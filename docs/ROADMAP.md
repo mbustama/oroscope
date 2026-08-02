@@ -299,20 +299,72 @@ the validated set. It is a further illustration of finding F.
 Tiling invariance is now pinned by tests — tiled screening must reproduce the untiled
 result exactly, at every tile size, with and without a slope baseline.
 
-### 4.2 Azimuthal sweep engine
+### 4.2 / 4.5 / 4.11 Arrival-direction scan engine ✅ delivered
 
-Replace per-candidate ray casting with a per-azimuth sweep across the raster. For a
-fixed azimuth, the horizon for *every* pixel comes from one running-max walk —
-sequential memory access, O(N) per azimuth, versus random access per candidate now.
+`src/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
+form. Not yet wired into the pipeline — that is the next step.
 
-Per pixel and azimuth it yields: horizon elevation angle, distance and height of the
-horizon-defining terrain, and the qualifying targets within the distance window.
+For each candidate and azimuth, one profile walk yields **every elevation bin at
+once**. The running maximum of the terrain's elevation angle only increases, so each
+new maximum claims a contiguous band of bins; and since a ray at angle θ is
+underground wherever `θ_terrain(d) > θ`, binning `θ_terrain` and taking an inclusive
+suffix sum gives the underground path length for all bins simultaneously. Rays
+crossing several ridges accumulate all the rock they traverse, not just the first
+chord.
 
-This is simultaneously the fix for §2.1 (fan instead of one ray) and §2.2 A
-(occlusion), and it is faster than what it replaces — the rare case where the
-physics fix pays for itself. Implemented with numba `prange`, bilinear sampling
-instead of `int()` truncation (which currently biases every ray), and marching at DEM
-resolution instead of 1 km jumps that can step over a narrow ridge.
+Reported per candidate: accepted-direction count, accepted solid angle (sr), mean
+distance to the exit point, maximum and mean column depth (g/cm²), and the horizon
+angle. `require_terrain=False` inverts the test for the cosmic-ray channel, where
+terrain is an obstruction rather than a target — the same kernel, no second code path.
+
+**Measured on the 2500² Arequipa crop, 755,339 candidates:**
+
+| azimuths | elevation bins | seconds | candidates accepted | median column depth |
+| --- | --- | --- | --- | --- |
+| 1 | 1 | 7.2 | 0.3% | 8.9×10⁶ g/cm² |
+| 5 | 6 | 30.8 | 58.3% | 2.7×10⁶ g/cm² |
+| 9 | 12 | 51.7 | 66.7% | 2.9×10⁶ g/cm² |
+| 17 | 24 | 94.8 | 71.1% | 3.1×10⁶ g/cm² |
+
+Two things to read from this.
+
+*The design goal holds.* Cost scales with azimuths (~5.6 s each) and is nearly
+independent of elevation sampling — quadrupling the bins from 6 to 24 is almost free,
+which is exactly what the single-walk-per-azimuth construction was for.
+
+*It is ~290× slower than the ray-caster it replaces* (51.7 s against 0.18 s), which is
+the trade §4.11 anticipated. Whole-run cost on this crop goes from ~5.4 s to ~57 s.
+Phase 3 targets it; note morphology is still 77–90% of the *old* run, so the profile
+is now genuinely dominated by physics rather than cleanup.
+
+*Acceptance rises from 13.9% to 66.7%.* That is finding B and finding C2 combined,
+in one number: the old single ray at a distance-dependent elevation floor was
+rejecting most of what a ±3° window admits.
+
+### 4.2b A physical constraint that emerged
+
+A detector standing on the ground has **every downward direction blocked by the ground
+at its own feet**: over flat terrain a sub-horizontal ray goes underground within a
+pixel or two and stays there, so its exit point is metres away and its column depth is
+the entire traced path. This is correct, and it is why the decay-baseline window is
+not optional — only a site whose local terrain falls away can use the lower half of an
+acceptance window at all. It also says something about siting: a good GRAND site is
+not merely *on* a slope, it is on a slope whose own terrain does not occlude the
+sub-horizontal half of the window. Pinned by tests.
+
+### 4.2c Deferred to phase 3: whole-raster azimuthal sweep
+
+The original plan was to replace per-candidate scanning with a per-azimuth sweep
+across the raster, where the horizon for *every* pixel comes from one running-max walk
+— O(N) per azimuth with sequential access. That remains the right optimisation, but it
+does not extend cleanly to a (θ, φ) scan carrying sub-surface chords, and the
+curvature term is not separable in the way the convex-hull construction needs.
+Correctness first: the delivered engine scans per candidate, and phase 3 optimises
+against the measured 51.7 s.
+
+Two accuracy items also remain for that work: bilinear sampling instead of `int()`
+truncation, which currently biases each step by up to half a pixel, and early
+termination once no further sample can qualify.
 
 ### 4.3 Visibility and Fresnel clearance
 
