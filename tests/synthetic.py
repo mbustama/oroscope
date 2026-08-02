@@ -88,6 +88,19 @@ def canyon_rim_separation_m(floor_width_m, depth_m, wall_slope_deg):
     return floor_width_m + 2.0 * depth_m / np.tan(np.radians(wall_slope_deg))
 
 
+# Colca Canyon as published in ref. [2]: ~1.5 km deep, ~4.5 km median between valley
+# sides. The wall slope follows from those two, given a ~1 km floor:
+#     4500 = 1000 + 2*1500/tan(s)  ->  s = 40.6 deg
+# Note the walls are far steeper than GRAND's 3-25 deg deployable band, which is one
+# reason the slope criterion has to be per-experiment.
+COLCA = dict(floor_width_m=1000.0, depth_m=1500.0, wall_slope_deg=40.6, rim_elevation=3500.0)
+
+
+def colca_like(n, cell_x):
+    """A canyon with Colca's published depth and rim-to-rim separation."""
+    return canyon(n, cell_x, **COLCA)
+
+
 def write_geotiff(path, array, origin_lat, origin_lon, cell_size_deg=CELL_DEG):
     """Writes a geographic GeoTIFF carrying the tags the searcher reads."""
     tiff.imwrite(

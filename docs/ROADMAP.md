@@ -517,6 +517,38 @@ co-location report).
 | air shower | 3–10 km length, 200 m diameter |
 | energy reach | ~3 PeV – 1 EeV |
 
+### 5.2 TAMBO search geometry (guidance, 2026-08-03)
+
+| parameter | value | note |
+| --- | --- | --- |
+| wall-to-wall separation | **a few km**, configurable | Colca's published median is 4.5 km |
+| canyon depth | **1.5 km** (Colca as the worked example) | ref. [2] Fig. 2 |
+| detector spacing | 100 m to start | published nominal 150 m, §1.1 |
+| layout | triangular grid | ref. [2] |
+
+Separation is a *window*, not a single value, and the physics fixes its scale
+independently: the τ must decay in the air gap, and at 1–100 PeV the decay length is
+49 m – 4.9 km (§4.7). A few km is therefore exactly right, and the same reasoning
+says the window should move with the configured energy range rather than being a
+fixed constant. Proposed default 2–6 km, bracketing Colca.
+
+Two things fall out of the published geometry that matter for the criterion design:
+
+- **Colca's walls are ~40° steep.** Taking 1.5 km depth, 4.5 km rim-to-rim and a ~1 km
+  floor gives `4500 = 1000 + 2*1500/tan(s)`, so `s ≈ 40.6°`. That is well outside
+  GRAND's 3–25° deployable band, so the **slope criterion itself must be
+  per-experiment** — and probably per-*role*: the far wall wants to be steep for τ
+  exit, while the near wall must still be deployable. A single global slope band
+  cannot express that.
+- **Depth and separation are not independent.** Any two of {depth, separation, wall
+  slope} determine the third, so the criteria should be stated in terms of the two
+  that are measured (depth and separation) with wall slope derived, rather than
+  filtering on all three as though they were free.
+
+The fixtures now carry a `COLCA` preset with these numbers, verified against the
+published figures, so TAMBO criteria can be developed against known-answer terrain
+before touching a real DEM.
+
 Two consequences worth flagging early:
 
 - **Site shape differs fundamentally between experiments.** 5,000 units at 150 m

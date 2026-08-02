@@ -62,11 +62,27 @@ class TestCanyonFixture(unittest.TestCase):
         col = int((self.n / 2) - (self.floor_w / 2 + self.depth / 2 / np.tan(np.radians(self.wall))) / self.cell_x)
         self.assertAlmostEqual(float(slope[10, col]), self.wall, places=3)
 
-    def test_colca_like_parameters_reproduce_published_separation(self):
-        """~1.5 km deep with 35 degree walls gives roughly Colca's 4.5 km rim separation."""
-        sep = synthetic.canyon_rim_separation_m(1000.0, 1500.0, 35.0)
-        self.assertGreater(sep, 4000.0)
-        self.assertLess(sep, 5500.0)
+    def test_colca_preset_reproduces_the_published_geometry(self):
+        """Ref. [2]: Colca is ~1.5 km deep with ~4.5 km between valley sides."""
+        sep = synthetic.canyon_rim_separation_m(
+            synthetic.COLCA["floor_width_m"], synthetic.COLCA["depth_m"],
+            synthetic.COLCA["wall_slope_deg"])
+        self.assertAlmostEqual(sep, 4500.0, delta=25.0)
+        self.assertAlmostEqual(synthetic.COLCA["depth_m"], 1500.0, places=6)
+
+    def test_colca_fixture_measures_as_published(self):
+        _, cell_x = synthetic.cell_sizes(-15.6)
+        n = 400
+        z = synthetic.colca_like(n, cell_x)
+        self.assertAlmostEqual(float(z.max() - z.min()), 1500.0, places=3)
+        profile = z[0]
+        below = np.where(profile < z.max() - 1e-3)[0]
+        measured = (below[-1] - below[0] + 1) * cell_x
+        self.assertAlmostEqual(measured, 4500.0, delta=cell_x * 2)
+
+    def test_colca_walls_are_steeper_than_grands_deployable_band(self):
+        """The far wall must be steep for tau exit; that is not GRAND's 3-25 deg band."""
+        self.assertGreater(synthetic.COLCA["wall_slope_deg"], 25.0)
 
 
 class TestPeakFixture(unittest.TestCase):
