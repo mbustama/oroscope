@@ -139,6 +139,41 @@ A complete run will produce the following files inside that directory:
 
 ---
 
+## 3b. Development: tests and benchmarks
+
+The test suite uses only the standard library's `unittest`, so it runs anywhere the
+tool itself runs — no extra dependencies. Terrain fixtures are synthetic with
+analytically known slope, aspect, target distance and canyon geometry, so assertions
+are against arithmetic rather than against a previous run.
+
+```bash
+cd tests && python -m unittest discover
+```
+
+Tests that need a real DEM skip automatically when `input/dem/` is absent (it is
+gitignored). After an intended change to results, regenerate the golden files:
+
+```bash
+cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression
+```
+
+The benchmark harness records per-stage wall time and peak memory on fixed inputs and
+compares against `bench/baseline.json`, failing if any stage slows by more than 30%:
+
+```bash
+python bench/benchmark.py
+```
+
+Every run also writes a **selection funnel** to the log and results JSON, showing how
+many pixels survived each filter, plus a `provenance.json` capturing the git commit,
+DEM checksum, resolved parameters and package versions. When a search returns no
+sites, the funnel is the first place to look.
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the development plan and a review of the
+current selection criteria.
+
+---
+
 ## 4. Parameter Configuration Hierarchy
 
 Parameters can be supplied in three ways. The script resolves parameters in the following strict order of priority (1 overrides 2, 2 overrides 3):

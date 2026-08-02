@@ -68,6 +68,28 @@ The single ray rejects **2.2× more sites than it accepts**. Aspect derived from
 noisy gradient is itself uncertain by tens of degrees on rough terrain, so the one
 direction tested is partly arbitrary.
 
+**Reported area is ~18× the area that passes the physics.** From the funnel on the
+2500² Arequipa crop: 755,328 candidates → 104,632 ray-tracing hits (13.9%) →
+2,323,104 pixels after the 1 km morphological closing (a 22× gain) → 1,922,720
+pixels in the selected site. Closing, not the physics, determines most of the
+reported site extent.
+
+**Capacity is over-counted, severely at fine spacings.** `count_grid_capacity`
+derives its strides with three independent `int()` truncations (`spacing_r`,
+`spacing_c`, and the hex row step `v_step`), each of which shrinks the grid, so
+antennas end up closer than the requested ground spacing:
+
+| requested spacing | actual N-S | actual E-W | over-count |
+| --- | --- | --- | --- |
+| 1000 m (GRAND) | 829 m | 981 m | **+7.4%** |
+| 200 m | 154 m | 178 m | +26.4% |
+| 150 m (TAMBO, published) | 92 m | 149 m | **+42.3%** |
+| 100 m (TAMBO, starting value) | 61 m | 89 m | **+58.1%** |
+
+The error grows as the spacing approaches the pixel size. At TAMBO spacings there are
+only ~3 pixels per detector spacing, so a 30 m DEM cannot represent the layout by
+integer stamping at all. This is a phase 2 blocker, not a rounding nicety — see §5.1.
+
 ### 2.2 Correctness
 
 **A. The line-of-sight test never tests line of sight.** `check_physics_chunk` walks
@@ -120,12 +142,25 @@ Current output is best read as a plausible shortlist, not a quantitative ranking
 
 ---
 
-## 3. Phase 0 — Foundations
+## 3. Phase 0 — Foundations ✅ delivered
 
 **Goal:** make every later change measurable. Nothing here changes results.
 
 Phase 1 rewrites the scientific core; without a baseline we cannot tell a fix from a
 regression. Phase 0 must land first.
+
+Result-neutrality was verified explicitly: the pipeline was run on two fixed inputs
+before and after the instrumentation and the outputs diffed identical.
+
+```bash
+cd tests && python -m unittest discover        # 54 tests, ~4 s, no extra dependencies
+python bench/benchmark.py                      # compare against bench/baseline.json
+python bench/benchmark.py --update             # rewrite the baseline
+UPDATE_GOLDEN=1 python -m unittest test_regression   # after an intended change
+```
+
+The suite uses stdlib `unittest` rather than `pytest`, which is not installed in the
+`sssearch` environment; `pytest` will collect it unchanged if it is ever added.
 
 ### 3.1 Test harness (`tests/`)
 
@@ -156,9 +191,25 @@ The full-region DEMs are too slow for CI but should be runnable on demand.
 
 ### 3.3 Benchmark harness (`bench/`)
 
-Per-stage wall time and peak RSS on fixed inputs, committed as a baseline table.
-Known starting point on the 2500² crop: **morphology is 6.8 s of a 9.4 s run** — the
-cleanup dominates, not the physics. Phase 3 targets that number.
+Per-stage wall time and peak RSS on fixed inputs, committed as `bench/baseline.json`.
+Cold runs (the cached `.npy` is removed first) so numbers are comparable between
+invocations. Measured baseline:
+
+| case | topo screen | ray tracing | morphology | capacity | peak RSS |
+| --- | --- | --- | --- | --- | --- |
+| synthetic_900 | 0.03 s | 0.17 s | **0.77 s** | 0.02 s | 296 MiB |
+| synthetic_1800 | 0.13 s | 0.36 s | **2.54 s** | 0.02 s | 386 MiB |
+| arequipa_900 | 0.04 s | 0.03 s | **0.81 s** | 0.01 s | 609 MiB |
+| arequipa_2500 | 0.30 s | 0.18 s | **4.61 s** | 0.08 s | 617 MiB |
+
+**Morphology is 77–90% of every run.** The physics is not the bottleneck; the
+cleanup is. That is what phase 3's separable/running min-max morphology targets.
+
+One further cost the harness exposed: the ray-caster is JIT-compiled inside joblib's
+worker processes, so every fresh invocation pays ~0.75 s of compilation that the
+parent cannot amortise. Replacing joblib with numba `prange` (phase 3) removes it
+entirely. The benchmark warms the workers before timing so this does not distort the
+per-case numbers.
 
 ### 3.4 Funnel instrumentation
 
@@ -331,6 +382,11 @@ Two consequences worth flagging early:
   per-experiment, not shared.
 - **The 100 m vs 150 m spacing discrepancy** (§1.1 vs ref. [2]) should be confirmed;
   the roadmap assumes it is a deliberate starting point and keeps spacing configurable.
+- **Integer grid stamping cannot express TAMBO's layout.** At 100–150 m spacing on a
+  30 m DEM there are only 3–5 pixels per detector separation, and the truncation
+  cascade of §2.1 over-counts capacity by 42–58%. Capacity for TAMBO must be computed
+  analytically from usable area and wall geometry, or on a resampled grid — not by
+  stamping integer strides. This is why layout models have to be per-experiment.
 
 Ref. [2] Fig. 1 also annotates ">4 km shielding from background muons" — a possible
 additional criterion on rock overburden. **To confirm** whether this is a site

@@ -1,0 +1,29 @@
+{
+  "funnel": {
+    "DEM pixels": 810000,
+    "after gap closing": 417120,
+    "after pruning (< 1.0 km wide)": 417120,
+    "finite elevation": 810000,
+    "kept by stride 5": 115390,
+    "pixels in selected sites (est.)": 417600,
+    "ray-tracing hits": 86407,
+    "slope 3.0-25.0 deg": 576900
+  },
+  "regions": {
+    "capacity_threshold_antennas": 20,
+    "labelled_regions": 1,
+    "passed_area_threshold": 1,
+    "passed_capacity_threshold": 1,
+    "required_pixels_per_region": 5467,
+    "selected": 1
+  },
+  "sites": [
+    {
+      "area_km2": 381.87,
+      "capacity_exact": 495,
+      "facing_direction": "W"
+    }
+  ],
+  "total_capacity": 495,
+  "total_sites": 1
+}

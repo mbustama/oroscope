@@ -295,6 +295,127 @@ def count_grid_capacity(mask_chunk, spacing_r, spacing_c, grid_type_code):
     return count
 
 # ==========================================
+#            RUN ACCOUNTING
+# ==========================================
+
+class Funnel:
+    """
+    Records how many pixels survive each successive stage of the search.
+
+    A search that returns nothing gives the user no clue which constraint was
+    responsible. Every stage reports the count of pixels that passed it *and all
+    preceding stages*, so the table reads as a funnel from the raw DEM down to the
+    selected sites. Counts accumulate across tiles.
+    """
+
+    def __init__(self):
+        self.stages = []          # ordered [name, count] pairs
+        self._index = {}
+
+    def add(self, name, count):
+        """Adds to a stage's running total, creating the stage on first use."""
+        count = int(count)
+        if name in self._index:
+            self.stages[self._index[name]][1] += count
+        else:
+            self._index[name] = len(self.stages)
+            self.stages.append([name, count])
+
+    def get(self, name, default=0):
+        return self.stages[self._index[name]][1] if name in self._index else default
+
+    def as_dict(self):
+        return {name: count for name, count in self.stages}
+
+    def render(self):
+        """Formats the funnel as a table: count, share of the DEM, share of the previous stage."""
+        if not self.stages:
+            return ""
+        total = max(self.stages[0][1], 1)
+        width = max(len(name) for name, _ in self.stages)
+        lines = [f"   {'stage'.ljust(width)} | {'pixels':>15} | {'of DEM':>8} | {'of prev':>8}",
+                 "   " + "-" * (width + 40)]
+        prev = None
+        for name, count in self.stages:
+            of_dem = f"{100.0*count/total:7.3f}%"
+            of_prev = "        -" if prev is None else f"{100.0*count/prev:7.3f}%" if prev else "      n/a"
+            lines.append(f"   {name.ljust(width)} | {count:>15,} | {of_dem:>8} | {of_prev:>8}")
+            prev = count
+        return "\n".join(lines)
+
+
+def _package_versions():
+    """Best-effort version lookup for the third-party stack, for provenance."""
+    import importlib
+    versions = {}
+    for name in ("numpy", "scipy", "numba", "tifffile", "matplotlib", "joblib", "tqdm", "psutil", "imagecodecs"):
+        try:
+            mod = importlib.import_module(name)
+            versions[name] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            versions[name] = None
+    return versions
+
+
+def _git_state():
+    """Returns the repository commit/branch and whether the tree was dirty."""
+    import subprocess
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    def run(*args):
+        return subprocess.run(args, cwd=repo_dir, capture_output=True, text=True,
+                              timeout=10, check=True).stdout.strip()
+    try:
+        return {
+            "commit": run("git", "rev-parse", "HEAD"),
+            "branch": run("git", "rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(run("git", "status", "--porcelain")),
+        }
+    except Exception:
+        return {"commit": None, "branch": None, "dirty": None}
+
+
+def _file_digest(path, block=1 << 20):
+    """SHA-256 of a file, streamed so multi-gigabyte DEMs do not land in RAM."""
+    import hashlib
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(block), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def collect_provenance(dem_path, map_grid):
+    """
+    Captures everything needed to reproduce a run: code version, input identity,
+    environment and invocation. Written alongside the scientific outputs.
+    """
+    dem_abs = os.path.abspath(dem_path)
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "git": _git_state(),
+        "dem": {
+            "path": dem_abs,
+            "sha256": _file_digest(dem_abs),
+            "bytes": os.path.getsize(dem_abs) if os.path.exists(dem_abs) else None,
+            "cell_size_deg": map_grid.cell_size_deg,
+            "cell_size_y_m": map_grid.cell_size_y,
+            "cell_size_x_m": map_grid.cell_size_x,
+            "cell_size_source": map_grid.source,
+        },
+        "platform": {
+            "python": sys.version.split()[0],
+            "system": f"{os.uname().sysname} {os.uname().release}" if hasattr(os, "uname") else sys.platform,
+            "cpu_count": multiprocessing.cpu_count(),
+        },
+        "packages": _package_versions(),
+        "command": " ".join(sys.argv),
+    }
+
+
+# ==========================================
 #           CORE PIPELINE HELPERS
 # ==========================================
 
@@ -425,7 +546,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                            min_alt=None, max_alt=None, min_aspect_deg=None, max_aspect_deg=None,
                            road_map_path=None, max_road_dist_km=None,
                            min_slope_deg=3.0, max_slope_deg=25.0,
-                           tile_size=2048, candidate_stride=5):
+                           tile_size=2048, candidate_stride=5, funnel=None):
     """
     Step 2 Pipeline: Memory-efficient topographic screening. Iterates over the large DEM in chunks (tiles) 
     to find pixels that meet the primary geometrical criteria (slope, aspect, altitude) 
@@ -444,6 +565,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     - tile_size (int): Size of the square chunk to process in RAM at one time.
     - candidate_stride (int): Keeps every Nth surviving pixel before ray-tracing. Higher
       values trade spatial sampling density for speed; 1 keeps every candidate.
+    - funnel (Funnel): Optional accounting object recording per-filter survivor counts.
 
     Returns:
     - ndarray: Nx3 array of valid candidate pixels formatted as [row, col, aspect_degrees].
@@ -502,33 +624,44 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                 r_end = min(r + tile_size, rows)
                 c_end = min(c + tile_size, cols)
                 chunk = elevation[r:r_end, c:c_end]
-                
+                if funnel is not None:
+                    funnel.add("DEM pixels", chunk.size)
+                    funnel.add("finite elevation", np.count_nonzero(~np.isnan(chunk)))
+
                 # Calculate topographic gradient (change in Z) against true ground distance
                 dy, dx = np.gradient(chunk, cell_size_y, cell_size_x)
-                
+
                 # Derive Slope (steepness) and Aspect (direction)
                 slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
                 aspect = np.degrees(np.arctan2(-dx, dy)) % 360
-                
+
                 # Filter 1: Fundamental detector slope requirement
                 mask = (slope >= min_slope_deg) & (slope <= max_slope_deg)
-                
+                if funnel is not None:
+                    funnel.add(f"slope {min_slope_deg}-{max_slope_deg} deg", np.count_nonzero(mask))
+
                 # Filter 2: Altitude bounds
                 if min_alt is not None: mask &= (chunk >= min_alt)
                 if max_alt is not None: mask &= (chunk <= max_alt)
-                
+                if funnel is not None and (min_alt is not None or max_alt is not None):
+                    funnel.add("altitude bounds", np.count_nonzero(mask))
+
                 # Filter 3: Aspect bounds (handle wrapping around 360 degrees)
                 if min_aspect_deg is not None and max_aspect_deg is not None:
                     min_a, max_a = min_aspect_deg, max_aspect_deg
                     if min_a > max_a:
-                        mask &= (aspect >= min_a) | (aspect <= max_a) 
+                        mask &= (aspect >= min_a) | (aspect <= max_a)
                     else:
-                        mask &= (aspect >= min_a) & (aspect <= max_a) 
-                
+                        mask &= (aspect >= min_a) & (aspect <= max_a)
+                    if funnel is not None:
+                        funnel.add("aspect bounds", np.count_nonzero(mask))
+
                 # Filter 4: Road Logistics
                 if road_dist_map is not None:
                     road_chunk = road_dist_map[r:r_end, c:c_end]
                     mask &= (road_chunk <= (max_road_dist_km * 1000))
+                    if funnel is not None:
+                        funnel.add("road distance", np.count_nonzero(mask))
 
                 # Filter 5: Dynamic Exclusion Zones (RFI)
                 if rfi_zones:
@@ -551,9 +684,13 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                                 apply_poly_mask_numba(abs_r.astype(np.float64), abs_c.astype(np.float64), poly, subset_mask)
                             bad_idx = np.where(~subset_mask)[0]
                             mask[valid_y[bad_idx], valid_x[bad_idx]] = False
+                    if funnel is not None:
+                        funnel.add("outside RFI zones", np.count_nonzero(mask))
 
                 # Extract surviving pixels for the physics simulation step
                 cr, cc = np.where(mask)
+                if funnel is not None:
+                    funnel.add(f"kept by stride {candidate_stride}", len(cr[::candidate_stride]))
                 if len(cr) > 0:
                     chunk_cands = np.column_stack((cr + r, cc + c, aspect[cr, cc]))
                     # Thin the candidates to speed up ray tracing; assumption is terrain is continuous
@@ -569,6 +706,9 @@ def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x
     """
     Step 3 Pipeline: Expensive Physics computation parallelized across CPU cores.
     Distributes batches of candidates to the ray-caster and records successful hits to the buffer map.
+
+    Returns:
+    - int: Number of candidates that found a valid target.
     """
     batches = np.array_split(candidates_arr, num_cores * 4)
     results = Parallel(n_jobs=num_cores)(
@@ -576,15 +716,23 @@ def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x
         for batch in tqdm(batches, desc="   Simulating", unit="batch", colour='magenta' if USE_COLOR else None)
     )
     # Reconstruct the boolean mask from returned ray-cast coordinates
+    n_hits = 0
     for r_list, c_list in results:
         buf_a[r_list, c_list] = True
+        n_hits += len(r_list)
     buf_a.flush()
+    return n_hits
 
 def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_func, structure, desc="Processing", tile_size=2048):
     """
-    Applies image morphology operations (closing/opening) on a massive memory-mapped array 
+    Applies image morphology operations (closing/opening) on a massive memory-mapped array
     without loading the whole array into RAM. It reads from one file and writes to another ("ping-pong").
+
+    Returns:
+    - int: Number of set pixels in the result, counted while writing so the funnel
+      accounting costs nothing extra.
     """
+    surviving = 0
     source = np.lib.format.open_memmap(source_path, mode='r')
     dest = np.lib.format.open_memmap(dest_path, mode='r+', shape=shape, dtype=dtype)
     rows, cols = shape
@@ -605,9 +753,12 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
                 loc_r_start = r - r_start
                 loc_c_start = c - c_start
                 # Write back only the non-padded, processed core of the chunk
-                dest[r:r_end, c:c_end] = processed[loc_r_start:loc_r_start + (r_end - r), loc_c_start:loc_c_start + (c_end - c)]
+                core = processed[loc_r_start:loc_r_start + (r_end - r), loc_c_start:loc_c_start + (c_end - c)]
+                dest[r:r_end, c:c_end] = core
+                surviving += int(np.count_nonzero(core))
                 pbar.update(1)
     dest.flush()
+    return surviving
 
 def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size):
     """
@@ -616,16 +767,20 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
 
     The structuring elements are sized per axis so that they cover the requested
     ground distance in both directions rather than only north-south.
+
+    Returns:
+    - tuple(int, int): Set-pixel counts after closing and after pruning.
     """
     close_r = max(1, int(antenna_spacing_km * 1000 / cell_size_y))
     close_c = max(1, int(antenna_spacing_km * 1000 / cell_size_x))
     tendril_r = max(1, int((min_width_km * 0.5 * 1000) / cell_size_y))
     tendril_c = max(1, int((min_width_km * 0.5 * 1000) / cell_size_x))
-    apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, binary_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
-    apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, binary_opening, np.ones((tendril_r, tendril_c)), desc="Pruning", tile_size=tile_size)
+    n_closed = apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, binary_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
+    n_pruned = apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, binary_opening, np.ones((tendril_r, tendril_c)), desc="Pruning", tile_size=tile_size)
+    return n_closed, n_pruned
 
 def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
-                               target_antennas, min_sub_array_size, antenna_spacing_km, grid_type):
+                               target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=None):
     """
     Step 5 Pipeline: Isolates unique sites and measures their capacity mathematically.
     Uses SciPy labeling to find continuous regions and simulates physical grid placement.
@@ -636,6 +791,7 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
     - site_details (list): Dictionaries containing metadata about each valid site found.
     - cumulative_capacity (int): Sum of all antennas fitting in valid sites.
     - count (int): Total number of independent valid sites found.
+    - region_stats (dict): Region-level accounting for the funnel report.
     """
     final_map_disk = np.lib.format.open_memmap(path_A, mode='r')
     small_map = final_map_disk[::downsample_factor, ::downsample_factor]
@@ -719,8 +875,21 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 current_viz_id += 1
             small_final = np.isin(labeled, final_selection_ids).astype(np.uint8)
             count = len(final_selection_ids)
-            
-    return small_final, labeled_viz, site_details, cumulative_capacity, count
+
+    region_stats = {
+        "labelled_regions": int(num),
+        "passed_area_threshold": int(len(potential_ids)) if num > 0 else 0,
+        "passed_capacity_threshold": int(len(site_details)),
+        "selected": int(count),
+        "required_pixels_per_region": int(req_pixels),
+        "capacity_threshold_antennas": int(threshold_antennas),
+    }
+    if funnel is not None:
+        # small_final is downsampled; scale back to full-resolution pixels
+        funnel.add("pixels in selected sites (est.)",
+                   int(small_final.sum()) * downsample_factor * downsample_factor)
+
+    return small_final, labeled_viz, site_details, cumulative_capacity, count, region_stats
 
 def create_world_file(tif_filename, top_left_lat, top_left_lon, cell_size_deg):
     """
@@ -794,7 +963,7 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
 def generate_visualizations_and_outputs(dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
                                         origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
                                         output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
-                                        min_altitude, max_altitude, region_name, final_params):
+                                        min_altitude, max_altitude, region_name, final_params, run_info=None):
     """
     Step 6 Pipeline: Formats and exports all scientific products including geo-registered TIFs, KML models, 
     an annotated map graphic, and a serialized JSON summary of the run parameters and results 
@@ -901,6 +1070,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         print(f"      {C.FAIL}{Icon.CROSS}Viz Error: {e}{C.RESET}")
 
     # Save JSON output log
+    run_info = run_info or {}
     out_data = {
         "timestamp": datetime.now().isoformat(),
         "mode": search_mode,
@@ -909,14 +1079,25 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
             "total_sites": count,
             "total_capacity": cumulative_capacity if search_mode=='distributed' else 'N/A',
             "sites": site_details
-        }
+        },
+        "funnel": run_info.get("funnel", {}),
+        "regions": run_info.get("regions", {}),
+        "timings_sec": run_info.get("timings_sec", {}),
     }
     json_name = os.path.join(run_output_dir, base_filename + ".json")
     with open(json_name, "w") as f:
         json.dump(out_data, f, indent=4)
     generated_files.append(os.path.abspath(json_name))
     print(f"      {Icon.CHECK}JSON Data Summary saved.")
-    
+
+    # Provenance goes in its own file so it stays readable next to the science outputs
+    if "provenance" in run_info:
+        prov_name = os.path.join(run_output_dir, "provenance.json")
+        with open(prov_name, "w") as f:
+            json.dump(run_info["provenance"], f, indent=4)
+        generated_files.append(os.path.abspath(prov_name))
+        print(f"      {Icon.CHECK}Provenance saved.")
+
     return generated_files
 
 def print_tool_explanation():
@@ -1134,22 +1315,29 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"{C.HEADER}============================================={C.RESET}\n")
 
     t_start_total = time.time()
-    
+
     # Tracking variables for safe cleanup
     path_A = None
     path_B = None
     success_flag = False
-    
+
+    # Run accounting: per-stage wall time, per-filter survivor counts, and provenance
+    timings = {}
+    funnel = Funnel()
+    region_stats = {}
+    provenance = collect_provenance(dem_path, map_grid)
+
     try:
         # Step 1: Disk Setup
         print(f"{C.BOLD}[1/6]{C.RESET} {Icon.MAP}Loading Map Data...")
         t0 = time.time()
         elevation, rows, cols, path_A, path_B, buf_a, is_resuming = load_dem_and_init_buffers(dem_path, run_output_dir, resume, resume_dir)
-        est_disk_gb = (rows * cols * 2) / (1024**3) 
+        est_disk_gb = (rows * cols * 2) / (1024**3)
         print(f"      Map: {C.MAGENTA}{rows} x {cols}{C.RESET} pixels")
         print(f"      Estimated Temp Disk Usage: {C.MAGENTA}~{est_disk_gb:.2f} GB{C.RESET}")
-        print(f"      Time: {time.time()-t0:.2f}s")
-        
+        timings["load_dem"] = time.time() - t0
+        print(f"      Time: {timings['load_dem']:.2f}s")
+
         if not is_resuming:
             # Step 2: Topographic Screen
             print(f"\n{C.BOLD}[2/6]{C.RESET} {Icon.GEAR}Identifying Candidates...")
@@ -1160,12 +1348,13 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                 road_map_path=road_map_path, max_road_dist_km=max_road_dist_km,
                 min_aspect_deg=min_aspect_deg, max_aspect_deg=max_aspect_deg,
                 min_slope_deg=min_slope_deg, max_slope_deg=max_slope_deg,
-                tile_size=tile_size, candidate_stride=candidate_stride
+                tile_size=tile_size, candidate_stride=candidate_stride, funnel=funnel
             )
             total = candidates_arr.shape[0]
-            print(f"      Time: {time.time()-t0:.2f}s")
-            
-            if total == 0: 
+            timings["topographic_screen"] = time.time() - t0
+            print(f"      Time: {timings['topographic_screen']:.2f}s")
+
+            if total == 0:
                 print(f"      {Icon.CROSS}{C.WARN}No viable candidates found in topographic pass.{C.RESET}")
                 success_flag = True
                 return
@@ -1173,8 +1362,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             # Step 3: Physics Simulation
             print(f"\n{C.BOLD}[3/6]{C.RESET} {Icon.GEAR}Ray Tracing ({C.MAGENTA}{total}{C.RESET} candidates)...")
             t0 = time.time()
-            run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
-            print(f"      Time: {time.time()-t0:.2f}s")
+            n_hits = run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
+            funnel.add("ray-tracing hits", n_hits)
+            timings["ray_tracing"] = time.time() - t0
+            print(f"      Time: {timings['ray_tracing']:.2f}s")
         else:
             print(f"\n{C.BOLD}[2/6 & 3/6]{C.RESET} {Icon.GEAR}Resuming: Skipping candidate search and ray tracing...")
 
@@ -1183,21 +1374,26 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         # Step 4: Spatial Pruning
         print(f"\n{C.BOLD}[4/6]{C.RESET} {Icon.BROOM}Cleaning Shapes...")
         t0 = time.time()
-        clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size)
-        print(f"      Time: {time.time()-t0:.2f}s")
+        n_closed, n_pruned = clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size)
+        funnel.add("after gap closing", n_closed)
+        funnel.add(f"after pruning (< {min_width_km} km wide)", n_pruned)
+        timings["morphology"] = time.time() - t0
+        print(f"      Time: {timings['morphology']:.2f}s")
 
         # Step 5: Capacity Analysis
         print(f"\n{C.BOLD}[5/6]{C.RESET} {Icon.INFO}Final Analysis...")
         t0 = time.time()
-        small_final, labeled_viz, site_details, cumulative_capacity, count = analyze_sites_and_capacity(
-            path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode, target_antennas, min_sub_array_size, antenna_spacing_km, grid_type
+        small_final, labeled_viz, site_details, cumulative_capacity, count, region_stats = analyze_sites_and_capacity(
+            path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
+            target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=funnel
         )
         if search_mode == 'distributed':
             print(f"      Distributed: {C.MAGENTA}{count}{C.RESET} sites found.")
             print(f"      Total Cap: {C.MAGENTA}{cumulative_capacity}{C.RESET} (Target: {target_antennas})")
         else:
             print(f"      Single: {C.MAGENTA}{count}{C.RESET} valid sites found.")
-        print(f"      Time: {time.time()-t0:.2f}s")
+        timings["capacity_analysis"] = time.time() - t0
+        print(f"      Time: {timings['capacity_analysis']:.2f}s")
 
         # Step 6: Create Outputs
         print(f"\n{C.BOLD}[6/6]{C.RESET} {Icon.DISK}Saving & Visualization...")
@@ -1206,10 +1402,25 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
             origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
             output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km,
-            min_altitude, max_altitude, region_name, export_params
+            min_altitude, max_altitude, region_name, export_params,
+            run_info={"funnel": funnel.as_dict(), "regions": region_stats,
+                      "timings_sec": timings, "provenance": provenance}
         )
-        print(f"      Time Elapsed: {time.time()-t0:.2f}s")
-        
+        timings["outputs"] = time.time() - t0
+        print(f"      Time Elapsed: {timings['outputs']:.2f}s")
+
+        # Funnel Report: where the candidate pixels went
+        print(f"\n{C.HEADER}============================================={C.RESET}")
+        print(f"   {C.BOLD}SELECTION FUNNEL{C.RESET}")
+        print(f"{C.HEADER}============================================={C.RESET}")
+        print(funnel.render())
+        if region_stats:
+            print(f"\n   Regions: {C.MAGENTA}{region_stats['labelled_regions']}{C.RESET} labelled"
+                  f" -> {C.MAGENTA}{region_stats['passed_area_threshold']}{C.RESET} above area threshold"
+                  f" ({region_stats['required_pixels_per_region']:,} px)"
+                  f" -> {C.MAGENTA}{region_stats['passed_capacity_threshold']}{C.RESET} above capacity threshold"
+                  f" ({region_stats['capacity_threshold_antennas']:,} antennas)")
+
         # Results Table Printout
         print(f"\n{C.HEADER}============================================={C.RESET}")
         print(f"   {Icon.CHECK}{C.BOLD}RESULTS SUMMARY: {count} Sites Found{C.RESET}")
@@ -1246,7 +1457,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             print(f"   {C.WARN}Buffer files have been retained in the workspace.{C.RESET}")
             print(f"   {C.WARN}Resume this exact run later using:{C.RESET} --resume --resume_dir {os.path.abspath(run_output_dir)}")
             
-        print(f"\n{C.OK}Total Execution Time: {time.time() - t_start_total:.2f} seconds{C.RESET}")
+        timings["total"] = time.time() - t_start_total
+        print(f"\n{C.OK}Total Execution Time: {timings['total']:.2f} seconds{C.RESET}")
         print(f"{C.BOLD}Done.{C.RESET}")
 
 # Custom Logger Interceptor
