@@ -5,3 +5,11 @@ obj/
 **/__pycache__
 *.pyc
 *.csv
+
+# Input data and run products (large binaries, regenerable)
+input/
+output/
+# Superseded scripts and their outputs, kept locally for reference only
+old/
+*.npy
+environment.yml

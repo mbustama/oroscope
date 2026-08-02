@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import tifffile as tiff
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Polygon as MplPolygon
+from matplotlib.patches import Ellipse, Polygon as MplPolygon
 from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
 import matplotlib.patheffects as path_effects
@@ -13,11 +13,11 @@ import multiprocessing
 from scipy.ndimage import binary_closing, binary_opening, label, sum as ndi_sum, find_objects
 import os
 import shutil
-import tempfile
 import math
 import time
 import json
 import xml.etree.ElementTree as ET
+from collections import namedtuple
 from datetime import datetime
 import re
 
@@ -105,72 +105,89 @@ ORIGIN_LON_AREQUIPA = -73.58612537384033
 ORIGIN_LAT_LIMA = -10.228479499469358
 ORIGIN_LON_LIMA = -78.07665824890137
 
+# Geodetic constants used to translate angular map units into physical distances.
+# A degree of latitude is very nearly constant; 110.6 km is a good mid-latitude value.
+KM_PER_DEG_LAT = 110.6
+# A degree of longitude spans this at the equator, shrinking as cos(latitude).
+KM_PER_DEG_LON_EQUATOR = 111.32
+# Fallback pixel size (1 arc-second, i.e. SRTMGL1 / AW3D30) used only when the DEM
+# carries no georeferencing tags and the user supplied no explicit value.
+DEFAULT_CELL_SIZE_DEG = 1.0 / 3600.0
+
 # ==========================================
 #           NUMBA & PHYSICS KERNELS
 # ==========================================
 try:
+    import numba
     from numba import jit, prange
     HAS_NUMBA = True
 except ImportError:
+    numba = None
     HAS_NUMBA = False
     def jit(*args, **kwargs):
         def decorator(func): return func
         return decorator
 
 @jit(nopython=True, nogil=True, fastmath=True)
-def check_physics_chunk(candidate_subset, elevation, cell_size, rows, cols, fresnel_buffer, min_dist_km, max_dist_km):
+def check_physics_chunk(candidate_subset, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km):
     """
     Core Physics Engine: Simulates Line-of-Sight (LoS) from detector pixels to target mountains.
-    
-    This function utilizes Numba for C-level execution speeds. It casts a geometric ray outward 
-    from each candidate pixel in the direction it faces (aspect). It calculates if a target 
-    mountain interrupts the ray within the required distance limits, actively accounting for 
+
+    This function utilizes Numba for C-level execution speeds. It casts a geometric ray outward
+    from each candidate pixel in the direction it faces (aspect). It calculates if a target
+    mountain interrupts the ray within the required distance limits, actively accounting for
     the curvature of the Earth and a Fresnel zone clearance buffer.
-    
+
+    The ray marches in real ground distance (metres) and converts to pixel offsets with a
+    separate scale per axis, because a geographic DEM's pixels are shorter east-west than
+    north-south. Stepping in raw pixels would otherwise skew every ray away from its aspect.
+
     Parameters:
     - candidate_subset (ndarray): An Nx3 array of [row, col, aspect_degrees] for candidate pixels.
     - elevation (ndarray): The full 2D array of the Digital Elevation Model (DEM).
-    - cell_size (float): The physical size of one pixel side in meters.
+    - cell_size_y (float): North-south size of one pixel in meters.
+    - cell_size_x (float): East-west size of one pixel in meters.
     - rows, cols (int): Dimensions of the elevation array.
     - fresnel_buffer (float): Altitude buffer in meters added to account for radio wave scattering.
     - min_dist_km, max_dist_km (float): The valid distance bounds to find a target mountain.
-    
+
     Returns:
     - tuple(list, list): Two lists containing the row and column indices of successful candidate pixels.
     """
     hits_r = []
     hits_c = []
-    
-    # Convert physical limits to pixel indices based on map resolution
-    start_dist_px = int((min_dist_km * 1000) / cell_size) 
-    end_dist_px   = int((max_dist_km * 1000) / cell_size) 
-    step_px       = int(1000 / cell_size)
-    
+
+    # Sample the ray every kilometre of ground distance between the two bounds
+    start_dist_m = int(min_dist_km * 1000)
+    end_dist_m   = int(max_dist_km * 1000)
+    step_m       = 1000
+
     # Precompute Earth Curvature coefficient: 1 / (2 * Earth_Radius_in_meters)
     # Using a standard 8500km effective radius often used in radio propagation models
-    inv_2R = 1.0 / (2 * 8500000.0) 
+    inv_2R = 1.0 / (2 * 8500000.0)
 
     n = candidate_subset.shape[0]
     for i in range(n):
         r = int(candidate_subset[i, 0])
         c = int(candidate_subset[i, 1])
         aspect_val = candidate_subset[i, 2]
-        
+
         # Calculate ray directional vectors based on pixel aspect
         look_rad = np.radians(aspect_val)
         sin_look = np.sin(look_rad)
         cos_look = np.cos(look_rad)
         my_elev = elevation[r, c]
         has_target = False
-        
+
         # Ray casting loop: step outward from the pixel within the specified distance bounds
-        for dist_px in range(start_dist_px, end_dist_px, step_px):
-            dist_m = dist_px * cell_size
-            dx = int(dist_px * sin_look)
-            dy = int(dist_px * cos_look)
+        for dist_step in range(start_dist_m, end_dist_m, step_m):
+            dist_m = float(dist_step)
+            # Ground displacement (east, north) converted to pixels one axis at a time
+            dx = int(dist_m * sin_look / cell_size_x)
+            dy = int(dist_m * cos_look / cell_size_y)
             target_r = r - dy # Subtract dy because image y-axis points downwards
             target_c = c + dx
-            
+
             # Ensure target ray index remains within DEM boundaries
             if target_r >= 0 and target_r < rows and target_c >= 0 and target_c < cols:
                 target_elev = elevation[target_r, target_c]
@@ -239,35 +256,39 @@ def apply_poly_mask_numba(valid_rows, valid_cols, poly_verts, mask_out):
             mask_out[i] = False
 
 @jit(nopython=True, fastmath=True)
-def count_grid_capacity(mask_chunk, spacing_px, grid_type_code):
+def count_grid_capacity(mask_chunk, spacing_r, spacing_c, grid_type_code):
     """
-    Simulates the placement of physical antennas on the validated terrain map to count 
+    Simulates the placement of physical antennas on the validated terrain map to count
     total array capacity based on specific geometry.
-    
+
+    The row and column strides are supplied separately: an equal ground spacing is a
+    different number of pixels along each axis on a geographic grid.
+
     Parameters:
     - mask_chunk (ndarray): A 2D boolean array where True indicates valid terrain.
-    - spacing_px (int): The distance between antennas in pixels.
+    - spacing_r (int): The north-south distance between antennas in pixels.
+    - spacing_c (int): The east-west distance between antennas in pixels.
     - grid_type_code (int): 0 for 'square' grid, 1 for 'hexagonal' grid.
-    
+
     Returns:
     - int: The total number of antennas that successfully fit inside the valid terrain.
     """
     h, w = mask_chunk.shape
     count = 0
     if grid_type_code == 0: # Square Grid layout
-        for r in range(0, h, spacing_px):
-            for c in range(0, w, spacing_px):
+        for r in range(0, h, spacing_r):
+            for c in range(0, w, spacing_c):
                 if mask_chunk[r, c]:
                     count += 1
     elif grid_type_code == 1: # Hexagonal Grid layout
         # Vertical spacing for hex is sin(60 deg) * spacing
-        v_step = int(spacing_px * 0.866025)
+        v_step = int(spacing_r * 0.866025)
         if v_step < 1: v_step = 1
         row_idx = 0
         for r in range(0, h, v_step):
             # Stagger every other row by half the spacing distance
-            offset = (spacing_px // 2) if (row_idx % 2 == 1) else 0
-            for c in range(offset, w, spacing_px):
+            offset = (spacing_c // 2) if (row_idx % 2 == 1) else 0
+            for c in range(offset, w, spacing_c):
                 if mask_chunk[r, c]:
                     count += 1
             row_idx += 1
@@ -276,6 +297,86 @@ def count_grid_capacity(mask_chunk, spacing_px, grid_type_code):
 # ==========================================
 #           CORE PIPELINE HELPERS
 # ==========================================
+
+def read_dem_geometry(dem_path):
+    """
+    Reads the angular pixel size and row count of a GeoTIFF DEM from its header.
+
+    Standard geographic (EPSG:4326) DEMs such as SRTMGL1 or AW3D30 store the pixel
+    size in degrees, which is what the georeferenced outputs (.tfw, .kml) require.
+    Only the header is touched, so this stays cheap on multi-gigabyte files.
+
+    Parameters:
+    - dem_path (str): Path to the input elevation .tif file.
+
+    Returns:
+    - tuple(float or None, int or None): Pixel size in degrees and the number of
+      rows, either of which is None when the file or the tag cannot be read.
+    """
+    try:
+        with tiff.TiffFile(dem_path) as tf:
+            page = tf.pages[0]
+            n_rows = int(page.shape[0])
+            tag = page.tags.get('ModelPixelScaleTag')
+            if tag is None:
+                return None, n_rows
+            scale_x, scale_y = float(tag.value[0]), float(tag.value[1])
+            if scale_y <= 0:
+                return None, n_rows
+            # A geographic grid is square in degrees; warn if the DEM says otherwise.
+            if scale_x > 0 and abs(scale_x - scale_y) / scale_y > 1e-6:
+                print(f"      {C.WARN}{Icon.WARN}WARNING: Non-square DEM pixels "
+                      f"({scale_x:.8f} x {scale_y:.8f} deg). Using the latitude scale.{C.RESET}")
+            return scale_y, n_rows
+    except Exception:
+        return None, None
+
+# Describes the sampling grid of the DEM. Angular pixel size is identical on both
+# axes (that is what "geographic" means), but the two metric sizes are not.
+MapGrid = namedtuple("MapGrid", "cell_size_deg cell_size_y cell_size_x center_lat source")
+
+def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
+    """
+    Determines the sampling geometry used by the whole pipeline.
+
+    Resolution priority: explicit user value > GeoTIFF ModelPixelScaleTag > 1 arc-second.
+
+    A geographic raster has pixels that are square in degrees but *not* in metres: a
+    degree of longitude shrinks with the cosine of the latitude, so a 1 arc-second
+    pixel spans roughly 30.7 m north-south but only ~29.5 m east-west at 17 degrees
+    south. The longitude scale is evaluated at the DEM's centre latitude so the
+    residual error from ignoring its north-south variation is spread evenly over the
+    map rather than accumulating towards one edge.
+
+    Parameters:
+    - dem_path (str): Path to the input elevation .tif file.
+    - origin_lat (float): Latitude of the DEM's top-left corner.
+    - cell_size_deg (float or None): Explicit override in degrees per pixel.
+
+    Returns:
+    - MapGrid: Angular pixel size, both metric pixel sizes, the centre latitude used
+      for the longitude scaling, and where the resolution value came from.
+    """
+    detected_deg, n_rows = read_dem_geometry(dem_path)
+
+    if cell_size_deg is not None:
+        source = "user-specified"
+    elif detected_deg is not None:
+        cell_size_deg = detected_deg
+        source = "auto-detected from GeoTIFF"
+    else:
+        cell_size_deg = DEFAULT_CELL_SIZE_DEG
+        source = "assumed 1 arc-second (DEM carries no georeferencing tags)"
+
+    center_lat = origin_lat
+    if n_rows:
+        center_lat = origin_lat - (n_rows / 2.0) * cell_size_deg
+
+    cell_size_y = cell_size_deg * KM_PER_DEG_LAT * 1000.0
+    cell_size_x = cell_size_deg * KM_PER_DEG_LON_EQUATOR * math.cos(math.radians(center_lat)) * 1000.0
+
+    return MapGrid(float(cell_size_deg), float(cell_size_y), float(cell_size_x),
+                   float(center_lat), source)
 
 def load_dem_and_init_buffers(dem_path, temp_dir, resume=False, resume_dir=None):
     """
@@ -320,11 +421,11 @@ def load_dem_and_init_buffers(dem_path, temp_dir, resume=False, resume_dir=None)
     
     return elevation, rows, cols, path_A, path_B, buf_a, is_resuming
 
-def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_lon, 
-                           min_alt=None, max_alt=None, min_aspect_deg=None, max_aspect_deg=None, 
-                           road_map_path=None, max_road_dist_km=None, 
+def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lon,
+                           min_alt=None, max_alt=None, min_aspect_deg=None, max_aspect_deg=None,
+                           road_map_path=None, max_road_dist_km=None,
                            min_slope_deg=3.0, max_slope_deg=25.0,
-                           tile_size=2048):
+                           tile_size=2048, candidate_stride=5):
     """
     Step 2 Pipeline: Memory-efficient topographic screening. Iterates over the large DEM in chunks (tiles) 
     to find pixels that meet the primary geometrical criteria (slope, aspect, altitude) 
@@ -332,7 +433,7 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
     
     Parameters:
     - elevation (ndarray): Full DEM array (usually memory-mapped).
-    - cell_size (float): Physical pixel size in meters.
+    - map_grid (MapGrid): Angular and metric pixel sizes of the DEM.
     - rfi_zones (list): List of configured exclusion zones (circles/polygons).
     - origin_lat, origin_lon (float): Reference coordinates for converting km to pixels.
     - min_alt, max_alt (float): Elevation restrictions.
@@ -341,20 +442,22 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
     - max_road_dist_km (float): Maximum allowed distance from a road.
     - min_slope_deg, max_slope_deg (float): Required steepness limits for detector slopes.
     - tile_size (int): Size of the square chunk to process in RAM at one time.
-    
+    - candidate_stride (int): Keeps every Nth surviving pixel before ray-tracing. Higher
+      values trade spatial sampling density for speed; 1 keeps every candidate.
+
     Returns:
     - ndarray: Nx3 array of valid candidate pixels formatted as [row, col, aspect_degrees].
     """
     rows, cols = elevation.shape
     candidates_list = []
-    
-    # Approximations for translating lat/lon to pixels locally.
-    # Latitude degrees are roughly constant (~110.6 km). 
-    # Longitude degrees scale dynamically with the cosine of the latitude (Equatorial degree ~111.32 km).
-    deg_per_px_lat = (cell_size / 1000.0) / 110.6
-    lon_km_per_deg = math.cos(math.radians(origin_lat)) * 111.32
-    deg_per_px_lon = (cell_size / 1000.0) / lon_km_per_deg
-    
+
+    # A geographic DEM steps by the same angle on both axes, so one pixel is one
+    # cell_size_deg of latitude *and* of longitude. The two metric sizes differ, and
+    # are applied wherever a real ground distance (rather than an angle) is meant.
+    cell_size_deg = map_grid.cell_size_deg
+    cell_size_y = map_grid.cell_size_y
+    cell_size_x = map_grid.cell_size_x
+
     # Load Logistics Road map if provided
     road_dist_map = None
     if road_map_path and max_road_dist_km:
@@ -374,18 +477,19 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
         for item in rfi_zones:
             type_tag = item[0]
             if type_tag == 'circle':
-                _, zlat, zlon, zrad_km, _ = item 
-                z_r = (origin_lat - zlat) / deg_per_px_lat
-                z_c = (zlon - origin_lon) / deg_per_px_lon
-                z_rad_px = int((zrad_km * 1000) / cell_size)
-                rfi_circles.append((z_r, z_c, z_rad_px**2)) # Store radius squared for faster math
+                _, zlat, zlon, zrad_km, _ = item
+                z_r = (origin_lat - zlat) / cell_size_deg
+                z_c = (zlon - origin_lon) / cell_size_deg
+                # Keep the radius in metres: the distance test below is done on the
+                # ground, so the zone stays a true circle instead of a pixel-space one
+                rfi_circles.append((z_r, z_c, (zrad_km * 1000.0)**2))
             elif type_tag == 'poly':
-                _, coords, _ = item 
+                _, coords, _ = item
                 pixel_verts = []
                 for (plat, plon) in coords:
-                    pr = (origin_lat - plat) / deg_per_px_lat
-                    pc = (plon - origin_lon) / deg_per_px_lon
-                    pixel_verts.append((pc, pr)) 
+                    pr = (origin_lat - plat) / cell_size_deg
+                    pc = (plon - origin_lon) / cell_size_deg
+                    pixel_verts.append((pc, pr))
                 rfi_polys.append(np.array(pixel_verts, dtype=np.float64))
 
     r_steps = range(0, rows, tile_size)
@@ -399,8 +503,8 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
                 c_end = min(c + tile_size, cols)
                 chunk = elevation[r:r_end, c:c_end]
                 
-                # Calculate topographic gradient (change in Z)
-                dy, dx = np.gradient(chunk, cell_size)
+                # Calculate topographic gradient (change in Z) against true ground distance
+                dy, dx = np.gradient(chunk, cell_size_y, cell_size_x)
                 
                 # Derive Slope (steepness) and Aspect (direction)
                 slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
@@ -433,11 +537,12 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
                         abs_r = r + valid_y
                         abs_c = c + valid_x
                         
-                        # Process Circular exclusion zones
-                        for (zr, zc, zrad_sq) in rfi_circles:
-                            dist_sq = (abs_r - zr)**2 + (abs_c - zc)**2
-                            mask[valid_y[np.where(dist_sq < zrad_sq)], valid_x[np.where(dist_sq < zrad_sq)]] = False
-                        
+                        # Process Circular exclusion zones, measured in metres on the ground
+                        for (zr, zc, zrad_m_sq) in rfi_circles:
+                            dist_sq = ((abs_r - zr) * cell_size_y)**2 + ((abs_c - zc) * cell_size_x)**2
+                            inside = np.where(dist_sq < zrad_m_sq)
+                            mask[valid_y[inside], valid_x[inside]] = False
+
                         valid_idx = np.where(mask.ravel())[0]
                         if len(valid_idx) > 0:
                             subset_mask = np.ones(len(valid_y), dtype=bool)
@@ -451,22 +556,23 @@ def get_candidates_chunked(elevation, cell_size, rfi_zones, origin_lat, origin_l
                 cr, cc = np.where(mask)
                 if len(cr) > 0:
                     chunk_cands = np.column_stack((cr + r, cc + c, aspect[cr, cc]))
-                    # Down-sample candidates 5x to speed up ray tracing; assumption is terrain is continuous
-                    candidates_list.append(chunk_cands[::5]) 
-                    pbar.set_postfix(candidates=f"{len(chunk_cands[::5]):,}")
+                    # Thin the candidates to speed up ray tracing; assumption is terrain is continuous
+                    kept = chunk_cands[::candidate_stride]
+                    candidates_list.append(kept)
+                    pbar.set_postfix(candidates=f"{len(kept):,}")
                 pbar.update(1)
 
     if not candidates_list: return np.zeros((0, 3))
     return np.vstack(candidates_list)
 
-def run_ray_tracing_parallel(candidates_arr, elevation, cell_size, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, num_cores, buf_a):
+def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, num_cores, buf_a):
     """
     Step 3 Pipeline: Expensive Physics computation parallelized across CPU cores.
     Distributes batches of candidates to the ray-caster and records successful hits to the buffer map.
     """
     batches = np.array_split(candidates_arr, num_cores * 4)
-    results = Parallel(n_jobs=-1)(
-        delayed(check_physics_chunk)(batch, elevation, cell_size, rows, cols, fresnel_buffer, min_dist_km, max_dist_km) 
+    results = Parallel(n_jobs=num_cores)(
+        delayed(check_physics_chunk)(batch, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km)
         for batch in tqdm(batches, desc="   Simulating", unit="batch", colour='magenta' if USE_COLOR else None)
     )
     # Reconstruct the boolean mask from returned ray-cast coordinates
@@ -503,17 +609,22 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
                 pbar.update(1)
     dest.flush()
 
-def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size, antenna_spacing_km, min_width_km, tile_size):
+def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size):
     """
     Step 4 Pipeline: Prunes spatial artifacts to ensure solid, block-like arrays.
     Applies closing to fill gaps and opening to prune unusable tendrils.
-    """
-    close_r = int(antenna_spacing_km * 1000 / cell_size)
-    tendril_r = int((min_width_km * 0.5 * 1000) / cell_size)
-    apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, binary_closing, np.ones((close_r, close_r)), desc="Closing", tile_size=tile_size)
-    apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, binary_opening, np.ones((tendril_r, tendril_r)), desc="Pruning", tile_size=tile_size)
 
-def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size, downsample_factor, search_mode, 
+    The structuring elements are sized per axis so that they cover the requested
+    ground distance in both directions rather than only north-south.
+    """
+    close_r = max(1, int(antenna_spacing_km * 1000 / cell_size_y))
+    close_c = max(1, int(antenna_spacing_km * 1000 / cell_size_x))
+    tendril_r = max(1, int((min_width_km * 0.5 * 1000) / cell_size_y))
+    tendril_c = max(1, int((min_width_km * 0.5 * 1000) / cell_size_x))
+    apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, binary_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
+    apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, binary_opening, np.ones((tendril_r, tendril_c)), desc="Pruning", tile_size=tile_size)
+
+def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
                                target_antennas, min_sub_array_size, antenna_spacing_km, grid_type):
     """
     Step 5 Pipeline: Isolates unique sites and measures their capacity mathematically.
@@ -530,8 +641,9 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size, downsam
     small_map = final_map_disk[::downsample_factor, ::downsample_factor]
     labeled, num = label(small_map) # Give unique integer IDs to disconnected array zones
     
-    eff_cell = cell_size * downsample_factor
-    px_area_km2 = (eff_cell / 1000.0)**2
+    eff_cell_y = cell_size_y * downsample_factor
+    eff_cell_x = cell_size_x * downsample_factor
+    px_area_km2 = (eff_cell_y / 1000.0) * (eff_cell_x / 1000.0)
     
     if search_mode == 'single':
         threshold_antennas = target_antennas
@@ -551,11 +663,12 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size, downsam
         valid_ids_final = []
         
         if len(potential_ids) > 0:
-            dy_ds, dx_ds = np.gradient(elevation[::downsample_factor, ::downsample_factor], eff_cell)
+            dy_ds, dx_ds = np.gradient(elevation[::downsample_factor, ::downsample_factor], eff_cell_y, eff_cell_x)
             aspect_ds = np.degrees(np.arctan2(-dx_ds, dy_ds)) % 360
-            
-            spacing_px = int((antenna_spacing_km * 1000) / cell_size)
-            grid_code = 1 if grid_type == 'hex' else 0 
+
+            spacing_r = max(1, int((antenna_spacing_km * 1000) / cell_size_y))
+            spacing_c = max(1, int((antenna_spacing_km * 1000) / cell_size_x))
+            grid_code = 1 if grid_type == 'hex' else 0
             all_slices = find_objects(labeled)
             
             # Iterate through found blobs to calculate physical internal placement of DUs
@@ -570,7 +683,7 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size, downsam
                 c_stop = min(c_stop, cols)
                 
                 mask_chunk = final_map_disk[r_start:r_stop, c_start:c_stop]
-                antennas_fit = count_grid_capacity(mask_chunk, spacing_px, grid_code)
+                antennas_fit = count_grid_capacity(mask_chunk, spacing_r, spacing_c, grid_code)
                 
                 if antennas_fit >= threshold_antennas:
                     valid_ids_final.append(site_id)
@@ -679,7 +792,7 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
         print(f"      {C.WARN}{Icon.WARN}WARNING: KML generation failed (Skipping KML). Error: {e}{C.RESET}")
 
 def generate_visualizations_and_outputs(dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
-                                        origin_lat, origin_lon, cell_size, downsample_factor, generate_kml, run_output_dir, 
+                                        origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
                                         output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
                                         min_altitude, max_altitude, region_name, final_params):
     """
@@ -688,6 +801,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
     to the designated unified output directory.
     """
     generated_files = []
+    cell_size_deg = map_grid.cell_size_deg
     base_filename = "grand_search_results_" + os.path.splitext(os.path.basename(dem_path))[0]
     
     # Save TIF
@@ -695,8 +809,8 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
     tiff.imwrite(out_tif, small_final)
     generated_files.append(os.path.abspath(out_tif))
     
-    # Save TFW
-    new_res_deg = (1.0/3600.0) * downsample_factor
+    # Save TFW (the exported raster is downsampled, so its pixels are that much larger)
+    new_res_deg = cell_size_deg * downsample_factor
     create_world_file(out_tif, origin_lat, origin_lon, new_res_deg)
     generated_files.append(os.path.abspath(os.path.splitext(out_tif)[0] + ".tfw"))
     
@@ -737,7 +851,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                 legend_labels.append(label_str)
         
         if rfi_zones:
-            deg_viz = (1.0/3600.0) * viz_ds
+            deg_viz = cell_size_deg * viz_ds
             legend_handles.append(Line2D([0], [0], color='red', linestyle='--', lw=2))
             legend_labels.append("RFI exclusion zone")
             for item in rfi_zones:
@@ -746,9 +860,12 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                     _, lat, lon, radius_km, name = item
                     px_x = (lon - origin_lon) / deg_viz
                     px_y = (origin_lat - lat) / deg_viz
-                    r_px = (radius_km / 111.0) / deg_viz
-                    ax.add_patch(Circle((px_x, px_y), r_px, edgecolor='red', facecolor='none', ls='--', lw=2))
-                    text = ax.text(px_x, px_y-r_px/2, name, color='red', fontsize=12, ha='center')
+                    # A circle on the ground is an ellipse on an angular pixel grid, since
+                    # a pixel covers less ground east-west than north-south
+                    w_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_x) / viz_ds
+                    h_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_y) / viz_ds
+                    ax.add_patch(Ellipse((px_x, px_y), w_px, h_px, edgecolor='red', facecolor='none', ls='--', lw=2))
+                    text = ax.text(px_x, px_y-h_px/4, name, color='red', fontsize=12, ha='center')
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
                 elif type_tag == 'poly':
                     _, coords, name = item
@@ -763,7 +880,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                     text = ax.text(cx, cy, name, color='red', fontsize=8, ha='center')
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
 
-        deg_viz = (1.0/3600.0) * viz_ds
+        deg_viz = cell_size_deg * viz_ds
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x,p: f"{origin_lon + x*deg_viz:.2f}"))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y,p: f"{origin_lat - y*deg_viz:.2f}"))
         ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
@@ -828,6 +945,9 @@ identify suitable deployment sites for the GRAND array.
 - Slope Bounds: Customizable minimum and maximum terrain steepness in degrees.
 - RFI Zones: Accept pre-defined sets ('lima', 'arequipa') or custom geometry lists via JSON config.
 - Fresnel Buffer: Adds a vertical clearance margin (in meters) to the line-of-sight ray.
+- Map Resolution: Read from the DEM's own GeoTIFF tags, or forced via `--cell_size_deg`. Pixels
+  are square in degrees but not in metres, so each axis carries its own ground scale.
+- Candidate Stride: Thins the candidate set before ray-tracing via `--candidate_stride`.
 - Downsample Factor: Modifies the internal resolution of the capacity masking, speeding up processing.
 - Tile Size: Configures the size of memory-mapped square chunks for RAM management.
 - Core Scaling: Control CPU thread allocation via `--num_cores` (defaults to all available cores).
@@ -882,6 +1002,12 @@ def validate_parameters(params):
     if params['tile_size'] <= 0:
         errors.append("tile_size must be strictly positive (> 0).")
 
+    if params.get('candidate_stride', 5) <= 0:
+        errors.append("candidate_stride must be strictly positive (> 0).")
+
+    if params.get('cell_size_deg') is not None and params['cell_size_deg'] <= 0:
+        errors.append("cell_size_deg must be strictly positive (> 0) when specified.")
+
     # 8. Verify Resume Directory
     if params.get('resume'):
         res_dir = params.get('resume_dir')
@@ -911,7 +1037,7 @@ def validate_parameters(params):
 # ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
-def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000, 
+def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=1000,
                             rfi_zones=None, origin_lat=-15.0, origin_lon=-73.0,
                             min_width_km=2.0, min_altitude=None, max_altitude=None,
                             antenna_spacing_km=1.0, min_dist_km=30.0, max_dist_km=80.0,
@@ -922,20 +1048,33 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
                             min_slope_deg=3.0, max_slope_deg=25.0,
                             region_name=None, fresnel_buffer=200.0, 
                             downsample_factor=4, run_output_dir=".", 
-                            output_image_format='png', tile_size=2048, 
-                            resume=False, resume_dir=None, num_cores=-1):
+                            output_image_format='png', tile_size=2048,
+                            resume=False, resume_dir=None, num_cores=-1,
+                            candidate_stride=5):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
+
+    The map resolution (cell_size_deg) is read from the DEM's own georeferencing tags
+    unless the caller overrides it; every metric conversion downstream derives from it.
     """
-    
+
     # Cast safety to ensure slice logic doesn't fail if passed as float via JSON
     downsample_factor = int(downsample_factor)
     tile_size = int(tile_size)
-    
+    candidate_stride = int(candidate_stride)
+
+    # Establish the sampling geometry before anything else depends on it
+    map_grid = resolve_grid_geometry(dem_path, origin_lat, cell_size_deg)
+    cell_size_deg = map_grid.cell_size_deg
+    cell_size_y, cell_size_x = map_grid.cell_size_y, map_grid.cell_size_x
+
     # Store explicit params for final JSON export
     export_params = {
         "dem": dem_path, "origin": [origin_lat, origin_lon],
+        "cell_size_deg": cell_size_deg, "cell_size_y_m": cell_size_y,
+        "cell_size_x_m": cell_size_x, "cell_size_center_lat": map_grid.center_lat,
+        "cell_size_source": map_grid.source, "candidate_stride": candidate_stride,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -958,6 +1097,9 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
     print(f"   -> Slope Range: {C.MAGENTA}{min_slope_deg}° to {max_slope_deg}°{C.RESET}")
     print(f"   -> Target Dist: {C.MAGENTA}{min_dist_km} - {max_dist_km} km{C.RESET}")
     print(f"   -> Physics: Fresnel Buffer {C.MAGENTA}{fresnel_buffer}m{C.RESET} | Downsample Factor {C.MAGENTA}{downsample_factor}{C.RESET}")
+    print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
+    print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
+    print(f"   -> Candidate Stride: {C.MAGENTA}every {candidate_stride} px{C.RESET}")
     print(f"   -> Memory: Tile Size {C.MAGENTA}{tile_size}x{tile_size} px{C.RESET}")
     if road_map_path:
         print(f"   -> Logistics: Require road within {C.MAGENTA}{max_road_dist_km} km{C.RESET}")
@@ -974,6 +1116,12 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
     print(f"{C.HEADER}============================================={C.RESET}")
     sys_cores = multiprocessing.cpu_count()
     active_cores = sys_cores if num_cores == -1 else int(num_cores)
+    # Cap Numba's own thread pool too, otherwise the parallel kernels ignore the request
+    if HAS_NUMBA:
+        try:
+            numba.set_num_threads(active_cores)
+        except Exception as e:
+            print(f"   {C.WARN}{Icon.WARN}Could not limit Numba threads: {e}{C.RESET}")
     print(f"   -> CPU Cores: {C.MAGENTA}{active_cores} allocated{C.RESET} (System Max: {sys_cores})")
     print(f"   -> Numba JIT: {C.OK}ENABLED{C.RESET}" if HAS_NUMBA else f"   -> Numba JIT: {C.FAIL}DISABLED{C.RESET}")
     if psutil:
@@ -1007,12 +1155,12 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
             print(f"\n{C.BOLD}[2/6]{C.RESET} {Icon.GEAR}Identifying Candidates...")
             t0 = time.time()
             candidates_arr = get_candidates_chunked(
-                elevation, cell_size, rfi_zones, origin_lat, origin_lon, 
+                elevation, map_grid, rfi_zones, origin_lat, origin_lon,
                 min_alt=min_altitude, max_alt=max_altitude,
                 road_map_path=road_map_path, max_road_dist_km=max_road_dist_km,
                 min_aspect_deg=min_aspect_deg, max_aspect_deg=max_aspect_deg,
                 min_slope_deg=min_slope_deg, max_slope_deg=max_slope_deg,
-                tile_size=tile_size
+                tile_size=tile_size, candidate_stride=candidate_stride
             )
             total = candidates_arr.shape[0]
             print(f"      Time: {time.time()-t0:.2f}s")
@@ -1025,7 +1173,7 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
             # Step 3: Physics Simulation
             print(f"\n{C.BOLD}[3/6]{C.RESET} {Icon.GEAR}Ray Tracing ({C.MAGENTA}{total}{C.RESET} candidates)...")
             t0 = time.time()
-            run_ray_tracing_parallel(candidates_arr, elevation, cell_size, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
+            run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
             print(f"      Time: {time.time()-t0:.2f}s")
         else:
             print(f"\n{C.BOLD}[2/6 & 3/6]{C.RESET} {Icon.GEAR}Resuming: Skipping candidate search and ray tracing...")
@@ -1035,14 +1183,14 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
         # Step 4: Spatial Pruning
         print(f"\n{C.BOLD}[4/6]{C.RESET} {Icon.BROOM}Cleaning Shapes...")
         t0 = time.time()
-        clean_shape_artifacts(path_A, path_B, rows, cols, cell_size, antenna_spacing_km, min_width_km, tile_size)
+        clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size)
         print(f"      Time: {time.time()-t0:.2f}s")
 
         # Step 5: Capacity Analysis
         print(f"\n{C.BOLD}[5/6]{C.RESET} {Icon.INFO}Final Analysis...")
         t0 = time.time()
         small_final, labeled_viz, site_details, cumulative_capacity, count = analyze_sites_and_capacity(
-            path_A, elevation, rows, cols, cell_size, downsample_factor, search_mode, target_antennas, min_sub_array_size, antenna_spacing_km, grid_type
+            path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode, target_antennas, min_sub_array_size, antenna_spacing_km, grid_type
         )
         if search_mode == 'distributed':
             print(f"      Distributed: {C.MAGENTA}{count}{C.RESET} sites found.")
@@ -1056,8 +1204,8 @@ def find_grand_regions_interactive(dem_path, cell_size=30, target_antennas=1000,
         t0 = time.time()
         generated_files = generate_visualizations_and_outputs(
             dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
-            origin_lat, origin_lon, cell_size, downsample_factor, generate_kml, run_output_dir, 
-            output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
+            origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
+            output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km,
             min_altitude, max_altitude, region_name, export_params
         )
         print(f"      Time Elapsed: {time.time()-t0:.2f}s")
@@ -1144,6 +1292,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_slope_deg", type=float, default=25.0, help="Maximum terrain steepness in degrees (default: 25.0).")
     parser.add_argument("--fresnel_buffer", type=float, default=200.0, help="Clearance margin (in meters) for line-of-sight ray tracing (default: 200.0).")
     parser.add_argument("--downsample_factor", type=int, default=4, help="Internal capacity mask downsampling factor for processing speed (default: 4).")
+    parser.add_argument("--cell_size_deg", type=float, default=None, help="Map resolution in degrees per pixel. Defaults to reading the DEM's GeoTIFF tags.")
+    parser.add_argument("--candidate_stride", type=int, default=5, help="Keep every Nth candidate pixel before ray tracing (default: 5). Use 1 for no thinning.")
     parser.add_argument("--tile_size", type=int, default=2048, help="Size of the square memory chunk for RAM management (default: 2048).")
     parser.add_argument("--num_cores", type=int, default=-1, help="Number of CPU cores to use. Set to -1 to use all available cores (default: -1).")
     
@@ -1195,6 +1345,8 @@ if __name__ == "__main__":
             "grid_type": "hex",
             "fresnel_buffer": 200.0,
             "downsample_factor": 4,
+            "cell_size_deg": None,
+            "candidate_stride": 5,
             "tile_size": 2048,
             "num_cores": -1,
             "rfi_zones": "none",
@@ -1369,5 +1521,7 @@ if __name__ == "__main__":
         tile_size=final_params['tile_size'],
         resume=final_params.get('resume', False),
         resume_dir=final_params.get('resume_dir'),
-        num_cores=final_params.get('num_cores', -1)
+        num_cores=final_params.get('num_cores', -1),
+        cell_size_deg=final_params.get('cell_size_deg'),
+        candidate_stride=final_params.get('candidate_stride', 5)
     )

@@ -196,6 +196,8 @@ Parameters can be supplied in three ways. The script resolves parameters in the 
 | `--num_cores` | Int | `-1` | Number of CPU threads to allocate for ray-tracing. `-1` uses all available. |
 | `--tile_size` | Int | `2048` | Dimension of square chunks loaded into RAM during operations. Reduce if experiencing memory crashes. |
 | `--downsample_factor` | Int | `4` | Coarsening factor applied before final capacity counting to exponentially speed up labeling. |
+| `--cell_size_deg` | Float | `None` | Map resolution in degrees per pixel. By default this is read from the DEM's own GeoTIFF georeferencing tags; set it only to override a DEM with missing or wrong metadata. |
+| `--candidate_stride` | Int | `5` | Keeps every Nth pixel surviving the topographic screen before ray-tracing. Use `1` to trace every candidate (slower, denser sampling). |
 | `--resume` | Flag | `False` | Triggers checkpoint loading. Bypasses ray-tracing if previous buffers exist. |
 | `--resume_dir` | String | `None` | Explicit path to a failed run directory. Defaults to the current output dir if not provided. |
 
@@ -219,6 +221,10 @@ The script processes terrain logically through six distinct architectural phases
 
 To handle massive DEM files (which can easily exceed 20GB of RAM if loaded natively), the script instantly converts the input `.tif` into a Numpy `.npy` file. It then uses `np.lib.format.open_memmap` to establish "Ping-Pong" buffers (`buffer_A.npy`, `buffer_B.npy`) on the hard drive. All subsequent operations read and write to the disk in chunks, allowing the script to run seamlessly on standard laptops.
 
+The map resolution is read from the DEM's `ModelPixelScaleTag` at this stage and reported in the run banner. Every downstream conversion — slope gradients, ray-tracing step lengths, RFI radii, morphology kernels, grid packing, and the georeferencing of the `.tif`/`.tfw`/`.kml` products — derives from it, so DEMs at resolutions other than 1 arc-second are handled correctly. Pass `--cell_size_deg` to override a DEM whose metadata is missing or wrong.
+
+A geographic (EPSG:4326) DEM has pixels that are square in **degrees**, not in metres: a degree of longitude shrinks as `cos(latitude)`, so a 1 arc-second pixel spans about 30.7 m north-south but only ~29.5 m east-west in southern Peru. The pipeline therefore carries two metric pixel sizes and applies each on its own axis; angular quantities (the world file, KML coordinates, map axes) use the single degree value. The longitude scale is evaluated once at the DEM's centre latitude, which spreads the residual error of ignoring its north-south variation evenly across the map — about ±0.7% over a 3° tall DEM.
+
 ### Step 2: Topographic Screening
 
 The code steps through the DEM in defined RAM chunks (configured by `--tile_size`).
@@ -226,15 +232,15 @@ The code steps through the DEM in defined RAM chunks (configured by `--tile_size
 1. Uses `np.gradient` to establish raw `dy` and `dx` vectors.
 2. Derives physical `slope` and `aspect` angles using trig arrays.
 3. Filters the terrain by the bounds (`min_slope`, `altitude`, `aspect`, etc.).
-4. Evaluates geographic spatial logic. Longitude degrees are scaled dynamically using `math.cos(lat) * 111.32` to ensure RFI exclusion circles remain perfectly circular on the map projection.
-5. Surviving pixels are downsampled (default 5x) and passed forward as raw candidate coordinates.
+4. Evaluates geographic spatial logic. RFI exclusion zones are tested by real ground distance in metres, using the separate north-south and east-west pixel sizes, so a zone stays a true circle on the ground rather than becoming an ellipse.
+5. Surviving pixels are thinned by `--candidate_stride` (default 5x) and passed forward as raw candidate coordinates.
 
 ### Step 3: Physics Simulation (Ray Tracing)
 
 This is the most computationally expensive step. It distributes the candidate pixels across the user's CPU cores using `joblib`.
 
 * **Numba JIT**: The core loop (`check_physics_chunk`) is compiled to native C-speed.
-* **The Ray-Cast**: For each candidate pixel, a geometric ray is cast outward in its "aspect" direction up to the `max_dist_km`.
+* **The Ray-Cast**: For each candidate pixel, a geometric ray is cast outward in its "aspect" direction up to the `max_dist_km`. The ray marches in real ground distance (1 km steps) and converts to row/column offsets with a separate scale per axis, so its heading matches the aspect regardless of latitude.
 * **Earth Curvature**: The script applies real-world geometry. The target mountain's apparent height is reduced based on distance ($d^2 / 2R$) using an effective Earth radius of 8,500 km.
 * **Fresnel Margin**: The target must exceed the detector's altitude + a 1km required interaction depth + the `fresnel_buffer` clearance margin to successfully count as a hit.
 
