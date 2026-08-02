@@ -60,6 +60,24 @@ def warm_up_jit(tmp, n_jobs):
                              np.ones(1, dtype=bool))
 
 
+def check_machine_is_quiet():
+    """
+    Warns when other work is competing for the CPU.
+
+    Timings are only comparable against a baseline measured under similar conditions;
+    an unrelated job at full tilt can double a single-threaded stage and read as a
+    regression in code that did not change.
+    """
+    try:
+        load1 = os.getloadavg()[0]
+    except (OSError, AttributeError):               # pragma: no cover
+        return
+    if load1 > 1.0:
+        print(f"   WARNING: 1-minute load average is {load1:.2f}. Other work is competing "
+              f"for the CPU, so these timings are not comparable with a baseline taken "
+              f"on an idle machine.\n")
+
+
 def peak_rss_mb():
     """High-water memory for this process and its children, in MiB."""
     me = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -148,6 +166,8 @@ def main():
     if os.path.exists(BASELINE) and not args.update:
         with open(BASELINE) as f:
             baseline = json.load(f).get("cases")
+
+    check_machine_is_quiet()
 
     tmp = tempfile.mkdtemp(prefix="sitesearch_bench_")
     current = {}
