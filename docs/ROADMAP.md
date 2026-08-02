@@ -366,6 +366,66 @@ Two accuracy items also remain for that work: bilinear sampling instead of `int(
 truncation, which currently biases each step by up to half a pixel, and early
 termination once no further sample can qualify.
 
+### 4.2d Pipeline integration ✅ delivered
+
+`--physics_mode {legacy,scan}`, default `legacy` so the previous behaviour stays
+reproducible and every change remains measurable. Accepted candidates feed the same
+morphology and labelling stages, and each site carries the **distribution** of its
+candidates' observables (`arrival_scan` in the results JSON: mean/p50/p90 of solid
+angle, distance, column depth and horizon angle) — the §4.10 structure that lets
+absolute apertures be folded in later without re-running the terrain analysis.
+
+**A/B on the 2500² Arequipa crop**, 5–25 km window, 9 azimuths, 12 bins:
+
+| mode | wall time | sites | capacity | area | candidates passing physics |
+| --- | --- | --- | --- | --- | --- |
+| legacy | 12.6 s | 1 | 2,176 | 1,525 km² | 11.2% |
+| scan | 77.6 s | 1 | 6,157 | 4,969 km² | 64.6% |
+
+### 4.2e The window sits below the horizon almost everywhere
+
+The scan reports a **median horizon angle of 7.3°** across accepted candidates, with
+p90 at 17°. In terrain like this the whole ±3° acceptance window lies *below* the
+local horizon, so essentially every direction in it strikes rock. That is why
+acceptance is 64.6% rather than something selective.
+
+The consequence matters for the design: **"does this direction hit terrain" carries
+almost no discriminating power in the Andes.** The selection has to come from *how
+much* rock and *at what distance* — the column-depth band and the decay probability —
+not from visibility. The delivered site covers 4,969 km² of a ~5,600 km² crop, i.e.
+the criterion as currently configured selects nearly the whole map.
+
+This is not a defect of the engine, which is measuring correctly; it is the
+measurement telling us where the physics has to do the work. It also raises the
+priority of §4.8 (scores) and of a physically-motivated depth band over everything
+else remaining in phase 1.
+
+### 4.6 Target orientation — subsumed by column depth ✅
+
+No separate criterion is needed. A face sloping away from the candidate is never
+struck at all, and among faces that are struck, the depth measurement already
+distinguishes them. Verified by tests.
+
+Worth recording the direction of the effect, which is not the intuitive one: a
+*gentler* face presents **more** rock for the same summit height, because a
+near-horizontal ray runs further underground before reaching the summit. Since the τ
+must escape as well as be produced, this is direct evidence that the depth criterion
+wants an **optimum band rather than a floor** — and it is consistent with TAMBO
+wanting steep canyon walls, where the τ has to exit through a short path.
+
+### 4.7 Energy-derived distance windows ✅ delivered
+
+`--energy_min_pev` / `--energy_max_pev` set the decay-baseline window from
+`L = (E/m_τ)·cτ`, and the run banner reports the correspondence in both directions, so
+a hand-set distance window now says out loud what energies it implies. The helpers
+reproduce the published numbers: 1–100 PeV gives 49 m – 4.9 km against ref. [2]'s
+quoted 50 m – 5 km, and the inherited 10–80 km GRAND default corresponds to
+0.2–1.6 EeV. `decay_probability()` provides the one exactly-analytic acceptance factor.
+
+The mapping from an energy range to a window is a stated convention, not a derivation:
+it fixes the scale correctly, but the useful window also depends on acceptance details
+this tool does not model.
+
 ### 4.3 Visibility and Fresnel clearance
 
 A target qualifies only if it *is* the horizon at its distance. Fresnel clearance

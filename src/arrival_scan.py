@@ -40,6 +40,8 @@ This costs one profile walk per (candidate, azimuth) regardless of how finely th
 elevation window is sampled.
 """
 
+import math
+
 import numpy as np
 
 try:
@@ -57,6 +59,9 @@ except ImportError:                                     # pragma: no cover
 
 # Standard rock, the usual convention for tau propagation through the crust
 STANDARD_ROCK_DENSITY = 2650.0          # kg/m^3
+# Tau lepton, for the boosted decay length
+TAU_MASS_GEV = 1.77686
+TAU_CTAU_M = 87.03e-6
 # Effective radius for radio line-of-sight (the 4/3-Earth refraction convention)
 DEFAULT_EARTH_RADIUS_M = 8.5e6
 # Column depth is reported in g/cm^2: 1 kg/m^2 = 0.1 g/cm^2
@@ -244,6 +249,55 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         out_horizon[i] = horizon_max if horizon_max > -1.0e29 else 0.0
 
 
+def tau_decay_length_m(energy_pev):
+    """
+    Lorentz-boosted tau decay length, ``(E/m) * c*tau``.
+
+    This is what sets the scale of the useful detector-to-exit-point distance, and it
+    is exactly analytic — no simulation input required. Worth noting that it reproduces
+    the published numbers on both sides: 1-100 PeV gives 49 m to 4.9 km, matching
+    TAMBO's quoted 50 m - 5 km range, while the searcher's inherited 10-80 km GRAND
+    window corresponds to 0.2-1.6 EeV.
+    """
+    return (energy_pev * 1.0e6 / TAU_MASS_GEV) * TAU_CTAU_M
+
+
+def energy_pev_for_decay_length(distance_m):
+    """Inverse of :func:`tau_decay_length_m`, for reporting what a distance implies."""
+    return distance_m / TAU_CTAU_M * TAU_MASS_GEV / 1.0e6
+
+
+def decay_probability(min_dist_m, max_dist_m, energy_pev):
+    """
+    Probability the tau decays inside the accepted baseline window.
+
+    ``exp(-d_min/L) - exp(-d_max/L)``. One of the few factors that needs no acceptance
+    table, and the one that couples most strongly to site geometry.
+    """
+    length = tau_decay_length_m(energy_pev)
+    if length <= 0:
+        return 0.0
+    return math.exp(-min_dist_m / length) - math.exp(-max_dist_m / length)
+
+
+def distance_window_from_energy(energy_min_pev, energy_max_pev, shower_development_m=3000.0):
+    """
+    A decay-baseline window implied by an energy range.
+
+    The tau must decay before reaching the detector and the shower then needs room to
+    develop, so the window runs from about one decay length at the low end to one at
+    the high end plus the shower length. Ref. [2] quotes 3-10 km of shower development.
+
+    This is a stated convention rather than a derivation: it fixes the *scale*
+    correctly, but the useful window also depends on acceptance details this tool does
+    not model. Callers can always set the distances directly.
+
+    Returns (min_dist_m, max_dist_m).
+    """
+    return (tau_decay_length_m(energy_min_pev),
+            tau_decay_length_m(energy_max_pev) + shower_development_m)
+
+
 def azimuth_fan(n_azimuths, half_width_deg=None):
     """
     Azimuths to scan, as offsets from each candidate's aspect.
@@ -294,6 +348,9 @@ def scan(candidates, elevation, map_grid, *,
     }
     if n == 0:
         return out
+
+    if elevation.dtype != np.float32 and elevation.dtype != np.float64:
+        elevation = elevation.astype(np.float32)
 
     scan_candidates(
         candidates, elevation, map_grid.cell_size_y, map_grid.cell_size_x, rows, cols,

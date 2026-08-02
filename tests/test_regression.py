@@ -92,6 +92,78 @@ class TestSyntheticRegression(GoldenCase):
         self.assertFalse(os.path.exists(os.path.join(out, "buffer_B.npy")))
 
 
+class TestScanModePipeline(unittest.TestCase):
+    """The arrival-scan physics mode, driven through the real entry point."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="sitesearch_scan_")
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(700, grid_x)
+        cls.dem = synthetic.write_geotiff(os.path.join(cls.tmp, "ridge.tif"), z,
+                                          ORIGIN_LAT, ORIGIN_LON)
+        cls.results = run_pipeline(
+            cls.dem, os.path.join(cls.tmp, "out"), ORIGIN_LAT, ORIGIN_LON,
+            physics_mode="scan", n_azimuths=5, n_elev_bins=6,
+            min_dist_km=2.0, max_dist_km=15.0, tile_size=350)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_scan_mode_finds_sites(self):
+        self.assertGreater(self.results["results"]["total_sites"], 0)
+
+    def test_funnel_reports_the_scan_stage(self):
+        self.assertIn("directions accepted", self.results["funnel"])
+        self.assertGreater(self.results["funnel"]["directions accepted"], 0)
+
+    def test_sites_carry_their_scan_observables(self):
+        """Distributions are stored per site so apertures can be folded in later."""
+        site = self.results["results"]["sites"][0]
+        self.assertIn("arrival_scan", site)
+        obs = site["arrival_scan"]
+        for key in ("solid_angle_sr_mean", "max_depth_gcm2_p50",
+                    "mean_distance_m_mean", "horizon_deg_mean", "scanned_pixels"):
+            self.assertIn(key, obs)
+        self.assertGreater(obs["solid_angle_sr_mean"], 0.0)
+        self.assertGreater(obs["max_depth_gcm2_p50"], 0.0)
+
+    def test_recorded_distances_lie_inside_the_requested_window(self):
+        obs = self.results["results"]["sites"][0]["arrival_scan"]
+        self.assertGreaterEqual(obs["mean_distance_m_p50"], 2000.0)
+        self.assertLessEqual(obs["mean_distance_m_p50"], 15000.0)
+
+    def test_parameters_record_the_scan_configuration(self):
+        params = self.results["parameters"]
+        self.assertEqual(params["physics_mode"], "scan")
+        self.assertIsNotNone(params["scan"])
+        self.assertEqual(params["scan"]["n_azimuths"], 5)
+
+
+class TestEnergyDerivedWindow(unittest.TestCase):
+    """An energy range replaces the hand-set distance window."""
+
+    def test_energy_range_sets_the_distance_window(self):
+        tmp = tempfile.mkdtemp(prefix="sitesearch_energy_")
+        try:
+            grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+            z = synthetic.ridge_and_slope(500, grid_x)
+            dem = synthetic.write_geotiff(os.path.join(tmp, "ridge.tif"), z,
+                                          ORIGIN_LAT, ORIGIN_LON)
+            results = run_pipeline(dem, os.path.join(tmp, "out"), ORIGIN_LAT, ORIGIN_LON,
+                                   physics_mode="scan", n_azimuths=3, n_elev_bins=4,
+                                   energy_min_pev=1.0, energy_max_pev=100.0,
+                                   tile_size=250)
+            params = results["parameters"]
+            # 1-100 PeV gives a 49 m - 4.9 km decay length, plus shower development
+            self.assertLess(params["min_dist_km"], 0.1)
+            self.assertGreater(params["max_dist_km"], 4.0)
+            self.assertLess(params["max_dist_km"], 10.0)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @unittest.skipUnless(_support.have_real_dem(), "real DEM not present under input/dem/")
 class TestRealDemRegression(GoldenCase):
     """A fixed crop of the Arequipa DEM, as a check against real terrain."""

@@ -21,6 +21,8 @@ from collections import namedtuple
 from datetime import datetime
 import re
 
+import arrival_scan
+
 # Try to import psutil for RAM stats
 try:
     import psutil
@@ -776,6 +778,71 @@ def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x
     buf_a.flush()
     return n_hits
 
+def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params):
+    """
+    Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
+
+    Marks a candidate as valid when at least one accepted (azimuth, elevation)
+    direction strikes rock within the decay-baseline window with enough column depth.
+    See arrival_scan.py for the geometry.
+
+    Returns:
+    - tuple(int, dict): number of accepted candidates, and the per-candidate
+      observables kept for per-site aggregation.
+    """
+    observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
+    accepted = observables["cells"] > 0
+    n_hits = int(np.count_nonzero(accepted))
+    if n_hits:
+        buf_a[candidates_arr[accepted, 0].astype(np.int64),
+              candidates_arr[accepted, 1].astype(np.int64)] = True
+    buf_a.flush()
+    return n_hits, observables
+
+
+def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, observables,
+                                  site_ids):
+    """
+    Aggregates per-candidate scan observables over each labelled site.
+
+    Storing the distributions rather than a single score is deliberate: absolute
+    apertures can then be obtained later by folding these against an acceptance table,
+    without re-running the terrain analysis (roadmap 4.10).
+
+    Returns:
+    - dict mapping site id to summary statistics of that site's accepted candidates.
+    """
+    if observables is None or candidates_arr is None or len(site_ids) == 0:
+        return {}
+
+    accepted = observables["cells"] > 0
+    if not np.any(accepted):
+        return {}
+
+    rows = (candidates_arr[accepted, 0].astype(np.int64)) // downsample_factor
+    cols = (candidates_arr[accepted, 1].astype(np.int64)) // downsample_factor
+    inside = (rows >= 0) & (rows < labeled.shape[0]) & (cols >= 0) & (cols < labeled.shape[1])
+    rows, cols = rows[inside], cols[inside]
+    site_of = labeled[rows, cols]
+
+    fields = ("solid_angle_sr", "mean_distance_m", "max_depth_gcm2", "horizon_deg")
+    values = {f: observables[f][accepted][inside] for f in fields}
+
+    summary = {}
+    for site_id in site_ids:
+        sel = site_of == site_id
+        if not np.any(sel):
+            continue
+        entry = {"scanned_pixels": int(np.count_nonzero(sel))}
+        for f in fields:
+            v = values[f][sel]
+            entry[f"{f}_mean"] = float(np.mean(v))
+            entry[f"{f}_p50"] = float(np.median(v))
+            entry[f"{f}_p90"] = float(np.percentile(v, 90))
+        summary[int(site_id)] = entry
+    return summary
+
+
 def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_func, structure, desc="Processing", tile_size=2048):
     """
     Applies image morphology operations (closing/opening) on a massive memory-mapped array
@@ -833,7 +900,8 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     return n_closed, n_pruned
 
 def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
-                               target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=None):
+                               target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=None,
+                               candidates_arr=None, observables=None):
     """
     Step 5 Pipeline: Isolates unique sites and measures their capacity mathematically.
     Uses SciPy labeling to find continuous regions and simulates physical grid placement.
@@ -928,6 +996,13 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 current_viz_id += 1
             small_final = np.isin(labeled, final_selection_ids).astype(np.uint8)
             count = len(final_selection_ids)
+
+            # Fold the scan observables of each site's candidates into its record
+            per_site = summarize_observables_by_site(
+                labeled, downsample_factor, candidates_arr, observables, final_selection_ids)
+            for site in site_details:
+                if site['site_id'] in per_site:
+                    site['arrival_scan'] = per_site[site['site_id']]
 
     region_stats = {
         "labelled_regions": int(num),
@@ -1284,7 +1359,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             downsample_factor=4, run_output_dir=".", 
                             output_image_format='png', tile_size=2048,
                             resume=False, resume_dir=None, num_cores=-1,
-                            candidate_stride=5, slope_baseline_m=None):
+                            candidate_stride=5, slope_baseline_m=None,
+                            physics_mode='legacy', energy_min_pev=None, energy_max_pev=None,
+                            n_azimuths=9, azimuth_half_width_deg=60.0,
+                            elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
+                            min_column_depth_gcm2=0.0, require_terrain=True):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
@@ -1303,13 +1382,32 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     cell_size_deg = map_grid.cell_size_deg
     cell_size_y, cell_size_x = map_grid.cell_size_y, map_grid.cell_size_x
 
+    # An energy range, when given, sets the decay-baseline window (roadmap 4.7)
+    energy_note = ""
+    if energy_min_pev and energy_max_pev:
+        lo_m, hi_m = arrival_scan.distance_window_from_energy(energy_min_pev, energy_max_pev)
+        min_dist_km, max_dist_km = lo_m / 1000.0, hi_m / 1000.0
+        energy_note = f" (from {energy_min_pev:g}-{energy_max_pev:g} PeV)"
+
+    observables = None
+    scan_params = dict(
+        elev_min_deg=elev_min_deg, elev_max_deg=elev_max_deg, n_elev_bins=int(n_elev_bins),
+        n_azimuths=int(n_azimuths), half_width_deg=azimuth_half_width_deg,
+        max_range_m=max_dist_km * 1000.0,
+        min_dist_km=min_dist_km, max_dist_km=max_dist_km,
+        min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
+    )
+
+
     # Store explicit params for final JSON export
     export_params = {
         "dem": dem_path, "origin": [origin_lat, origin_lon],
         "cell_size_deg": cell_size_deg, "cell_size_y_m": cell_size_y,
         "cell_size_x_m": cell_size_x, "cell_size_center_lat": map_grid.center_lat,
         "cell_size_source": map_grid.source, "candidate_stride": candidate_stride,
-        "slope_baseline_m": slope_baseline_m,
+        "slope_baseline_m": slope_baseline_m, "physics_mode": physics_mode,
+        "energy_min_pev": energy_min_pev, "energy_max_pev": energy_max_pev,
+        "scan": scan_params if physics_mode == "scan" else None,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1330,7 +1428,17 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"   -> Spacing: {C.MAGENTA}{antenna_spacing_km} km{C.RESET} ({grid_type} grid)")
     print(f"   -> Min Width: {C.MAGENTA}{min_width_km} km{C.RESET}")
     print(f"   -> Slope Range: {C.MAGENTA}{min_slope_deg}° to {max_slope_deg}°{C.RESET}")
-    print(f"   -> Target Dist: {C.MAGENTA}{min_dist_km} - {max_dist_km} km{C.RESET}")
+    print(f"   -> Target Dist: {C.MAGENTA}{min_dist_km:g} - {max_dist_km:g} km{C.RESET}{energy_note}")
+    print(f"   -> Physics Mode: {C.MAGENTA}{physics_mode}{C.RESET}")
+    if physics_mode == 'scan':
+        print(f"      Arrival window: {C.MAGENTA}{elev_min_deg:g}° to {elev_max_deg:g}°{C.RESET}"
+              f" in {n_elev_bins} bins, {n_azimuths} azimuths"
+              f"{f' within ±{azimuth_half_width_deg:g}° of aspect' if azimuth_half_width_deg is not None else ' (full sweep)'}")
+        print(f"      Requires: {C.MAGENTA}{'rock' if require_terrain else 'clear sky'}{C.RESET}"
+              f", min column depth {min_column_depth_gcm2:,.0f} g/cm²")
+        _lo = arrival_scan.energy_pev_for_decay_length(min_dist_km * 1000.0)
+        _hi = arrival_scan.energy_pev_for_decay_length(max_dist_km * 1000.0)
+        print(f"      Baseline implies tau energies {C.MAGENTA}{_lo:.3g} - {_hi:.3g} PeV{C.RESET}")
     print(f"   -> Physics: Fresnel Buffer {C.MAGENTA}{fresnel_buffer}m{C.RESET} | Downsample Factor {C.MAGENTA}{downsample_factor}{C.RESET}")
     print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
     print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
@@ -1419,8 +1527,13 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             # Step 3: Physics Simulation
             print(f"\n{C.BOLD}[3/6]{C.RESET} {Icon.GEAR}Ray Tracing ({C.MAGENTA}{total}{C.RESET} candidates)...")
             t0 = time.time()
-            n_hits = run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
-            funnel.add("ray-tracing hits", n_hits)
+            if physics_mode == 'scan':
+                n_hits, observables = run_arrival_scan(
+                    candidates_arr, elevation, map_grid, buf_a, scan_params)
+                funnel.add("directions accepted", n_hits)
+            else:
+                n_hits = run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
+                funnel.add("ray-tracing hits", n_hits)
             timings["ray_tracing"] = time.time() - t0
             print(f"      Time: {timings['ray_tracing']:.2f}s")
         else:
@@ -1442,7 +1555,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         t0 = time.time()
         small_final, labeled_viz, site_details, cumulative_capacity, count, region_stats = analyze_sites_and_capacity(
             path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
-            target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=funnel
+            target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=funnel,
+            candidates_arr=candidates_arr, observables=observables
         )
         if search_mode == 'distributed':
             print(f"      Distributed: {C.MAGENTA}{count}{C.RESET} sites found.")
@@ -1567,6 +1681,18 @@ if __name__ == "__main__":
     parser.add_argument("--tile_size", type=int, default=2048, help="Size of the square memory chunk for RAM management (default: 2048).")
     parser.add_argument("--num_cores", type=int, default=-1, help="Number of CPU cores to use. Set to -1 to use all available cores (default: -1).")
     
+    # Arrival-direction scan (roadmap phase 1)
+    parser.add_argument("--physics_mode", type=str, choices=['legacy', 'scan'], default='legacy', help="'legacy' casts one ray per pixel; 'scan' scans arrival directions and computes column depth (default: legacy).")
+    parser.add_argument("--energy_min_pev", type=float, default=None, help="Lower tau energy in PeV. With --energy_max_pev, derives the decay-baseline distance window.")
+    parser.add_argument("--energy_max_pev", type=float, default=None, help="Upper tau energy in PeV.")
+    parser.add_argument("--n_azimuths", type=int, default=9, help="Azimuths scanned per candidate in scan mode (default: 9).")
+    parser.add_argument("--azimuth_half_width_deg", type=float, default=60.0, help="Half-width of the azimuth fan about the aspect. Use -1 for a full 360 sweep (default: 60).")
+    parser.add_argument("--elev_min_deg", type=float, default=-3.0, help="Lower edge of the accepted arrival elevation window (default: -3).")
+    parser.add_argument("--elev_max_deg", type=float, default=3.0, help="Upper edge of the accepted arrival elevation window (default: +3).")
+    parser.add_argument("--n_elev_bins", type=int, default=12, help="Elevation bins across the window (default: 12). Nearly free: cost scales with azimuths.")
+    parser.add_argument("--min_column_depth_gcm2", type=float, default=0.0, help="Column depth a direction must have to count, in g/cm2 (default: 0).")
+    parser.add_argument("--require_sky", action="store_true", dest="require_sky", help="Invert the test: accept directions that reach clear sky, for cosmic-ray style channels.")
+
     # Logistics and Geography Arguments
     parser.add_argument("--rfi_zones", type=str, default='none', help="Can be preset ('lima', 'arequipa') or a valid JSON string outlining custom exclusion zones.")
     parser.add_argument("--road_map_path", type=str, default=None, help="Path to a raster mapping distance-to-roads (optional).")
@@ -1618,6 +1744,15 @@ if __name__ == "__main__":
             "cell_size_deg": None,
             "candidate_stride": 5,
             "slope_baseline_m": None,
+            "physics_mode": "legacy",
+            "energy_min_pev": None,
+            "energy_max_pev": None,
+            "n_azimuths": 9,
+            "azimuth_half_width_deg": 60.0,
+            "elev_min_deg": -3.0,
+            "elev_max_deg": 3.0,
+            "n_elev_bins": 12,
+            "min_column_depth_gcm2": 0.0,
             "tile_size": 2048,
             "num_cores": -1,
             "rfi_zones": "none",
@@ -1795,5 +1930,16 @@ if __name__ == "__main__":
         num_cores=final_params.get('num_cores', -1),
         cell_size_deg=final_params.get('cell_size_deg'),
         candidate_stride=final_params.get('candidate_stride', 5),
-        slope_baseline_m=final_params.get('slope_baseline_m')
+        slope_baseline_m=final_params.get('slope_baseline_m'),
+        physics_mode=final_params.get('physics_mode', 'legacy'),
+        energy_min_pev=final_params.get('energy_min_pev'),
+        energy_max_pev=final_params.get('energy_max_pev'),
+        n_azimuths=final_params.get('n_azimuths', 9),
+        azimuth_half_width_deg=(None if (final_params.get('azimuth_half_width_deg', 60.0) or 0) < 0
+                                else final_params.get('azimuth_half_width_deg', 60.0)),
+        elev_min_deg=final_params.get('elev_min_deg', -3.0),
+        elev_max_deg=final_params.get('elev_max_deg', 3.0),
+        n_elev_bins=final_params.get('n_elev_bins', 12),
+        min_column_depth_gcm2=final_params.get('min_column_depth_gcm2', 0.0),
+        require_terrain=not final_params.get('require_sky', False)
     )

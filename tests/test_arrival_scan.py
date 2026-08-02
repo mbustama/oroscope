@@ -287,6 +287,111 @@ class TestCanyonGeometry(unittest.TestCase):
         self.assertEqual(int(out["cells"][0]), 0)
 
 
+class TestTauPhysicsHelpers(unittest.TestCase):
+    """Closed-form quantities that need no simulation input."""
+
+    def test_decay_length_reproduces_the_published_tambo_range(self):
+        """Ref. [2] Fig. 1 annotates a 50 m - 5 km range for 1-100 PeV."""
+        self.assertAlmostEqual(scan_mod.tau_decay_length_m(1.0), 49.0, delta=1.0)
+        self.assertAlmostEqual(scan_mod.tau_decay_length_m(100.0), 4900.0, delta=50.0)
+
+    def test_decay_length_is_linear_in_energy(self):
+        self.assertAlmostEqual(scan_mod.tau_decay_length_m(20.0)
+                               / scan_mod.tau_decay_length_m(2.0), 10.0, places=9)
+
+    def test_inherited_grand_window_corresponds_to_sub_eev_energies(self):
+        """The hardcoded 10-80 km default silently encoded an energy assumption."""
+        lo = scan_mod.energy_pev_for_decay_length(10000.0)
+        hi = scan_mod.energy_pev_for_decay_length(80000.0)
+        self.assertAlmostEqual(lo, 204.0, delta=5.0)     # ~0.2 EeV
+        self.assertAlmostEqual(hi, 1633.0, delta=20.0)   # ~1.6 EeV
+
+    def test_energy_and_decay_length_round_trip(self):
+        for energy in (1.0, 37.0, 1000.0):
+            length = scan_mod.tau_decay_length_m(energy)
+            self.assertAlmostEqual(scan_mod.energy_pev_for_decay_length(length),
+                                   energy, places=6)
+
+    def test_decay_probability_is_bounded_and_peaks_at_the_decay_length(self):
+        length = scan_mod.tau_decay_length_m(100.0)
+        p_wide = scan_mod.decay_probability(0.0, 1e9, 100.0)
+        self.assertAlmostEqual(p_wide, 1.0, places=6)
+        p_one_l = scan_mod.decay_probability(0.0, length, 100.0)
+        self.assertAlmostEqual(p_one_l, 1 - math.exp(-1), places=6)
+        self.assertEqual(scan_mod.decay_probability(1000.0, 1000.0, 100.0), 0.0)
+
+    def test_energy_window_sets_a_few_km_baseline_for_tambo(self):
+        lo, hi = scan_mod.distance_window_from_energy(1.0, 100.0)
+        self.assertLess(lo, 100.0)
+        self.assertGreater(hi, 4000.0)
+        self.assertLess(hi, 10000.0)
+
+
+class TestOrientationIsSubsumedByDepth(unittest.TestCase):
+    """
+    Column depth already encodes what a "target must face me" test was proxying for.
+
+    A face sloping away from the observer is never struck at all, and among faces that
+    are struck, a shallower one presents more rock for the same summit height. So the
+    depth measurement subsumes the orientation criterion (roadmap 4.6) rather than
+    needing it alongside.
+
+    Note the direction of the effect: a *gentler* face gives greater column depth,
+    because a near-horizontal ray runs further underground before reaching the summit.
+    That is one reason the depth criterion wants an optimum band and not a floor --
+    the tau has to escape as well as be produced.
+    """
+
+    def setUp(self):
+        self.grid = grid_at()
+        self.n = 1600
+        self.r0, self.c0 = 800, 100
+        self.summit = 2000.0
+        self.start_m = 6000.0
+
+    def ramp(self, face_slope_deg, descending=False):
+        """
+        A ridge of fixed summit height whose near face has the requested slope.
+
+        The far side drops away, so the rock a ray traverses is set by the face's
+        horizontal run rather than by how far the scan happens to reach.
+        """
+        z = np.zeros((self.n, self.n), dtype=np.float32)
+        start = self.c0 + int(self.start_m / self.grid.cell_size_x)
+        run_px = max(1, int(self.summit / math.tan(math.radians(face_slope_deg))
+                            / self.grid.cell_size_x))
+        cols = np.arange(self.n)
+        if descending:
+            profile = -np.clip(cols - start, 0, None) * self.grid.cell_size_x \
+                      * math.tan(math.radians(face_slope_deg))
+        else:
+            profile = np.clip((cols - start) / run_px, 0.0, 1.0) * self.summit
+            profile[cols > start + run_px] = 0.0
+        z[:, :] = profile[None, :]
+        return z
+
+    def scan(self, elevation, **kw):
+        params = dict(n_azimuths=1, half_width_deg=0.0,
+                      elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                      max_range_m=45000.0, min_dist_km=1.0, max_dist_km=45.0)
+        params.update(kw)
+        cands = np.array([[float(self.r0), float(self.c0), 90.0]])
+        return scan_mod.scan(cands, elevation, self.grid, **params)
+
+    def test_a_face_sloping_away_is_never_struck(self):
+        out = self.scan(self.ramp(20.0, descending=True))
+        self.assertEqual(int(out["cells"][0]), 0)
+
+    def test_a_face_sloping_toward_the_observer_is_struck(self):
+        out = self.scan(self.ramp(20.0))
+        self.assertGreater(int(out["cells"][0]), 0)
+
+    def test_a_gentler_face_presents_more_rock(self):
+        shallow = float(self.scan(self.ramp(5.0))["max_depth_gcm2"][0])
+        steep = float(self.scan(self.ramp(30.0))["max_depth_gcm2"][0])
+        self.assertGreater(shallow, steep)
+
+
 class TestNoDataAndEdges(unittest.TestCase):
     def test_nan_candidate_elevation_yields_nothing(self):
         grid = grid_at()
