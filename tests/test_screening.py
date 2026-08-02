@@ -68,6 +68,79 @@ class TestSlopeAndAspectScreening(unittest.TestCase):
         self.assertEqual(len(above), 0)
 
 
+class TestTilingInvariance(unittest.TestCase):
+    """
+    Screening must not depend on how the map is cut into tiles.
+
+    Derivatives are computed on a haloed block and cropped, so a pixel's slope is the
+    same whether or not a tile boundary happens to fall next to it. Without the halo,
+    np.gradient falls back to one-sided differences at every tile edge.
+    """
+
+    def candidates(self, z, grid, tile_size, **kwargs):
+        cands = screen(z, grid, tile_size=tile_size, candidate_stride=1, **kwargs)
+        return set(map(tuple, cands[:, :2].astype(int)))
+
+    def test_tiled_screening_matches_untiled(self):
+        grid = make_grid(-15.6)
+        n = 600
+        z = synthetic.ridge_and_slope(n, grid.cell_size_x)
+        untiled = self.candidates(z, grid, n)
+        for tile_size in (64, 128, 256):
+            self.assertEqual(self.candidates(z, grid, tile_size), untiled,
+                             msg=f"tile_size {tile_size} disagrees with the untiled result")
+
+    def test_tiled_screening_matches_untiled_with_a_slope_baseline(self):
+        grid = make_grid(-15.6)
+        n = 600
+        z = synthetic.ridge_and_slope(n, grid.cell_size_x)
+        untiled = self.candidates(z, grid, n, slope_baseline_m=500.0)
+        for tile_size in (128, 256):
+            self.assertEqual(self.candidates(z, grid, tile_size, slope_baseline_m=500.0), untiled,
+                             msg=f"tile_size {tile_size} disagrees at a 500 m baseline")
+
+
+class TestSlopeBaseline(unittest.TestCase):
+    """Slope is scale-dependent; the baseline makes the scale explicit."""
+
+    def test_baseline_converts_to_a_per_axis_pixel_window(self):
+        grid = make_grid(-16.0)
+        ny, nx = ss.slope_baseline_pixels(grid, 1000.0)
+        self.assertEqual(ny, round(1000.0 / grid.cell_size_y))
+        self.assertEqual(nx, round(1000.0 / grid.cell_size_x))
+        self.assertNotEqual(ny, nx, "anisotropic pixels give different windows per axis")
+
+    def test_no_baseline_means_native_resolution(self):
+        grid = make_grid(-16.0)
+        self.assertEqual(ss.slope_baseline_pixels(grid, None), (0, 0))
+        self.assertEqual(ss.slope_baseline_pixels(grid, 0), (0, 0))
+
+    def test_a_plane_keeps_its_slope_at_every_baseline(self):
+        """Smoothing must not bias slope on terrain that has no curvature."""
+        grid = make_grid(-16.0)
+        z = synthetic.planar(300, 12.0, 90.0, grid.cell_size_y, grid.cell_size_x)
+        for baseline in (None, 200.0, 1000.0):
+            smooth = ss.slope_baseline_pixels(grid, baseline)
+            slope, aspect = ss.terrain_derivatives(z, grid.cell_size_y, grid.cell_size_x, *smooth)
+            interior = slope[50:-50, 50:-50]
+            self.assertAlmostEqual(float(interior.mean()), 12.0, places=3,
+                                   msg=f"baseline {baseline}")
+
+    def test_longer_baselines_smooth_rough_terrain(self):
+        """On real-shaped terrain a wider window lowers the measured slope."""
+        grid = make_grid(-16.0)
+        rng = np.random.default_rng(0)
+        z = synthetic.planar(400, 10.0, 90.0, grid.cell_size_y, grid.cell_size_x)
+        z = z + rng.normal(0, 15.0, z.shape).astype(np.float32)
+        medians = []
+        for baseline in (None, 250.0, 1000.0):
+            smooth = ss.slope_baseline_pixels(grid, baseline)
+            slope, _ = ss.terrain_derivatives(z, grid.cell_size_y, grid.cell_size_x, *smooth)
+            medians.append(float(np.median(slope[20:-20, 20:-20])))
+        self.assertEqual(medians, sorted(medians, reverse=True),
+                         msg=f"expected decreasing slope with baseline, got {medians}")
+
+
 class TestCandidateStride(unittest.TestCase):
     def test_stride_thins_candidates_proportionally(self):
         grid = make_grid()

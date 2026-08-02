@@ -30,6 +30,20 @@ are the subject of phase 1.
 | Effective areas | Published curves exist — GRAND ref. [1] Fig. 25, TAMBO ref. [2] Fig. 3. |
 | TAMBO detector separation | Start at **100 m**. (Note: ref. [2] nominal is 150 m — see §4.3.) |
 | Backward compatibility | **Clean break.** Do what is best. |
+| Differential acceptance table | Not available at present — see §4.10 for how phase 1 proceeds without it. |
+
+### 1.2 Arrival-direction acceptance (guidance, 2026-08-03)
+
+| experiment / channel | accepted arrival directions |
+| --- | --- |
+| GRAND, neutrinos | about **-3° to +3°** relative to the horizon |
+| GRAND, cosmic rays | **above** the horizon, unless a nearby mountain blocks |
+| TAMBO | must be **facing a canyon** |
+
+Other experiments will impose different demands, so the acceptance window is a
+per-experiment, per-*channel* configuration rather than a global constant. Note that
+GRAND alone needs two channels with different — in fact nearly disjoint — windows,
+which is a useful early stress test of the criterion framework in phase 2.
 
 ---
 
@@ -115,6 +129,30 @@ decision (§1.1).
 
 **C. The target's orientation is never checked.** For the τ to exit toward the array,
 the target face must point back at the detector.
+
+**C2. The height criterion is mismatched to GRAND's acceptance window.** Requiring the
+target to stand `1000 + fresnel_buffer` metres above the detector is equivalent to
+demanding a minimum *elevation angle* that varies with distance:
+
+| distance | required elevation | within ±3°? |
+| --- | --- | --- |
+| 10 km | +6.81° | no — above the window |
+| 15 km | +4.52° | no — above the window |
+| 20 km | +3.37° | no — above the window |
+| 25 km | +2.66° | yes |
+| 40 km | +1.58° | yes |
+| 80 km | +0.59° | yes |
+
+Two consequences, given the §1.2 window of -3° to +3°:
+
+1. Inside ~22 km the criterion demands terrain **above** the acceptance window, so the
+   targets it selects there are ones GRAND could not use anyway.
+2. Being a floor, it admits nothing in the **-3° to 0°** half of the window — terrain
+   at or below the detector's horizontal — even though those are valid arrival
+   directions, and for Earth-skimming trajectories arguably the more important half.
+
+A height threshold cannot express an angular acceptance band; only an explicit
+elevation-angle window can. This is the concrete case for §4.11.
 
 **D. Curvature radius 8500 km is the microwave 4/3-Earth refraction rule.** A
 defensible convention at 50–200 MHz, but it should be explicit. At 80 km it changes
@@ -233,11 +271,33 @@ directory.
 Every change lands as an *option* with the previous behaviour reproducible, so each
 one's effect on site counts can be quantified rather than discovered later.
 
-### 4.1 Terrain layer
+### 4.1 Terrain layer ✅ delivered
 
-Slope, aspect and roughness computed at an explicit `slope_baseline_m`, on a
-correspondingly smoothed DEM. The scale dependence of §2.1 gets documented rather
-than being an accident of `np.gradient`.
+Slope and aspect are computed at an explicit `--slope_baseline_m`, on a
+correspondingly smoothed DEM, so the scale dependence of §2.1 is a stated parameter
+rather than an accident of `np.gradient`. Default is `None` (native resolution).
+
+Derivatives are now taken on a **haloed block and cropped**, which removed a latent
+tiling artefact: `np.gradient` falls back to one-sided differences at array edges, so
+every tile boundary previously carried a wrong slope and aspect. Screening results
+depended on `--tile_size`, a purely computational parameter.
+
+This was the first deliberate result change of phase 1, and the phase 0 harness
+quantified it on the Arequipa crop golden:
+
+| quantity | before | after |
+| --- | --- | --- |
+| pixels passing slope | 580,154 | 580,129 |
+| ray-tracing hits | 3,214 | 3,183 |
+| site area | 117.55 km² | 122.42 km² |
+| capacity | 153 | 151 |
+
+Worth noting the amplification: a 25-pixel correction to the slope mask moved the
+reported area by 4%, because the 1 km morphological closing magnifies every change in
+the validated set. It is a further illustration of finding F.
+
+Tiling invariance is now pinned by tests — tiled screening must reproduce the untiled
+result exactly, at every tile size, with and without a slope baseline.
 
 ### 4.2 Azimuthal sweep engine
 
@@ -342,9 +402,93 @@ they cannot be applied as a per-pixel lookup. Their roles are:
 2. an **energy-response weight** when comparing energy ranges.
 
 Per-pixel weighting needs a *differential* acceptance in (distance, elevation angle,
-column depth, energy). Getting that properly means either a table from the
-collaborations' simulation chains or an explicit parameterisation with stated
-assumptions. **This is the main open question for phase 1 — see §7.**
+column depth, energy).
+
+### 4.10 Working without a differential acceptance table (decided 2026-08-03)
+
+No such table is available at present. That blocks **absolute apertures**, but not
+site *ranking* — which is what a site-search tool is for. Any factor that is
+energy-dependent but site-independent cancels when comparing two sites for the same
+experiment and energy band, so a defensible relative score is available today.
+
+The plan adapts as follows.
+
+1. **Compute and store the geometric observables, not just a score.** For every
+   candidate: target distance, arrival elevation angle, column depth, usable azimuth
+   range, and clearance. Sites carry *histograms* of these, not scalars.
+2. **Score relatively**, within one experiment and energy band, from those
+   observables plus the analytic factors below.
+3. **Keep the physics response pluggable**: a documented default parameterisation
+   with explicit assumptions, behind an interface that loads a CSV table when one
+   exists.
+4. **Absolute apertures come later for free.** Because the histograms are stored,
+   folding them against an acceptance table is a post-processing step — no re-running
+   of the expensive terrain analysis.
+
+One factor *is* exactly analytic and needs no table, and it is the one that couples
+most strongly to geometry: the probability that the tau decays inside the useful
+range,
+
+```
+P_decay = exp(-d_min / L) - exp(-d_max / L),    L = (E/m_tau) * c*tau
+```
+
+The pieces that genuinely need simulation are the tau exit probability given column
+depth, and the trigger probability given shower geometry. Those get parameterised
+defaults with the assumptions written down, and are replaced when a table arrives.
+
+Validation against ref. [1] Fig. 25 and ref. [2] Fig. 3 remains possible: integrating
+our per-site model over the published Colca configuration should reproduce the
+published aperture up to a single free normalisation. That is a real test — a model
+with the wrong geometry dependence will not match the *shape* whatever the
+normalisation.
+
+### 4.11 Engine geometry: scan arrival directions, not "find a tall mountain"
+
+Working through the column-depth calculation exposed that the current formulation is
+not merely crude but structurally wrong, and that the fix reshapes the engine.
+
+The current test asks: *is there terrain 1 km taller than me at 10-80 km?* The
+physical question is: *from which arrival directions does a backward ray from this
+pixel enter rock, and how much rock does it cross?*
+
+Tracing backward from a candidate along an arrival direction (azimuth phi, elevation
+angle theta):
+
+- Rays **above** the local horizon escape to the sky and contribute nothing.
+- Rays **below** the horizon strike terrain. That first intersection is the tau exit
+  point; the distance to it is the decay baseline; and the chord beyond it, where the
+  ray runs under the surface, is the column depth.
+
+So the useful quantity is a scan over **(azimuth, elevation angle)** pairs, each
+yielding (distance, column depth) — which is exactly the differential geometry §4.10
+wants histogrammed. Note the grazing ray is the *least* useful one: at the horizon
+the column depth goes to zero. Terrain that is merely tall is not the target; terrain
+that subtends solid angle with rock behind it is.
+
+The §1.2 guidance sets the scan range directly, and makes each experiment a
+configuration of the same engine rather than a separate code path:
+
+| channel | elevation scan | what the engine reports |
+| --- | --- | --- |
+| GRAND ν | -3° to +3° about horizontal | rock-backed solid angle, distance and column-depth histograms |
+| GRAND CR | above the horizon | unobstructed sky solid angle; nearby terrain is a *penalty*, not a target |
+| TAMBO | across a canyon | opposing-wall distance, depth and subtended angle |
+
+The cosmic-ray channel is a useful check on the design: it inverts the test — terrain
+in the accepted directions *reduces* the score instead of enabling it. Any framework
+that cannot express both from one scan is not general enough for the experiments
+after these two.
+
+This supersedes §4.2's per-candidate ray fan as the engine's shape.
+
+**Sequencing correction.** §4.2 claimed the whole-raster azimuthal sweep is both the
+accuracy fix and a speedup. That holds for a pure horizon calculation, but the O(N)
+skyline algorithm does not extend cleanly to a (theta, phi) scan with sub-surface
+chords, and the curvature term is not separable in the way the convex-hull trick
+needs. Correctness first: phase 1 implements a direct scan, phase 3 optimises it
+against the phase 0 baseline. Expect phase 1 to be *slower* than the current code —
+the harness exists to quantify exactly that.
 
 ---
 

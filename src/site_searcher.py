@@ -10,7 +10,7 @@ import matplotlib.patheffects as path_effects
 from joblib import Parallel, delayed
 from tqdm import tqdm
 import multiprocessing
-from scipy.ndimage import binary_closing, binary_opening, label, sum as ndi_sum, find_objects
+from scipy.ndimage import binary_closing, binary_opening, label, sum as ndi_sum, find_objects, uniform_filter
 import os
 import shutil
 import math
@@ -419,6 +419,46 @@ def collect_provenance(dem_path, map_grid):
 #           CORE PIPELINE HELPERS
 # ==========================================
 
+def slope_baseline_pixels(map_grid, slope_baseline_m):
+    """
+    Converts a slope measurement baseline in metres to a per-axis window in pixels.
+
+    Slope is scale-dependent: on real Andean terrain the median slope falls from
+    ~17.8 deg measured over the DEM's native ~61 m to ~10.8 deg over 1 km, and the
+    fraction passing a 3-25 deg band rises from 60% to 78%. Which of those is
+    "the" slope depends on the footprint being deployed, so the baseline is an
+    explicit parameter rather than an accident of the DEM's resolution.
+
+    Returns (0, 0) when no baseline is requested, meaning the native gradient.
+    """
+    if not slope_baseline_m:
+        return 0, 0
+    ny = max(1, int(round(slope_baseline_m / map_grid.cell_size_y)))
+    nx = max(1, int(round(slope_baseline_m / map_grid.cell_size_x)))
+    return ny, nx
+
+
+def terrain_derivatives(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
+    """
+    Slope and aspect over a stated measurement baseline.
+
+    Smoothing before differentiating gives the average gradient over the window,
+    which is what "slope at 1 km scale" means physically. Callers must supply a
+    block with a halo of at least max(smooth)//2 + 1 and crop the result, otherwise
+    the window reaches past the block edge.
+
+    Returns:
+    - tuple(ndarray, ndarray): slope in degrees, aspect in degrees clockwise from north.
+    """
+    block = elevation_block
+    if smooth_y > 1 or smooth_x > 1:
+        block = uniform_filter(block, size=(max(1, smooth_y), max(1, smooth_x)), mode="nearest")
+    dy, dx = np.gradient(block, cell_size_y, cell_size_x)
+    slope = np.degrees(np.arctan(np.sqrt(dx ** 2 + dy ** 2)))
+    aspect = np.degrees(np.arctan2(-dx, dy)) % 360
+    return slope, aspect
+
+
 def read_dem_geometry(dem_path):
     """
     Reads the angular pixel size and row count of a GeoTIFF DEM from its header.
@@ -546,7 +586,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                            min_alt=None, max_alt=None, min_aspect_deg=None, max_aspect_deg=None,
                            road_map_path=None, max_road_dist_km=None,
                            min_slope_deg=3.0, max_slope_deg=25.0,
-                           tile_size=2048, candidate_stride=5, funnel=None):
+                           tile_size=2048, candidate_stride=5, slope_baseline_m=None, funnel=None):
     """
     Step 2 Pipeline: Memory-efficient topographic screening. Iterates over the large DEM in chunks (tiles) 
     to find pixels that meet the primary geometrical criteria (slope, aspect, altitude) 
@@ -565,6 +605,8 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     - tile_size (int): Size of the square chunk to process in RAM at one time.
     - candidate_stride (int): Keeps every Nth surviving pixel before ray-tracing. Higher
       values trade spatial sampling density for speed; 1 keeps every candidate.
+    - slope_baseline_m (float): Ground distance over which slope is measured. None uses
+      the DEM's native resolution, which on 30 m data is dominated by DEM noise.
     - funnel (Funnel): Optional accounting object recording per-filter survivor counts.
 
     Returns:
@@ -579,6 +621,11 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     cell_size_deg = map_grid.cell_size_deg
     cell_size_y = map_grid.cell_size_y
     cell_size_x = map_grid.cell_size_x
+
+    # Slope measurement baseline, and the halo the derivative window needs
+    smooth_y, smooth_x = slope_baseline_pixels(map_grid, slope_baseline_m)
+    halo_y = max(1, smooth_y // 2 + 1)
+    halo_x = max(1, smooth_x // 2 + 1)
 
     # Load Logistics Road map if provided
     road_dist_map = None
@@ -628,12 +675,18 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                     funnel.add("DEM pixels", chunk.size)
                     funnel.add("finite elevation", np.count_nonzero(~np.isnan(chunk)))
 
-                # Calculate topographic gradient (change in Z) against true ground distance
-                dy, dx = np.gradient(chunk, cell_size_y, cell_size_x)
+                # Read a haloed block so the derivative window never reaches past the
+                # tile edge; without it, slope at tile boundaries is a tiling artefact
+                r_lo, r_hi = max(0, r - halo_y), min(rows, r_end + halo_y)
+                c_lo, c_hi = max(0, c - halo_x), min(cols, c_end + halo_x)
+                block = elevation[r_lo:r_hi, c_lo:c_hi]
 
-                # Derive Slope (steepness) and Aspect (direction)
-                slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
-                aspect = np.degrees(np.arctan2(-dx, dy)) % 360
+                slope_block, aspect_block = terrain_derivatives(
+                    block, cell_size_y, cell_size_x, smooth_y, smooth_x)
+
+                core = (slice(r - r_lo, r - r_lo + (r_end - r)),
+                        slice(c - c_lo, c - c_lo + (c_end - c)))
+                slope, aspect = slope_block[core], aspect_block[core]
 
                 # Filter 1: Fundamental detector slope requirement
                 mask = (slope >= min_slope_deg) & (slope <= max_slope_deg)
@@ -1231,7 +1284,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             downsample_factor=4, run_output_dir=".", 
                             output_image_format='png', tile_size=2048,
                             resume=False, resume_dir=None, num_cores=-1,
-                            candidate_stride=5):
+                            candidate_stride=5, slope_baseline_m=None):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
@@ -1256,6 +1309,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "cell_size_deg": cell_size_deg, "cell_size_y_m": cell_size_y,
         "cell_size_x_m": cell_size_x, "cell_size_center_lat": map_grid.center_lat,
         "cell_size_source": map_grid.source, "candidate_stride": candidate_stride,
+        "slope_baseline_m": slope_baseline_m,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1281,6 +1335,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
     print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
     print(f"   -> Candidate Stride: {C.MAGENTA}every {candidate_stride} px{C.RESET}")
+    _sb = f"{slope_baseline_m:.0f} m" if slope_baseline_m else "native DEM resolution"
+    print(f"   -> Slope Baseline: {C.MAGENTA}{_sb}{C.RESET}")
     print(f"   -> Memory: Tile Size {C.MAGENTA}{tile_size}x{tile_size} px{C.RESET}")
     if road_map_path:
         print(f"   -> Logistics: Require road within {C.MAGENTA}{max_road_dist_km} km{C.RESET}")
@@ -1348,7 +1404,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                 road_map_path=road_map_path, max_road_dist_km=max_road_dist_km,
                 min_aspect_deg=min_aspect_deg, max_aspect_deg=max_aspect_deg,
                 min_slope_deg=min_slope_deg, max_slope_deg=max_slope_deg,
-                tile_size=tile_size, candidate_stride=candidate_stride, funnel=funnel
+                tile_size=tile_size, candidate_stride=candidate_stride,
+                slope_baseline_m=slope_baseline_m, funnel=funnel
             )
             total = candidates_arr.shape[0]
             timings["topographic_screen"] = time.time() - t0
@@ -1505,6 +1562,7 @@ if __name__ == "__main__":
     parser.add_argument("--fresnel_buffer", type=float, default=200.0, help="Clearance margin (in meters) for line-of-sight ray tracing (default: 200.0).")
     parser.add_argument("--downsample_factor", type=int, default=4, help="Internal capacity mask downsampling factor for processing speed (default: 4).")
     parser.add_argument("--cell_size_deg", type=float, default=None, help="Map resolution in degrees per pixel. Defaults to reading the DEM's GeoTIFF tags.")
+    parser.add_argument("--slope_baseline_m", type=float, default=None, help="Ground distance in metres over which slope is measured. Default: the DEM's native resolution.")
     parser.add_argument("--candidate_stride", type=int, default=5, help="Keep every Nth candidate pixel before ray tracing (default: 5). Use 1 for no thinning.")
     parser.add_argument("--tile_size", type=int, default=2048, help="Size of the square memory chunk for RAM management (default: 2048).")
     parser.add_argument("--num_cores", type=int, default=-1, help="Number of CPU cores to use. Set to -1 to use all available cores (default: -1).")
@@ -1559,6 +1617,7 @@ if __name__ == "__main__":
             "downsample_factor": 4,
             "cell_size_deg": None,
             "candidate_stride": 5,
+            "slope_baseline_m": None,
             "tile_size": 2048,
             "num_cores": -1,
             "rfi_zones": "none",
@@ -1735,5 +1794,6 @@ if __name__ == "__main__":
         resume_dir=final_params.get('resume_dir'),
         num_cores=final_params.get('num_cores', -1),
         cell_size_deg=final_params.get('cell_size_deg'),
-        candidate_stride=final_params.get('candidate_stride', 5)
+        candidate_stride=final_params.get('candidate_stride', 5),
+        slope_baseline_m=final_params.get('slope_baseline_m')
     )
