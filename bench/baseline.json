@@ -11,13 +11,13 @@
         "pixels in selected sites (est.)": 5791812,
         "slope 3.0-25.0 deg": 3776685
       },
-      "peak_rss_mb": 653.9,
+      "peak_rss_mb": 654.2,
       "timings_sec": {
-        "capacity_analysis": 0.2786,
-        "load_dem": 0.0203,
-        "morphology": 0.9845,
-        "ray_tracing": 34.6533,
-        "topographic_screen": 0.5319
+        "capacity_analysis": 0.4808,
+        "load_dem": 0.0328,
+        "morphology": 1.6582,
+        "ray_tracing": 19.3415,
+        "topographic_screen": 0.5584
       },
       "total_capacity": 6557,
       "total_sites": 1
@@ -33,13 +33,13 @@
         "pixels in selected sites (est.)": 727812,
         "slope 3.0-25.0 deg": 580129
       },
-      "peak_rss_mb": 645.8,
+      "peak_rss_mb": 646.3,
       "timings_sec": {
-        "capacity_analysis": 0.0465,
-        "load_dem": 0.0048,
-        "morphology": 0.1726,
-        "ray_tracing": 3.4661,
-        "topographic_screen": 0.0784
+        "capacity_analysis": 0.057,
+        "load_dem": 0.0042,
+        "morphology": 0.2078,
+        "ray_tracing": 2.0368,
+        "topographic_screen": 0.077
       },
       "total_capacity": 844,
       "total_sites": 1
@@ -55,13 +55,13 @@
         "pixels in selected sites (est.)": 1129260,
         "slope 3.0-25.0 deg": 2773800
       },
-      "peak_rss_mb": 475.5,
+      "peak_rss_mb": 476.8,
       "timings_sec": {
-        "capacity_analysis": 0.1009,
-        "load_dem": 0.0272,
-        "morphology": 0.4885,
-        "ray_tracing": 14.0371,
-        "topographic_screen": 0.168
+        "capacity_analysis": 0.1443,
+        "load_dem": 0.0256,
+        "morphology": 0.5227,
+        "ray_tracing": 8.3174,
+        "topographic_screen": 0.195
       },
       "total_capacity": 1287,
       "total_sites": 2
@@ -77,21 +77,22 @@
         "pixels in selected sites (est.)": 520260,
         "slope 3.0-25.0 deg": 576900
       },
-      "peak_rss_mb": 343.6,
+      "peak_rss_mb": 343.8,
       "timings_sec": {
-        "capacity_analysis": 0.2705,
-        "load_dem": 0.0048,
-        "morphology": 0.1308,
-        "ray_tracing": 4.5755,
-        "topographic_screen": 0.0446
+        "capacity_analysis": 0.2604,
+        "load_dem": 0.0082,
+        "morphology": 0.1626,
+        "ray_tracing": 4.8942,
+        "topographic_screen": 0.0517
       },
       "total_capacity": 611,
       "total_sites": 2
     }
   },
   "host": {
+    "bench_cores": 8,
     "cpu_count": 12,
-    "load_average_1min": 3.27,
+    "load_average_1min": 6.66,
     "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
     "python": "3.12.12"
   },

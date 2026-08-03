@@ -31,6 +31,9 @@ import synthetic                                   # noqa: E402
 BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline.json")
 ORIGIN_LAT, ORIGIN_LON = -15.6, -72.3
 
+# Cap threads so benchmarking does not saturate a shared workstation
+BENCH_CORES = 8
+
 # Stage timings above this fraction of a slowdown are called out as regressions
 REGRESSION_FACTOR = 1.30
 
@@ -122,7 +125,7 @@ def run_case(name, builder, params, tmp):
 
     out_dir = os.path.join(tmp, f"out_{name}")
     before = peak_rss_mb()
-    results = run_pipeline(dem, out_dir, lat, lon, **params)
+    results = run_pipeline(dem, out_dir, lat, lon, num_cores=BENCH_CORES, **params)
     return {
         "timings_sec": {k: round(v, 4) for k, v in results["timings_sec"].items()},
         "funnel": results["funnel"],
@@ -172,7 +175,7 @@ def main():
     current = {}
     try:
         print("warming up JIT ...", flush=True)
-        warm_up_jit(tmp, n_jobs=2)
+        warm_up_jit(tmp, n_jobs=BENCH_CORES)
         for name, builder, params, is_large in CASES:
             if args.quick and is_large:
                 continue
@@ -194,7 +197,7 @@ def main():
                          "Check host.load_average_1min: a baseline taken on a busy "
                          "machine is inflated and will hide real regressions."),
                 "host": {"platform": platform.platform(), "python": platform.python_version(),
-                         "cpu_count": os.cpu_count(),
+                         "cpu_count": os.cpu_count(), "bench_cores": BENCH_CORES,
                          "load_average_1min": round(os.getloadavg()[0], 2)
                          if hasattr(os, "getloadavg") else None},
                 "cases": current,

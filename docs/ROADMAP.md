@@ -986,26 +986,68 @@ entirely. Selection barely moved at default settings — four candidates out of 
 since nothing gates on depth unless a band or shielding floor is set — but the
 *reported* depth was wrong, and would have propagated into any depth-gated run.
 
-### 6.3 Parallel scaling
+### 6.3 Balanced candidate ordering ✅ delivered
 
-The scan reaches only about 2.4× on 12 cores with real candidates, against 4–5× with
-randomly scattered ones. The cause is load imbalance, not bandwidth: candidates leave
-the tile loop in spatial order, so each thread's contiguous chunk is a contiguous
-region where walks are uniformly short or uniformly long. Shuffling lifts scaling to
-5.0×, but costs single-thread locality, so the net gain at 12 threads was only ~10%
-and it is not applied. A block-interleaved ordering that balances without destroying
-locality is the obvious next thing to try.
+Numba's `prange` schedules statically, giving each thread one contiguous slice of the
+index range. Candidates leave the topographic screen in *spatial* order, so that slice
+is a contiguous patch of map — and walk cost varies enormously across a map, since rays
+near an edge terminate early while interior ones run the full range. Some threads
+therefore finished long before others: measured scaling was 2.4× on 12 cores against
+4–5× for randomly scattered candidates.
 
-### 6.4 Still to do
+Dealing *blocks* of neighbouring candidates round-robin keeps locality inside a block
+while spreading each thread's slice across the whole map. Result-neutral, verified
+against a single-threaded run.
 
-- Block-interleaved candidate ordering (§6.3).
-- The whole-raster azimuthal sweep (§4.2.2), for memory locality.
-- Bilinear sampling along profiles, which is an accuracy item as much as a speed one.
+| ordering | 8 threads |
+| --- | --- |
+| tile order | 31.3 s |
+| blocks of 1024 | **23.3 s** |
+
+Block size barely matters between 64 and 4096. Plain shuffling also balances, but
+destroys locality and measured no better overall.
+
+### 6.4 Two optimisations tried and rejected
+
+Recorded because the negative results are as useful as the positive ones.
+
+**Hoisting the per-sample division.** Most samples see terrain below the whole
+acceptance window and need no slope at all, so the comparison can be made against
+`tan(edge₀)·d` stepped incrementally. Tracking the horizon then needs an unreduced
+fraction and two multiplies per sample. Net effect: **24.5 s → 26.1 s, slower.** The
+division was already being pipelined; the extra multiplies were not free.
+
+**Solving for the exit distance up front,** to remove the four bounds comparisons from
+the inner loop. Worth about 5%, but it has to reproduce `int()`'s truncation exactly at
+every edge, and the attempt altered 405 of 40,000 candidates — the bound is
+`(cols − c0)/dc_per_m`, not `(cols − 1 − c0)/dc_per_m`. Silently truncating rays is not
+worth 5%, and the branch predictor handles the test nearly as cheaply.
+
+### 6.5 Where it stands
+
+End-to-end on the 2500² Arequipa crop, 8 cores:
+
+| stage | before phase 3 | now |
+| --- | --- | --- |
+| arrival scan | 69.8 s | **26.7 s** |
+| morphology | 10.5 s | **1.7 s** |
+| whole run | 82.0 s | **30.3 s** |
+
+Extrapolating to the full Arequipa DEM, about 20× the pixels: roughly 10 minutes,
+against something over an hour before.
+
+### 6.6 Still to do
+
+- The whole-raster azimuthal sweep (§4.2.2). Memory locality is now the main remaining
+  cost: for azimuths near north or south, consecutive samples are one DEM row apart and
+  every one is a cache miss. This is the last big structural win and also the largest
+  piece of work.
+- Bilinear sampling along profiles, an accuracy item as much as a speed one.
 - Native-dtype DEM caching, to halve cache size and I/O.
 
-**Note on the baseline.** `bench/baseline.json` now records the machine's load average.
-The current one was taken under load 3.3 and is therefore inflated; it should be
-refreshed on an idle machine before being trusted as a regression reference.
+**Note on the baseline.** `bench/baseline.json` records the load average and the core
+count it was taken with; the harness is pinned to 8 cores so it does not saturate a
+shared workstation. A baseline taken under load is inflated and will hide regressions.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

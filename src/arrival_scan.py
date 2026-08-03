@@ -135,6 +135,11 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
         tr = r0 - int(d * dr_per_m)
         if tr < 0 or tr >= rows or tc < 0 or tc >= cols:
             break
+        # Kept as a per-sample test on purpose. Solving for the exit distance up front
+        # removes four comparisons but has to reproduce int()'s truncation exactly at
+        # every edge; getting it wrong silently truncates rays, and an attempt at it
+        # altered 405 of 40,000 candidates for about 5%, which the branch predictor
+        # handles nearly as cheaply anyway.
 
         z = elevation[tr, tc]
         if not np.isnan(z):
@@ -221,6 +226,11 @@ def _min_clearance_ratio(elevation, r0, c0, z0, azimuth_deg,
         tr = r0 - int(d * cos_look / cell_size_y)
         if tr < 0 or tr >= rows or tc < 0 or tc >= cols:
             break
+        # Kept as a per-sample test on purpose. Solving for the exit distance up front
+        # removes four comparisons but has to reproduce int()'s truncation exactly at
+        # every edge; getting it wrong silently truncates rays, and an attempt at it
+        # altered 405 of 40,000 candidates for about 5%, which the branch predictor
+        # handles nearly as cheaply anyway.
         z = elevation[tr, tc]
         if not np.isnan(z):
             ray_z = z0 + antenna_height_m + d * tan_theta
@@ -487,6 +497,33 @@ def azimuth_fan(n_azimuths, half_width_deg=None):
     return np.linspace(-half_width_deg, half_width_deg, n_azimuths)
 
 
+def balanced_order(n_candidates, n_threads, block=256):
+    """
+    Candidate ordering that balances thread load without destroying locality.
+
+    Numba's ``prange`` schedules statically, giving each thread one contiguous slice of
+    the index range. Candidates leave the topographic screen in spatial order, so that
+    slice is a contiguous patch of map -- and walk cost varies enormously across the
+    map, since rays near an edge terminate early while interior ones run the full
+    range. The result is that some threads finish long before others: measured scaling
+    was 2.4x on 12 cores against 4-5x for randomly scattered candidates.
+
+    Shuffling fixes the balance but destroys cache locality, and measured barely better
+    overall. Dealing *blocks* of neighbouring candidates round-robin keeps locality
+    inside a block while spreading each thread's slice across the whole map.
+
+    Returns an index array, or None when reordering cannot help.
+    """
+    if n_threads <= 1 or n_candidates < block * n_threads * 2:
+        return None
+    n_blocks = (n_candidates + block - 1) // block
+    block_ids = np.arange(n_blocks)
+    dealt = np.concatenate([block_ids[r::n_threads] for r in range(n_threads)])
+    order = np.concatenate([np.arange(b * block, min((b + 1) * block, n_candidates))
+                            for b in dealt])
+    return order
+
+
 def scan(candidates, elevation, map_grid, *,
          elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
          n_azimuths=9, half_width_deg=60.0, use_aspect=True,
@@ -543,6 +580,15 @@ def scan(candidates, elevation, map_grid, *,
     if elevation.dtype != np.float32 and elevation.dtype != np.float64:
         elevation = elevation.astype(np.float32)
 
+    # Reorder for thread balance, then undo it so callers see their own ordering
+    try:
+        import numba as _numba
+        order = balanced_order(n, _numba.get_num_threads())
+    except Exception:
+        order = None
+    if order is not None:
+        candidates = np.ascontiguousarray(candidates[order])
+
     scan_candidates(
         candidates, elevation, map_grid.cell_size_y, map_grid.cell_size_x, rows, cols,
         offsets, use_aspect,
@@ -560,6 +606,12 @@ def scan(candidates, elevation, map_grid, *,
         out["best_clearance_ratio"],
         out["geomag_solid_angle_sr"], out["path_grammage_gcm2"], out["earth_chord_gcm2"],
     )
+
+    if order is not None:
+        inverse = np.empty_like(order)
+        inverse[order] = np.arange(len(order))
+        for key in out:
+            out[key] = out[key][inverse]
     return out
 
 
