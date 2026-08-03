@@ -329,3 +329,68 @@ class TestRfiShielding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGeomagneticDefaults(unittest.TestCase):
+    def test_defaults_are_set_for_the_andes(self):
+        self.assertAlmostEqual(physics.DEFAULT_GEOMAG_DECLINATION_DEG, -6.9, places=6)
+        self.assertAlmostEqual(physics.DEFAULT_GEOMAG_INCLINATION_DEG, -14.0, places=6)
+
+    def test_dipole_inclination_is_near_zero_at_the_magnetic_equator(self):
+        """Peru sits close to it, which is what makes the effect so directional."""
+        lat, lon = -12.0, -77.0
+        self.assertLess(abs(physics.centered_dipole_inclination(lat, lon)), 12.0)
+
+    def test_dipole_inclination_steepens_away_from_the_magnetic_equator(self):
+        near = abs(physics.centered_dipole_inclination(-12.0, -77.0))
+        far = abs(physics.centered_dipole_inclination(-45.0, -71.0))
+        self.assertGreater(far, near)
+
+    def test_dipole_inclination_reproduces_the_arequipa_default(self):
+        self.assertAlmostEqual(physics.centered_dipole_inclination(-16.4, -71.5),
+                               physics.DEFAULT_GEOMAG_INCLINATION_DEG, delta=0.1)
+
+    def test_the_default_field_still_suppresses_north_south_showers(self):
+        field = physics.geomagnetic_unit_vector(physics.DEFAULT_GEOMAG_DECLINATION_DEG,
+                                                physics.DEFAULT_GEOMAG_INCLINATION_DEG)
+        north = physics.geomagnetic_sin_alpha(0.0, 0.0, field)
+        east = physics.geomagnetic_sin_alpha(90.0, 0.0, field)
+        self.assertLess(north, east)
+        self.assertLess(north, 0.35)
+        self.assertGreater(east, 0.95)
+
+
+class TestShowerMaturityIsAThresholdForRadio(unittest.TestCase):
+    """
+    Radio emission comes from around shower maximum and then propagates through air
+    that is transparent at these frequencies, so being well past maximum costs nothing.
+    A particle array is different: its signal dies after maximum.
+    """
+
+    def observables(self, grammage):
+        return dict(cells=np.array([4]), max_depth_gcm2=np.array([1.0e6]),
+                    mean_distance_m=np.array([1.0e4]), solid_angle_sr=np.array([0.05]),
+                    path_grammage_gcm2=np.array([float(grammage)]))
+
+    def shower_score(self, grammage, mode="radio"):
+        import scoring
+        _, comps = scoring.score_candidates(self.observables(grammage),
+                                            {"grammage_mode": mode})
+        return float(comps["shower"][0])
+
+    def test_an_immature_shower_scores_low_either_way(self):
+        self.assertLess(self.shower_score(150.0), 0.4)
+        self.assertLess(self.shower_score(150.0, "particle"), 0.4)
+
+    def test_radio_saturates_at_maximum_and_stays_there(self):
+        for grammage in (700.0, 1500.0, 3000.0, 10000.0):
+            self.assertAlmostEqual(self.shower_score(grammage), 1.0, places=9,
+                                   msg=f"grammage {grammage}")
+
+    def test_a_particle_array_is_penalised_far_past_maximum(self):
+        self.assertAlmostEqual(self.shower_score(700.0, "particle"), 1.0, places=9)
+        self.assertLess(self.shower_score(6000.0, "particle"), 0.1)
+
+    def test_the_two_modes_agree_only_up_to_maximum(self):
+        self.assertAlmostEqual(self.shower_score(700.0), self.shower_score(700.0, "particle"))
+        self.assertGreater(self.shower_score(6000.0), self.shower_score(6000.0, "particle"))

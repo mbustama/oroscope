@@ -130,8 +130,13 @@ def compose(components, mode="product", weights=None):
 # encode physics the tool has not been given.
 DEFAULT_SCORE_CONFIG = {
     "depth_band_gcm2": (1.0e5, 1.0e7),
-    # Shower maturity: at least X_max to be developed, and not so much past it that
-    # the shower has attenuated away
+    # Shower maturity. For radio the criterion is a threshold: emission comes from
+    # around shower maximum and then propagates through transparent air, so being well
+    # beyond maximum costs nothing here -- the distance trade is amplitude against
+    # footprint area, which the footprint term carries. For a particle array the
+    # content dies after maximum, so there it genuinely is a band.
+    "grammage_mode": "radio",                  # 'radio' threshold, or 'particle' band
+    "grammage_maturity_gcm2": physics.X_MAX_GCM2,
     "grammage_band_gcm2": (physics.X_MAX_GCM2, 4.0 * physics.X_MAX_GCM2),
     # Neutrino interaction length for the Earth-chord attenuation term. None leaves the
     # term out: it is strongly energy-dependent and guessing it would be worse than
@@ -194,7 +199,10 @@ def score_candidates(observables, config=None, distance_window_m=None):
     # Shower maturity: grammage, not metres. Altitude enters here and nowhere else.
     grammage = observables.get("path_grammage_gcm2")
     if grammage is not None and np.any(np.asarray(grammage) > 0):
-        components["shower"] = band_score(grammage, *cfg["grammage_band_gcm2"])
+        if cfg["grammage_mode"] == "particle":
+            components["shower"] = band_score(grammage, *cfg["grammage_band_gcm2"])
+        else:
+            components["shower"] = ramp_score(grammage, 0.0, cfg["grammage_maturity_gcm2"])
 
     # Earth-chord attenuation, only when an interaction length is supplied
     chord = observables.get("earth_chord_gcm2")

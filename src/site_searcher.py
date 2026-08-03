@@ -23,6 +23,7 @@ import re
 
 import arrival_scan
 import aperture as aperture_mod
+import physics
 import scoring
 
 # Try to import psutil for RAM stats
@@ -1396,8 +1397,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
-                            min_score=0.0, geomag_declination_deg=None,
-                            geomag_inclination_deg=None,
+                            min_score=0.0,
+                            geomag_declination_deg=physics.DEFAULT_GEOMAG_DECLINATION_DEG,
+                            geomag_inclination_deg=physics.DEFAULT_GEOMAG_INCLINATION_DEG,
+                            use_geomagnetic=True, grammage_mode='radio',
                             nu_interaction_length_gcm2=None):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
@@ -1444,8 +1447,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         max_range_m=max_dist_km * 1000.0,
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
-        geomag_declination_deg=geomag_declination_deg,
-        geomag_inclination_deg=geomag_inclination_deg,
+        geomag_declination_deg=(geomag_declination_deg if use_geomagnetic else None),
+        geomag_inclination_deg=(geomag_inclination_deg if use_geomagnetic else None),
         frequency_mhz=fresnel_frequency_mhz,
         antenna_height_m=antenna_height_m,
         near_field_m=(fresnel_near_field_m if exclude_near_field else 0.0),
@@ -1473,6 +1476,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "geomag_declination_deg": geomag_declination_deg,
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
+        "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1598,7 +1602,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                     score_config={"depth_band_gcm2": depth_band_gcm2,
                                   "composition": score_composition,
                                   "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
-                                  "spacing_m": antenna_spacing_km * 1000.0},
+                                  "spacing_m": antenna_spacing_km * 1000.0,
+                                  "grammage_mode": grammage_mode},
                     min_score=min_score, rfi_zones_px=rfi_zones_px)
                 funnel.add("directions accepted", n_hits)
                 if min_score > 0:
@@ -1772,8 +1777,10 @@ if __name__ == "__main__":
     parser.add_argument("--antenna_height_m", type=float, default=2.0, help="Antenna height above ground, for the Fresnel measurement (default: 2).")
     parser.add_argument("--include_near_field", action="store_false", dest="exclude_near_field", help="Measure Fresnel clearance from the antenna outward instead of skipping the near field. Included for study: the result is then dominated by ground beside the antenna rather than by intervening terrain.")
     parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
-    parser.add_argument("--geomag_declination_deg", type=float, default=None, help="Geomagnetic declination at the site, degrees east of north. With --geomag_inclination_deg, weights each direction by sin(alpha) to the field. Use IGRF values for the site; omitted leaves emission unweighted.")
-    parser.add_argument("--geomag_inclination_deg", type=float, default=None, help="Geomagnetic inclination at the site, degrees, positive downward.")
+    parser.add_argument("--geomag_declination_deg", type=float, default=-6.9, help="Geomagnetic declination, degrees east of north (default: -6.9, IGRF 2026 at Arequipa). Replace with IGRF values for your site.")
+    parser.add_argument("--geomag_inclination_deg", type=float, default=-14.0, help="Geomagnetic inclination, degrees, positive downward (default: -14.0, a centered-dipole estimate at Arequipa). Replace with IGRF values for your site.")
+    parser.add_argument("--no_geomagnetic", action="store_false", dest="use_geomagnetic", help="Ignore the geomagnetic angle and weight all directions equally.")
+    parser.add_argument("--grammage_mode", type=str, choices=['radio', 'particle'], default='radio', help="How atmospheric depth is scored. 'radio' is a maturity threshold, since emission comes from shower maximum and then propagates through transparent air. 'particle' is a band, since particle content dies after maximum (default: radio).")
     parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
     parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
@@ -1846,8 +1853,10 @@ if __name__ == "__main__":
             "fresnel_near_field_m": 500.0,
             "refraction_k": None,
             "depth_band_gcm2": None,
-            "geomag_declination_deg": None,
-            "geomag_inclination_deg": None,
+            "geomag_declination_deg": -6.9,
+            "geomag_inclination_deg": -14.0,
+            "use_geomagnetic": True,
+            "grammage_mode": "radio",
             "nu_interaction_length_gcm2": None,
             "score_composition": "product",
             "min_score": 0.0,
@@ -2049,7 +2058,9 @@ if __name__ == "__main__":
                          if final_params.get('depth_band_gcm2') else None),
         score_composition=final_params.get('score_composition', 'product'),
         min_score=final_params.get('min_score', 0.0),
-        geomag_declination_deg=final_params.get('geomag_declination_deg'),
-        geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
+        geomag_declination_deg=final_params.get('geomag_declination_deg', -6.9),
+        geomag_inclination_deg=final_params.get('geomag_inclination_deg', -14.0),
+        use_geomagnetic=final_params.get('use_geomagnetic', True),
+        grammage_mode=final_params.get('grammage_mode', 'radio'),
         nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
     )

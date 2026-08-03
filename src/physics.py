@@ -87,9 +87,20 @@ def shower_maturity(grammage_gcm2, x_max_gcm2=X_MAX_GCM2):
     """
     Path grammage as a fraction of the depth of shower maximum.
 
-    Below 1 the shower is still developing when it arrives; well above 1 it is past
-    maximum and attenuating. Neither is fatal, but they are not equivalent, and a site
-    search that ignores altitude cannot tell them apart.
+    Below 1 the shower is still developing when it arrives. What "above 1" means
+    depends on what is being detected, and the two cases are not alike:
+
+    *Radio.* Emission comes from the region around shower maximum and then simply
+    propagates; air is effectively transparent at 50-200 MHz. Being far beyond maximum
+    costs nothing directly, so the criterion is a **threshold**, not a band. The real
+    trade at greater distance is amplitude against footprint area, which belongs to the
+    footprint term rather than here.
+
+    *Particles.* The charged-particle content peaks at maximum and dies away after, so
+    a particle array such as TAMBO does want to sit near it, and there the criterion
+    genuinely is a band.
+
+    This is one more reason criteria have to be per-channel rather than global.
     """
     return grammage_gcm2 / x_max_gcm2 if x_max_gcm2 > 0 else 0.0
 
@@ -184,6 +195,55 @@ def depth_band_from_energy(energy_min_pev, energy_max_pev, low_factor=0.3,
 
 
 # ---------------------------------------------------------------- geomagnetic
+
+# Default field for the Peruvian Andes. Provenance differs between the two, and it
+# matters:
+#
+#   declination -6.9 deg  -- IGRF 2026 at Arequipa (16.4 S, 71.5 W), retrieved from
+#                            NOAA's geomagnetic calculator.
+#   inclination -14.0 deg -- centered-dipole estimate at the same point (see
+#                            centered_dipole_inclination), because the IGRF value was
+#                            not available. It is approximate.
+#
+# Both should be replaced with IGRF values for the actual site. They are defaults so
+# that the geomagnetic effect is modelled rather than silently omitted, not because
+# one field fits all of Peru.
+DEFAULT_GEOMAG_DECLINATION_DEG = -6.9
+DEFAULT_GEOMAG_INCLINATION_DEG = -14.0
+
+# North geomagnetic pole, recent epoch, for the dipole approximation
+GEOMAGNETIC_POLE_LAT_DEG = 80.7
+GEOMAGNETIC_POLE_LON_DEG = -72.7
+
+
+def geomagnetic_latitude_deg(latitude_deg, longitude_deg,
+                             pole_lat_deg=GEOMAGNETIC_POLE_LAT_DEG,
+                             pole_lon_deg=GEOMAGNETIC_POLE_LON_DEG):
+    """Latitude in the centered-dipole frame."""
+    lat = math.radians(latitude_deg)
+    plat = math.radians(pole_lat_deg)
+    dlon = math.radians(longitude_deg - pole_lon_deg)
+    sin_mlat = (math.sin(lat) * math.sin(plat)
+                + math.cos(lat) * math.cos(plat) * math.cos(dlon))
+    return math.degrees(math.asin(max(-1.0, min(1.0, sin_mlat))))
+
+
+def centered_dipole_inclination(latitude_deg, longitude_deg, **kw):
+    """
+    Inclination from a centered dipole, ``tan(I) = 2 tan(magnetic latitude)``.
+
+    Useful when no IGRF lookup is available: it captures the dominant behaviour, that
+    inclination passes through zero at the magnetic equator and steepens away from it.
+    At Arequipa it gives about -14 degrees, the site being roughly 7 degrees south of
+    the magnetic equator.
+
+    Note this approximation is only worth using for *inclination*. The dipole
+    declination at Arequipa is about -0.2 degrees against an IGRF value of -6.9, so the
+    non-dipole terms dominate there and a dipole declination would be misleading.
+    """
+    mlat = math.radians(geomagnetic_latitude_deg(latitude_deg, longitude_deg, **kw))
+    return math.degrees(math.atan(2.0 * math.tan(mlat)))
+
 
 def geomagnetic_unit_vector(declination_deg, inclination_deg):
     """

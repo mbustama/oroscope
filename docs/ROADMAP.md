@@ -561,7 +561,7 @@ baseline, 9 azimuths, 12 bins):
 | mean `sin(α)` | **0.601** | geomagnetic weighting removes 40% of the effective acceptance |
 | median score, geometry only | 0.163 | |
 | median score, with geomagnetism | **0.094** | a 42% reduction: first-order, as predicted |
-| shower maturity | **1.07 × X_max** | these sites sit *exactly* at shower maximum |
+| shower maturity | **1.07 × X_max** | showers are mature on arrival, but only just |
 | footprint radius | 189 m | at 4335 m and 10.1 km |
 | antennas across the footprint | **0.38** | a 1 km grid under-samples it ~2.6× |
 
@@ -569,17 +569,52 @@ Three of these are statements the tool could not previously make at all.
 
 **(b) Geomagnetic weighting.** `--geomag_declination_deg` / `--geomag_inclination_deg`
 weight each accepted cell by `sin(α)` to the field, giving a second solid angle
-alongside the raw one. Left unweighted unless a field is supplied, since guessing a
-field vector would be worse than declining to weight. Verified against the closed
+alongside the raw one, and `--no_geomagnetic` turns the effect off.
+
+The defaults are for the Peruvian Andes, and their provenance differs:
+
+| parameter | default | source |
+| --- | --- | --- |
+| declination | **-6.9°** | IGRF 2026 at Arequipa (16.4°S, 71.5°W) |
+| inclination | **-14.0°** | centered-dipole estimate at the same point |
+
+The inclination is an estimate because the IGRF value was not retrievable; the dipole
+model reproduces it as -13.99° from Arequipa's -7.1° magnetic latitude.
+`centered_dipole_inclination()` will do the same for any site. That approximation is
+worth using for inclination only — the dipole declination at Arequipa is about -0.2°
+against an IGRF -6.9°, so non-dipole terms dominate there and a dipole declination
+would mislead. **Both defaults should be replaced with IGRF values per site.**
+
+With the default field the azimuthal asymmetry is large:
+
+| target azimuth | 0° (N) | 45° | 90° (E) | 135° | 180° (S) |
+| --- | --- | --- | --- | --- | --- |
+| `sin(α)` | 0.269 | 0.801 | **0.993** | 0.646 | 0.269 |
+
+An east-facing target is worth 3.7× a north-facing one, for identical terrain.
+Enabling the weighting drops the crop's median score from 0.167 to 0.109. Verified against the closed
 form: near the magnetic equator a north-facing target retains under 5% of its raw
 acceptance while an east-facing one keeps essentially all of it — two sites with
 identical terrain statistics that no geometric measure can tell apart.
 
 **(a) Atmospheric grammage.** The slant integral has a closed form, so no numerical
 integration is needed, and it is checked against a 200,000-step numerical integral.
-Reported per site and scored as a band around X_max. A given path at 4000 m carries
-0.622 of its sea-level grammage — and the tool is choosing between sites that differ
-by exactly that much altitude.
+A given path at 4000 m carries 0.622 of its sea-level grammage — and the tool is
+choosing between sites that differ by exactly that much altitude.
+
+*Correction, after review:* this was first scored as a **band** around X_max, which is
+wrong for radio. Radio emission comes from the region around shower maximum and then
+simply propagates, and air is effectively transparent at 50–200 MHz, so a detector
+well beyond maximum loses nothing on that account. The criterion is a **threshold**:
+the shower must have matured, and past that there is no penalty here. The remaining
+trade at greater distance is amplitude against footprint area, which belongs to the
+footprint term (e) and not to grammage.
+
+A particle array is the opposite case — charged-particle content peaks at maximum and
+dies away after — so `--grammage_mode particle` keeps the band for TAMBO. One more
+instance of criteria having to be per-channel. The measured 1.07 × X_max therefore
+says these showers are mature on arrival with little margin, not that the sites are
+optimally placed.
 
 **(c) Earth chord.** `2R sin θ` for downgoing directions, with an optional
 `--nu_interaction_length_gcm2` attenuation term. Reported always, weighted only when
