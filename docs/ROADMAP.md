@@ -969,12 +969,15 @@ rasterio/pyproj for CRS and outputs; `--explain` funnel report; parameter sweeps
 4. **~~A published aperture curve as data~~** — both digitized into `data/`.
 5. **IGRF field values per site.** Inclination now follows the DEM's own coordinates;
    declination still falls back to the Arequipa value and should be supplied per site.
-6. **The tau survival model** (§4.13). The exit probability treats the tau as surviving
-   or not, where in reality it exits with degraded energy, so the thick-rock side is
-   optimistic. Replacing it with an energy-degrading treatment would sharpen the upper
-   edge of the band — though not the conclusion that topography sits below the optimum.
-7. **Beta, the tau energy-loss constant**, is uncertain to a factor of two and moves the
-   optimum roughly in proportion. Worth pinning to whatever the collaboration uses.
+6. **~~The tau survival model~~** — corrected in §4.13. Energy loss now shortens the
+   decay length as the tau propagates, giving a double-exponential survival and a range
+   that grows logarithmically rather than saturating.
+7. **Beta, the tau energy-loss constant.** Now estimated at (0.4–1.0)×10⁻⁶ cm²/g from
+   mass scaling, with an assumed energy dependence. Still worth pinning to whatever
+   value or tabulation the collaboration uses; it moves the optimum in proportion,
+   though not the siting conclusion.
+8. **Neutral-current regeneration** is not modelled — only charged-current attenuation
+   is counted, so the Earth-chord suppression of §4.13(iii) is somewhat overstated.
 
 ---
 
