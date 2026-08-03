@@ -596,3 +596,54 @@ class TestNoDataAndEdges(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBinningBoundary(unittest.TestCase):
+    """
+    Regression: terrain just below the acceptance window must not be counted.
+
+    The original binned by ``k = int((theta - elev_min)/bin)`` and kept samples with
+    ``k >= 0``. C-style int() truncates toward zero, so a sample up to one bin *below*
+    elev_min gave k = 0 and was added to the lowest bin, inflating its column depth by
+    as much as a third. Working in slope against pre-computed tangent edges removes
+    the boundary entirely.
+    """
+
+    def test_terrain_below_the_window_is_excluded_from_the_depth(self):
+        grid = grid_at()
+        n = 1200
+        r0, c0 = 600, 100
+        # A slab whose top subtends an angle just below the window's lower edge
+        elevation = np.zeros((n, n), dtype=np.float32)
+        start = c0 + int(6000.0 / grid.cell_size_x)
+        drop = -6000.0 * math.tan(math.radians(1.4))     # about -1.4 deg, below -1.0
+        elevation[:, start:start + 400] = drop
+        cands = np.array([[float(r0), float(c0), 90.0]])
+        out = scan_mod.scan(cands, elevation, grid, n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                            max_range_m=20000.0, min_dist_km=1.0, max_dist_km=20.0)
+        self.assertEqual(int(out["cells"][0]), 0)
+        self.assertEqual(float(out["max_depth_gcm2"][0]), 0.0)
+
+    def test_a_target_above_the_window_credits_the_upward_bins(self):
+        """
+        A wall subtending 20 degrees is far above a +/-1 degree window, so it lands in
+        the overflow bin. The inclusive suffix sum means overflow counts toward every
+        bin, so the upward bins are still credited with its rock.
+
+        Only two of the four bins are accepted: the two downward ones strike the ground
+        underfoot well inside min_dist and are rejected there, not here.
+        """
+        grid = grid_at()
+        n = 1200
+        elevation = np.zeros((n, n), dtype=np.float32)
+        col = 100 + int(8000.0 / grid.cell_size_x)
+        elevation[:, col:col + 200] = 3000.0
+        cands = np.array([[600.0, 100.0, 90.0]])
+        out = scan_mod.scan(cands, elevation, grid, n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                            max_range_m=20000.0, min_dist_km=1.0, max_dist_km=20.0)
+        self.assertEqual(int(out["cells"][0]), 2)
+        self.assertGreater(float(out["max_depth_gcm2"][0]), 0.0)
+        self.assertAlmostEqual(float(out["mean_distance_m"][0]), 8000.0,
+                               delta=3 * grid.cell_size_x)

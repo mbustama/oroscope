@@ -48,12 +48,11 @@ def warm_up_jit(tmp, n_jobs):
     import numpy as np
     from _support import ss
     elevation = np.zeros((64, 64), dtype=np.float32)
-    buf = np.lib.format.open_memmap(os.path.join(tmp, "warm.npy"), mode="w+",
-                                    shape=(64, 64), dtype=bool)
-    with _support.quiet():
-        ss.run_ray_tracing_parallel(np.array([[32.0, 32.0, 90.0]]), elevation,
-                                    30.7, 29.7, 64, 64, 200.0, 1.0, 2.0, n_jobs, buf)
-    del buf
+    import arrival_scan
+    grid = ss.resolve_grid_geometry("nonexistent.tif", -15.6, cell_size_deg=1 / 3600)
+    arrival_scan.scan(np.array([[32.0, 32.0, 90.0]]), elevation, grid,
+                      n_azimuths=1, half_width_deg=0.0, max_range_m=500.0,
+                      min_dist_km=0.0, max_dist_km=1.0)
     ss.count_grid_capacity(np.ones((8, 8), dtype=bool), 2, 2, 1)
     ss.apply_poly_mask_numba(np.zeros(1), np.zeros(1),
                              np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
@@ -191,9 +190,13 @@ def main():
         import platform
         with open(BASELINE, "w") as f:
             json.dump({
-                "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update",
+                "note": ("Cold-cache runs. Regenerate with: python bench/benchmark.py --update. "
+                         "Check host.load_average_1min: a baseline taken on a busy "
+                         "machine is inflated and will hide real regressions."),
                 "host": {"platform": platform.platform(), "python": platform.python_version(),
-                         "cpu_count": os.cpu_count()},
+                         "cpu_count": os.cpu_count(),
+                         "load_average_1min": round(os.getloadavg()[0], 2)
+                         if hasattr(os, "getloadavg") else None},
                 "cases": current,
             }, f, indent=2, sort_keys=True)
         print(f"\nbaseline written to {BASELINE}")

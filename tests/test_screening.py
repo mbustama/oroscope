@@ -215,3 +215,56 @@ class TestFunnelAccounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSeparableMorphology(unittest.TestCase):
+    """
+    A rectangle of ones factorises into a column and a row, so the separable form is
+    bit-identical to the direct one and O(N(h+w)) rather than O(Nhw).
+    """
+
+    def setUp(self):
+        rng = np.random.default_rng(0)
+        self.mask = rng.random((400, 400)) < 0.35
+
+    def test_closing_matches_the_direct_operation(self):
+        from scipy.ndimage import binary_closing
+        for shape in ((33, 33), (17, 21), (9, 5)):
+            st = np.ones(shape)
+            self.assertTrue(np.array_equal(ss.separable_closing(self.mask, st),
+                                           binary_closing(self.mask, structure=st)),
+                            msg=f"shape {shape}")
+
+    def test_opening_matches_the_direct_operation(self):
+        from scipy.ndimage import binary_opening
+        for shape in ((17, 17), (21, 9)):
+            st = np.ones(shape)
+            self.assertTrue(np.array_equal(ss.separable_opening(self.mask, st),
+                                           binary_opening(self.mask, structure=st)),
+                            msg=f"shape {shape}")
+
+    def test_morphology_is_independent_of_tile_size(self):
+        """Cleanup must not depend on how the map happens to be cut into tiles."""
+        import tempfile, shutil, os, contextlib, io
+        from scipy.ndimage import binary_closing
+
+        def run(tile):
+            tmp = tempfile.mkdtemp()
+            try:
+                a_path = os.path.join(tmp, "a.npy"); b_path = os.path.join(tmp, "b.npy")
+                a = np.lib.format.open_memmap(a_path, mode="w+", shape=self.mask.shape,
+                                              dtype=bool)
+                a[:] = self.mask; a.flush(); del a
+                np.lib.format.open_memmap(b_path, mode="w+", shape=self.mask.shape,
+                                          dtype=bool).flush()
+                with contextlib.redirect_stderr(io.StringIO()):
+                    ss.apply_morphology_pingpong(a_path, b_path, self.mask.shape, bool,
+                                                 ss.separable_closing, np.ones((21, 21)),
+                                                 desc="c", tile_size=tile)
+                return np.array(np.lib.format.open_memmap(b_path, mode="r"))
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        ref = run(400)
+        for tile in (100, 150):
+            self.assertTrue(np.array_equal(run(tile), ref), msg=f"tile {tile}")

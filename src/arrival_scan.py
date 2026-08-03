@@ -95,7 +95,7 @@ def earth_radius_for_k(k_factor):
 @jit(nopython=True, nogil=True, fastmath=True)
 def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
                         cell_size_y, cell_size_x, rows, cols,
-                        elev_min_deg, elev_bin_deg, n_bins,
+                        tan_edges, n_bins,
                         step_m, max_range_m, inv_2R,
                         first_dist, angle_hist):
     """
@@ -106,7 +106,14 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
       * ``angle_hist`` -- path length binned by the terrain's elevation angle, which
         an inclusive suffix sum turns into underground path length per bin.
 
-    Both arrays are caller-supplied and overwritten. Returns the horizon angle.
+    Works in **slope** rather than angle. Every comparison the walk makes is monotonic
+    in the elevation angle, so comparing ``apparent/d`` against pre-computed tangents of
+    the bin edges gives identical results without an arctangent per sample -- which at
+    roughly 15 ns per sample was about half the cost of the whole scan. The per-axis
+    pixel steps are hoisted out of the loop for the same reason.
+
+    ``tan_edges`` holds tan of the n_bins+1 bin edges. Both output arrays are
+    caller-supplied and overwritten. Returns the horizon angle in degrees.
     """
     for b in range(n_bins):
         first_dist[b] = -1.0
@@ -114,46 +121,50 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
     angle_hist[n_bins] = 0.0            # overflow bin: terrain above the window
 
     look = np.radians(azimuth_deg)
-    sin_look = np.sin(look)
-    cos_look = np.cos(look)
+    # Pixels per metre of ground distance, one scale per axis, hoisted out of the loop
+    dc_per_m = np.sin(look) / cell_size_x
+    dr_per_m = np.cos(look) / cell_size_y
 
-    running_max = -1.0e30
+    running_max = -1.0e30               # in slope, not angle
     fill_bin = 0                        # lowest bin not yet assigned a distance
-    horizon = -1.0e30
+    horizon_slope = -1.0e30
 
     d = step_m
     while d <= max_range_m:
-        # Ground displacement to pixel offsets, one scale per axis
-        tc = c0 + int(d * sin_look / cell_size_x)
-        tr = r0 - int(d * cos_look / cell_size_y)
+        tc = c0 + int(d * dc_per_m)
+        tr = r0 - int(d * dr_per_m)
         if tr < 0 or tr >= rows or tc < 0 or tc >= cols:
             break
 
         z = elevation[tr, tc]
         if not np.isnan(z):
             # Earth curvature lowers distant terrain: apparent height drops as d^2/2R
-            apparent = z - (d * d) * inv_2R - z0
-            theta = np.degrees(np.arctan(apparent / d))
+            slope = (z - (d * d) * inv_2R - z0) / d
 
-            if theta > horizon:
-                horizon = theta
+            if slope > horizon_slope:
+                horizon_slope = slope
 
-            # Path length attributed to this terrain angle, for the suffix sum
-            k = int((theta - elev_min_deg) / elev_bin_deg)
-            if k >= n_bins:
-                k = n_bins              # above the window: counts for every bin
-            if k >= 0:
+            # Path length attributed to this terrain angle, for the suffix sum. The
+            # sample counts for every bin whose lower edge lies below it.
+            if slope >= tan_edges[0]:
+                k = n_bins                      # above the window: counts for every bin
+                for b in range(1, n_bins + 1):
+                    if tan_edges[b] > slope:
+                        k = b - 1
+                        break
                 angle_hist[k] += step_m
 
             # Each new running maximum claims the elevation bins it has just risen past
-            if theta > running_max:
-                running_max = theta
-                while fill_bin < n_bins and (elev_min_deg + fill_bin * elev_bin_deg) <= theta:
+            if slope > running_max:
+                running_max = slope
+                while fill_bin < n_bins and tan_edges[fill_bin] <= slope:
                     first_dist[fill_bin] = d
                     fill_bin += 1
         d += step_m
 
-    return horizon
+    if horizon_slope < -1.0e29:
+        return -1.0e30
+    return np.degrees(np.arctan(horizon_slope))
 
 
 @jit(nopython=True, nogil=True, fastmath=True)
@@ -266,6 +277,12 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
     n_az = azimuth_offsets_deg.shape[0]
     elev_bin_deg = (elev_max_deg - elev_min_deg) / n_bins
     inv_2R = 1.0 / (2.0 * earth_radius_m)
+    # Tangents of the bin edges, so the walk needs no arctangent. There are n_bins+1
+    # of them: the lower edges plus the top of the last bin, without which samples in
+    # the highest bin fall through into the overflow bin.
+    tan_edges = np.empty(n_bins + 1, dtype=np.float64)
+    for b in range(n_bins + 1):
+        tan_edges[b] = np.tan(np.radians(elev_min_deg + b * elev_bin_deg))
     radio_inv_2R = 1.0 / (2.0 * radio_earth_radius_m)
 
     # Solid angle of one (azimuth, elevation) cell: dOmega = cos(theta) dtheta dphi
@@ -314,7 +331,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
             horizon = _scan_one_direction(
                 elevation, r0, c0, z0, azimuth,
                 cell_size_y, cell_size_x, rows, cols,
-                elev_min_deg, elev_bin_deg, n_bins,
+                tan_edges, n_bins,
                 step_m, max_range_m, inv_2R,
                 first_dist, angle_hist)
             if horizon > horizon_max:

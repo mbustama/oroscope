@@ -10,7 +10,8 @@ import matplotlib.patheffects as path_effects
 from joblib import Parallel, delayed
 from tqdm import tqdm
 import multiprocessing
-from scipy.ndimage import binary_closing, binary_opening, label, sum as ndi_sum, find_objects, uniform_filter
+from scipy.ndimage import (binary_dilation, binary_erosion, label,
+                           sum as ndi_sum, find_objects, uniform_filter)
 import os
 import shutil
 import math
@@ -794,7 +795,7 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
                 c_start = max(0, c - pad)
                 
                 chunk = source[r_start:min(rows, r_end+pad), c_start:min(cols, c_end+pad)]
-                processed = operation_func(chunk, structure=structure)
+                processed = operation_func(chunk, structure)
                 
                 loc_r_start = r - r_start
                 loc_c_start = c - c_start
@@ -805,6 +806,31 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
                 pbar.update(1)
     dest.flush()
     return surviving
+
+def separable_closing(chunk, structure):
+    """
+    Binary closing with a rectangular structuring element, done separably.
+
+    A rectangle of ones factorises into a column and a row, so dilation or erosion by
+    (h, w) is dilation by (h, 1) followed by (1, w). That turns an O(N h w) operation
+    into O(N (h + w)) -- about 10x for the 33x33 element a 1 km antenna spacing implies
+    -- and the result is bit-identical, not an approximation.
+    """
+    h, w = structure.shape
+    col = np.ones((h, 1), dtype=bool)
+    row = np.ones((1, w), dtype=bool)
+    grown = binary_dilation(binary_dilation(chunk, col), row)
+    return binary_erosion(binary_erosion(grown, col), row)
+
+
+def separable_opening(chunk, structure):
+    """Binary opening with a rectangular element, separably. See :func:`separable_closing`."""
+    h, w = structure.shape
+    col = np.ones((h, 1), dtype=bool)
+    row = np.ones((1, w), dtype=bool)
+    shrunk = binary_erosion(binary_erosion(chunk, col), row)
+    return binary_dilation(binary_dilation(shrunk, col), row)
+
 
 def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size):
     """
@@ -821,8 +847,8 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     close_c = max(1, int(antenna_spacing_km * 1000 / cell_size_x))
     tendril_r = max(1, int((min_width_km * 0.5 * 1000) / cell_size_y))
     tendril_c = max(1, int((min_width_km * 0.5 * 1000) / cell_size_x))
-    n_closed = apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, binary_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
-    n_pruned = apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, binary_opening, np.ones((tendril_r, tendril_c)), desc="Pruning", tile_size=tile_size)
+    n_closed = apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, separable_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
+    n_pruned = apply_morphology_pingpong(path_B, path_A, (rows, cols), bool, separable_opening, np.ones((tendril_r, tendril_c)), desc="Pruning", tile_size=tile_size)
     return n_closed, n_pruned
 
 def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,

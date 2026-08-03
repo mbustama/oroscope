@@ -3,96 +3,97 @@
     "arequipa_2500": {
       "funnel": {
         "DEM pixels": 6250000,
-        "after gap closing": 1722350,
-        "after pruning (< 1.0 km wide)": 1681449,
+        "after gap closing": 5796836,
+        "after pruning (< 1.0 km wide)": 5790395,
+        "directions accepted": 551912,
         "finite elevation": 6250000,
         "kept by stride 5": 755339,
-        "pixels in selected sites (est.)": 1607556,
-        "ray-tracing hits": 70191,
+        "pixels in selected sites (est.)": 5791812,
         "slope 3.0-25.0 deg": 3776685
       },
-      "peak_rss_mb": 617.6,
+      "peak_rss_mb": 653.9,
       "timings_sec": {
-        "capacity_analysis": 0.0939,
-        "load_dem": 0.0251,
-        "morphology": 4.7648,
-        "ray_tracing": 0.1784,
-        "topographic_screen": 0.2933
+        "capacity_analysis": 0.2786,
+        "load_dem": 0.0203,
+        "morphology": 0.9845,
+        "ray_tracing": 34.6533,
+        "topographic_screen": 0.5319
       },
-      "total_capacity": 2047,
-      "total_sites": 4
+      "total_capacity": 6557,
+      "total_sites": 1
     },
     "arequipa_900": {
       "funnel": {
         "DEM pixels": 810000,
-        "after gap closing": 123407,
-        "after pruning (< 1.0 km wide)": 118758,
+        "after gap closing": 728002,
+        "after pruning (< 1.0 km wide)": 727199,
+        "directions accepted": 79154,
         "finite elevation": 810000,
         "kept by stride 5": 116033,
-        "pixels in selected sites (est.)": 118968,
-        "ray-tracing hits": 2800,
+        "pixels in selected sites (est.)": 727812,
         "slope 3.0-25.0 deg": 580129
       },
-      "peak_rss_mb": 609.1,
+      "peak_rss_mb": 645.8,
       "timings_sec": {
-        "capacity_analysis": 0.0085,
-        "load_dem": 0.0029,
-        "morphology": 0.8394,
-        "ray_tracing": 0.0258,
-        "topographic_screen": 0.0363
+        "capacity_analysis": 0.0465,
+        "load_dem": 0.0048,
+        "morphology": 0.1726,
+        "ray_tracing": 3.4661,
+        "topographic_screen": 0.0784
       },
-      "total_capacity": 135,
+      "total_capacity": 844,
       "total_sites": 1
     },
     "synthetic_1800": {
       "funnel": {
         "DEM pixels": 3240000,
-        "after gap closing": 849120,
-        "after pruning (< 1.0 km wide)": 849120,
+        "after gap closing": 1128622,
+        "after pruning (< 1.0 km wide)": 1128622,
+        "directions accepted": 229683,
         "finite elevation": 3240000,
         "kept by stride 5": 554767,
-        "pixels in selected sites (est.)": 849600,
-        "ray-tracing hits": 172803,
+        "pixels in selected sites (est.)": 1129260,
         "slope 3.0-25.0 deg": 2773800
       },
-      "peak_rss_mb": 364.0,
+      "peak_rss_mb": 475.5,
       "timings_sec": {
-        "capacity_analysis": 0.0234,
-        "load_dem": 0.0182,
-        "morphology": 2.5637,
-        "ray_tracing": 0.295,
-        "topographic_screen": 0.1223
+        "capacity_analysis": 0.1009,
+        "load_dem": 0.0272,
+        "morphology": 0.4885,
+        "ray_tracing": 14.0371,
+        "topographic_screen": 0.168
       },
-      "total_capacity": 990,
-      "total_sites": 1
+      "total_capacity": 1287,
+      "total_sites": 2
     },
     "synthetic_900": {
       "funnel": {
         "DEM pixels": 810000,
-        "after gap closing": 417120,
-        "after pruning (< 1.0 km wide)": 417120,
+        "after gap closing": 520531,
+        "after pruning (< 1.0 km wide)": 520531,
+        "directions accepted": 110707,
         "finite elevation": 810000,
         "kept by stride 5": 115390,
-        "pixels in selected sites (est.)": 417600,
-        "ray-tracing hits": 86407,
+        "pixels in selected sites (est.)": 520260,
         "slope 3.0-25.0 deg": 576900
       },
-      "peak_rss_mb": 296.1,
+      "peak_rss_mb": 343.6,
       "timings_sec": {
-        "capacity_analysis": 0.1057,
+        "capacity_analysis": 0.2705,
         "load_dem": 0.0048,
-        "morphology": 0.7921,
-        "ray_tracing": 0.1792,
-        "topographic_screen": 0.03
+        "morphology": 0.1308,
+        "ray_tracing": 4.5755,
+        "topographic_screen": 0.0446
       },
-      "total_capacity": 495,
-      "total_sites": 1
+      "total_capacity": 611,
+      "total_sites": 2
     }
   },
   "host": {
     "cpu_count": 12,
+    "load_average_1min": 3.27,
     "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
     "python": "3.12.12"
   },
-  "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update"
+  "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update. Check host.load_average_1min: a baseline taken on a busy machine is inflated and will hide real regressions."
 }

@@ -947,19 +947,72 @@ requirement we should encode.
 
 ---
 
-## 6. Phases 3–4 *(sketch — to be scoped)*
+## 6. Phase 3 — Performance (in progress)
 
-**Phase 3 — performance.** Separable/running min-max morphology (O(N) instead of
-O(N·k²), targeting the 6.8 s of §3.3); numba `prange` replacing joblib in the hot
-path; native-dtype DEM caching; content-addressed cache keys. Precision is improved,
-not traded: bilinear sampling and DEM-resolution marching (§4.2).
+Started ahead of phase 2, because at ~70 s per scan iterating on TAMBO criteria would
+have been painful.
 
-**Phase 4 — usability.** Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF
-tiepoint (verified present, matching current configs to ~1e-4°); rename `src/setup.py`
-(it is not a packaging file and that name hijacks `pip install`); real packaging;
-rasterio/pyproj for CRS and outputs; `--explain` funnel report; parameter sweeps.
+### 6.1 Delivered
 
----
+**Separable morphology.** A rectangle of ones factorises into a column and a row, so
+dilation or erosion by (h, w) is (h, 1) followed by (1, w) — O(N(h+w)) instead of
+O(Nhw), and **bit-identical**, not an approximation. Verified against the direct
+operation for several element shapes.
+
+**The scan inner loop works in slope, not angle.** Every comparison the walk makes is
+monotonic in elevation angle, so comparing `apparent/d` against pre-computed tangents
+of the bin edges gives the same decisions without an arctangent per sample. At roughly
+15 ns per sample the arctangent was about half the cost. The per-axis pixel steps are
+hoisted out of the loop too.
+
+Measured on the 2500² Arequipa crop, same configuration, 2 threads throughout:
+
+| stage | before | after | |
+| --- | --- | --- | --- |
+| morphology | 10.50 s | **1.23 s** | 8.5× |
+| arrival scan | 69.83 s | **52.46 s** | 1.33× |
+| whole run | 82.0 s | **55.6 s** | 1.47× |
+
+On all 12 cores — the CLI default, which the earlier figures did *not* use — the same
+run is now **32.4 s**.
+
+### 6.2 A bug the rewrite exposed
+
+The original binned by `k = int((theta - elev_min)/bin)` and kept samples with `k >= 0`.
+C-style `int()` truncates toward zero, so a sample up to one bin *below* `elev_min`
+gave `k = 0` and was added to the lowest bin, inflating its column depth by as much as
+a third. Working in slope against explicit tangent edges removes the boundary case
+entirely. Selection barely moved at default settings — four candidates out of 69,000,
+since nothing gates on depth unless a band or shielding floor is set — but the
+*reported* depth was wrong, and would have propagated into any depth-gated run.
+
+### 6.3 Parallel scaling
+
+The scan reaches only about 2.4× on 12 cores with real candidates, against 4–5× with
+randomly scattered ones. The cause is load imbalance, not bandwidth: candidates leave
+the tile loop in spatial order, so each thread's contiguous chunk is a contiguous
+region where walks are uniformly short or uniformly long. Shuffling lifts scaling to
+5.0×, but costs single-thread locality, so the net gain at 12 threads was only ~10%
+and it is not applied. A block-interleaved ordering that balances without destroying
+locality is the obvious next thing to try.
+
+### 6.4 Still to do
+
+- Block-interleaved candidate ordering (§6.3).
+- The whole-raster azimuthal sweep (§4.2.2), for memory locality.
+- Bilinear sampling along profiles, which is an accuracy item as much as a speed one.
+- Native-dtype DEM caching, to halve cache size and I/O.
+
+**Note on the baseline.** `bench/baseline.json` now records the machine's load average.
+The current one was taken under load 3.3 and is therefore inflated; it should be
+refreshed on an idle machine before being trusted as a regression reference.
+
+## Phase 4 — Usability *(sketch — to be scoped)*
+
+Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
+matching current configs to ~1e-4°); rename `src/setup.py`, which is not a packaging
+file and whose name hijacks `pip install`; real packaging; rasterio/pyproj for CRS and
+outputs; `--explain` funnel report; parameter sweeps.
 
 ## 7. Open questions
 

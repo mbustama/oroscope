@@ -3,7 +3,7 @@
     "DEM pixels": 810000,
     "after gap closing": 660891,
     "after pruning (< 1.0 km wide)": 657884,
-    "directions accepted": 69245,
+    "directions accepted": 69249,
     "finite elevation": 810000,
     "kept by stride 5": 116033,
     "pixels in selected sites (est.)": 654836,
