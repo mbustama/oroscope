@@ -724,70 +724,111 @@ phase 2 conclusion that criteria are per-channel.
 **Not worth modelling for ranking:** Galactic background noise sets the absolute
 trigger threshold but is site-independent, so it cancels in a comparison (§4.10).
 
-### 4.13 The production-and-escape optimum ✅ estimated
+### 4.13 The production-and-escape optimum ✅ estimated, then corrected
 
 The one substantive physics input still missing was a column-depth band with a basis.
 It can be derived rather than assumed.
 
-Two processes compete along a slab of column depth X. The neutrino must interact,
-which happens at depth x with probability `exp(-x/λ) dx/λ`; the tau must then cross
-the remaining `X - x`, surviving as `exp(-(X-x)/R)`. Integrating:
+**A first version of this section was wrong and is corrected here.** It combined the
+tau's decay and energy-loss lengths harmonically, which saturates at `1/β`, and used a
+simple exponential for the tau's survival. Both are wrong, and the errors moved the
+answer.
+
+#### The corrected treatment
+
+Decay and energy loss couple, because losing energy shortens the boosted decay length.
+With `E(X) = E₀exp(-βX)` the decay probability per unit column depth is
+`exp(βX)/X_decay(E₀)`, so
 
 ```
-P(X) = R/(λ - R) · [exp(-X/λ) - exp(-X/R)]
-X_peak = λR/(λ - R) · ln(λ/R)
+S(d)  = exp[ -(X_loss/X_decay)(exp(d/X_loss) - 1) ],   X_loss = 1/β
+R_τ   = X_loss · ln(1 + X_decay/X_loss)
 ```
 
-with λ the neutrino interaction length and R the tau range in rock.
+The range therefore **grows logarithmically** rather than saturating — the harmonic
+form understated it by 2× at an EeV and 4× at 10 EeV — and survival falls as a *double*
+exponential, far more sharply than `exp(-d/R)` beyond `1/β`.
 
-**The optimum is 18–30 km of standard rock, and barely moves with energy:**
+The exit probability then has no closed form and is integrated numerically:
 
-| E | λ_ν [g/cm²] | R_τ [g/cm²] | X_peak [g/cm²] | X_peak [km rock] |
+```
+P(X) = ∫₀ˣ (dx/λ) exp(-x/λ) · S(X - x)
+```
+
+with the tau carrying `(1 - y)` of the neutrino energy, `⟨y⟩ ≈ 0.2`.
+
+#### β, estimated
+
+β is the radiative energy-loss coefficient in `-dE/dX = a + βE`, units cm²/g, and
+`1/β` is the depth over which the tau's energy falls by `1/e`. Estimating from muon
+coefficients in standard rock (brems 1.6, pair 2.0, photonuclear 0.4, ×10⁻⁶):
+bremsstrahlung and pair production scale as `1/m²` and are suppressed by
+`(m_μ/m_τ)² = 1/283`, contributing ~3%. Photonuclear depends on the lepton mass only
+logarithmically and dominates entirely.
+
+That gives **β_τ ≈ (0.4–1.0)×10⁻⁶ cm²/g**, cross-checked by `1/β` = 3.8–9.4 km of
+rock, bracketing the ~10 km at which the tau range is usually quoted to saturate.
+Since photonuclear grows with energy, β is modelled as `0.6×10⁻⁶ (E/1 EeV)^0.20`,
+giving 0.38 at 100 PeV and 0.95 at 10 EeV. An estimate, not a fit — set the index to
+zero for a constant.
+
+#### The result
+
+| E | β [10⁻⁶] | R_τ [g/cm²] | X_peak [g/cm²] | X_peak [km rock] |
 | --- | --- | --- | --- | --- |
-| 100 PeV | 3.8×10⁸ | 7.9×10⁵ | 4.9×10⁶ | 18.4 |
-| 1 EeV | 1.7×10⁸ | 1.7×10⁶ | 8.0×10⁶ | 30.1 |
-| 10 EeV | 7.2×10⁷ | 2.0×10⁶ | 7.3×10⁶ | 27.5 |
+| 100 PeV | 0.38 | 1.1×10⁶ | 3.3×10⁶ | 12.5 |
+| 1 EeV | 0.60 | 3.6×10⁶ | 5.7×10⁶ | 21.6 |
+| 10 EeV | 0.95 | 5.1×10⁶ | 6.2×10⁶ | 23.5 |
 
-Both terms move with energy and largely cancel. Three consequences follow, and they
-change how the criterion should be applied.
+The optimum **rises then flattens**, 12 to 23 km of standard rock — not the flat
+18–30 km the erroneous version reported. It rises because the tau range grows
+logarithmically, and flattens because β rises and tempers that growth.
 
-**(i) Topography sits on the rising side of the optimum.** Measured on the Arequipa
-crop, the median column depth is 2.0×10⁶ g/cm² (7.5 km of rock) and the p90 is
-4.9×10⁶ (18.5 km) — at or below X_peak. Relative yield:
+Three consequences, and they are unchanged by the correction.
 
-| depth | km rock | yield at 100 PeV | at 1 EeV | at 10 EeV |
-| --- | --- | --- | --- | --- |
-| median 2.0×10⁶ | 7.5 | 0.93 | 0.71 | 0.69 |
-| p90 4.9×10⁶ | 18.5 | 1.00 | 0.97 | 0.97 |
+**(i) Topography sits at or below the optimum.** Arequipa's measured p90 column depth
+is 4.9×10⁶ g/cm² (18.5 km of rock), giving **0.97–1.00 of peak yield across the whole
+energy range**. Within what mountains can supply, more rock is never penalised, so the
+depth criterion should be a rising ramp over the accessible range rather than a band.
+The correction strengthened this: the optimum came *down* toward what terrain provides.
 
-So within what mountains can supply, **more rock is always better** and the upper edge
-of the band never binds. The depth criterion should be a rising ramp over the
-accessible range, not a band — the band shape only matters for the Earth chord.
-
-**(ii) The band is two decades wide at half maximum**, roughly 10⁶ to 10⁸ g/cm².
-Column depth is an intrinsically weak discriminant, and the criterion should not
-pretend otherwise.
+**(ii) The band is two and a half decades wide** at half maximum, 5×10⁵ to 6×10⁷ g/cm².
+Column depth is an intrinsically weak discriminant and the criterion should not pretend
+otherwise.
 
 **(iii) The upper limit lives in the Earth chord, and narrows the window with energy.**
-Setting the chord `2R sin θ` equal to the upper band edge gives the elevation at which
-acceptance has halved:
+Setting `2R sin θ` equal to the upper band edge:
 
 | E | chord [km] | elevation |
 | --- | --- | --- |
-| 100 PeV | 1005 | −4.5° |
-| 1 EeV | 468 | −2.1° |
-| 10 EeV | 224 | −1.0° |
+| 100 PeV | 990 | −4.4° |
+| 1 EeV | 452 | −2.0° |
+| 10 EeV | 211 | −0.9° |
 
-At 100 PeV the cut lies outside the ±3° window and nothing is lost. By an EeV it has
-eaten the bottom third; by 10 EeV, two thirds. **The effective arrival window is not a
-fixed ±3° but an energy-dependent one whose lower edge climbs toward the horizon.**
-That is worth confirming against the collaboration's own acceptance, since it predicts
-a specific narrowing.
+At 100 PeV the cut lies outside a ±3° window; by an EeV it has taken the bottom third,
+by 10 EeV two thirds. **The effective arrival window is energy-dependent, its lower
+edge climbing toward the horizon.** Worth checking against the collaboration's own
+acceptance, since it predicts a specific narrowing.
 
-Caveats. The survival term treats the tau as surviving or not, where it really exits
-with degraded energy, so the thick-rock side is optimistic. And β is uncertain to a
-factor of two, moving X_peak roughly in proportion. Neither affects (i), which is the
-conclusion that matters for site selection.
+#### Verification
+
+Beyond the unit tests, the derivations are checked against limits and constructions
+rather than against the code's own output: the numerical quadrature reproduces the
+closed form when survival is made exponential (2×10⁻⁷ relative); survival reduces to
+`exp(-d/X_decay)` as β→0; the decay length reproduces ref. [2]'s quoted 50 m – 5 km for
+1–100 PeV; and the Earth chord is verified by direct construction, checking the
+endpoint lands on the sphere.
+
+One of those checks initially failed — and the check was wrong, not the code. It
+compared the entry angle against `atan(sagitta/half-chord)`, which is `θ/2` rather than
+`θ`. The chord formula `2R sin θ` is confirmed both by the tangent-chord angle theorem
+and by explicit construction.
+
+#### Remaining caveats
+
+β is an estimate from scaling arguments, not a fit to published tables, and its energy
+index is a guess consistent with photonuclear growth. Only charged-current attenuation
+is counted; neutral-current regeneration would soften it. Neither affects (i).
 
 ### 4.10 Working without a differential acceptance table (decided 2026-08-03)
 

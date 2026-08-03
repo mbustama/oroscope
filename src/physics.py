@@ -16,6 +16,8 @@ import math
 
 import numpy as np
 
+_trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
+
 # Atmosphere: an exponential isothermal approximation, adequate over the few km of
 # relief a site search spans.
 SEA_LEVEL_DENSITY_KGM3 = 1.225
@@ -180,25 +182,6 @@ def tau_decay_length_m(energy_pev, mass_gev=1.77686, ctau_m=87.03e-6):
     return (energy_pev * 1.0e6 / mass_gev) * ctau_m
 
 
-def tau_range_gcm2(energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
-                   density_gcm3=CRUST_DENSITY_GCM3):
-    """
-    Effective tau range in rock, in g/cm^2.
-
-    Two effects compete: the tau decays after a boosted decay length, and it loses
-    energy continuously with ``1/beta`` as the loss length. Combining them
-    harmonically, ``X_range = X_decay X_loss / (X_decay + X_loss)``, gives a range that
-    grows with energy at low energy and saturates once energy loss dominates.
-
-    This is an approximation with a genuinely uncertain constant -- published beta
-    values span roughly 0.4-1.0e-6 cm^2/g and are themselves energy-dependent -- so it
-    fixes the *scale* of the useful column depth rather than its precise value.
-    """
-    x_decay = tau_decay_length_m(energy_pev) * 100.0 * density_gcm3
-    x_loss = 1.0 / beta_cm2g
-    return x_decay * x_loss / (x_decay + x_loss)
-
-
 # Charged-current nu-N cross-section, a power-law fit of the standard
 # parameterisations: sigma = A (E/GeV)^n cm^2. Good to tens of per cent over
 # 1e8-1e10 GeV and an extrapolation above that, where no data constrain it.
@@ -216,85 +199,150 @@ def neutrino_interaction_length_gcm2(energy_pev):
     """
     Column depth over which a neutrino interacts once, ``1/(N_A sigma)``.
 
-    Falls from about 3.8e8 g/cm^2 at 100 PeV to 7e7 at 10 EeV.
+    Falls from about 3.8e8 g/cm^2 at 100 PeV to 7e7 at 10 EeV. Only charged-current
+    attenuation is counted; neutral-current regeneration would soften it slightly.
     """
     return 1.0 / (AVOGADRO * cc_cross_section_cm2(energy_pev))
 
 
-def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
-                         density_gcm3=CRUST_DENSITY_GCM3):
+# Tau energy loss is essentially all photonuclear. Bremsstrahlung and pair production
+# both scale as 1/m^2, so relative to the muon they are suppressed by
+# (m_mu/m_tau)^2 = 1/283 and contribute only a few per cent -- which is exactly why a
+# tau outranges a muon. Photonuclear depends on the lepton mass only through the
+# virtual-photon flux, logarithmically, so it survives at close to the muon value.
+#
+# Estimating from muon coefficients in standard rock (brems 1.6, pair 2.0,
+# photonuclear 0.4, all 1e-6 cm^2/g) gives beta_tau ~ (0.4-1.0)e-6 cm^2/g. Cross-check:
+# 1/beta is then 3.8-9.4 km of rock, bracketing the ~10 km at which the tau range is
+# usually quoted to saturate.
+#
+# Photonuclear cross-sections grow with energy, so beta grows too. The power law below
+# reproduces 0.38e-6 at 100 PeV and 0.95e-6 at 10 EeV. It is an ESTIMATE, not a fit to
+# published tables; set the index to zero to recover a constant.
+BETA_REFERENCE_CM2G = 0.6e-6
+BETA_REFERENCE_ENERGY_PEV = 1.0e3        # 1 EeV
+BETA_ENERGY_INDEX = 0.20
+
+# Mean inelasticity of a charged-current interaction at these energies: the tau carries
+# away roughly (1 - y) of the neutrino energy, with <y> about 0.2.
+CC_INELASTICITY = 0.2
+
+
+def tau_energy_loss_beta(energy_pev, reference=BETA_REFERENCE_CM2G,
+                         reference_energy_pev=BETA_REFERENCE_ENERGY_PEV,
+                         index=BETA_ENERGY_INDEX):
+    """Energy-loss coefficient beta(E), rising with energy as photonuclear does."""
+    if index == 0.0:
+        return reference
+    return reference * (energy_pev / reference_energy_pev) ** index
+
+
+def tau_range_gcm2(energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
+    """
+    Column depth over which a tau's survival probability falls to 1/e.
+
+    Decay and energy loss couple, because losing energy shortens the boosted decay
+    length. With ``E(X) = E0 exp(-beta X)`` the decay probability per unit depth is
+    ``exp(beta X)/X_decay(E0)``, and integrating the survival gives
+
+        S(X) = exp( -(X_loss/X_decay) (exp(X/X_loss) - 1) ),   X_loss = 1/beta
+
+    so the 1/e point is
+
+        R = X_loss * ln(1 + X_decay/X_loss)
+
+    Note this **grows logarithmically** at high energy rather than saturating at
+    ``1/beta``. An earlier version of this module combined the two lengths
+    harmonically, which saturates and underestimates the range by a factor of 2 at
+    an EeV and 4 at 10 EeV.
+    """
+    beta = tau_energy_loss_beta(energy_pev) if beta_cm2g is None else beta_cm2g
+    x_decay = tau_decay_length_m(energy_pev) * 100.0 * density_gcm3
+    x_loss = 1.0 / beta
+    return x_loss * math.log1p(x_decay / x_loss)
+
+
+def tau_survival(depth_gcm2, energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
+    """
+    Probability a tau of the given energy crosses ``depth_gcm2`` of rock without decaying.
+
+    The double-exponential form above, which falls far more sharply than a simple
+    exponential once the depth exceeds ``1/beta``: the tau is losing energy, so its
+    decay length shrinks as it goes.
+    """
+    beta = tau_energy_loss_beta(energy_pev) if beta_cm2g is None else beta_cm2g
+    x_decay = tau_decay_length_m(energy_pev) * 100.0 * density_gcm3
+    x_loss = 1.0 / beta
+    d = np.asarray(depth_gcm2, dtype=np.float64)
+    # exp overflows for very thick rock, where survival is zero anyway
+    return np.exp(-(x_loss / x_decay) * np.expm1(np.clip(d / x_loss, 0.0, 700.0)))
+
+
+def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=None,
+                         density_gcm3=CRUST_DENSITY_GCM3,
+                         inelasticity=CC_INELASTICITY, samples=2000):
     """
     Relative probability that a traversing neutrino yields a tau that escapes.
 
-    Two processes compete along a slab of column depth X. The neutrino must interact,
-    which happens at depth x with probability ``exp(-x/lambda) dx/lambda``; and the tau
-    then has to cross the remaining ``X - x``, surviving as ``exp(-(X-x)/R)``.
-    Integrating,
+    The neutrino interacts at depth x with probability ``exp(-x/lambda) dx/lambda``;
+    the tau, carrying ``(1 - y)`` of the energy, must then cross the remaining
+    ``X - x`` and survive:
 
-        P(X) = R/(lambda - R) * [exp(-X/lambda) - exp(-X/R)]
+        P(X) = integral_0^X (dx/lambda) exp(-x/lambda) S(X - x)
 
-    which rises linearly as ``X/lambda`` for thin slabs, peaks, then falls as the
-    neutrino flux itself is absorbed. It is the quantitative form of "the tau must be
-    produced and must escape".
-
-    Relative, not absolute: normalisation needs the trigger response (see aperture.py).
-
-    Caveats worth keeping in view. The survival term treats the tau as surviving or not,
-    where in reality it exits with degraded energy, so the fall-off on the thick side is
-    optimistic. And ``beta`` is uncertain to a factor of two, which moves the optimum
-    roughly in proportion.
+    Evaluated numerically, because ``S`` is a double exponential and the integral has
+    no clean closed form. Relative, not absolute: normalisation needs the trigger
+    response (see aperture.py).
     """
-    X = np.asarray(column_depth_gcm2, dtype=np.float64) if hasattr(column_depth_gcm2, "__len__") \
-        else float(column_depth_gcm2)
+    e_tau = energy_pev * (1.0 - inelasticity)
     lam = neutrino_interaction_length_gcm2(energy_pev)
-    R = tau_range_gcm2(energy_pev, beta_cm2g, density_gcm3)
-    if abs(lam - R) < 1e-12:
-        return 0.0
-    if isinstance(X, float):
-        return R / (lam - R) * (math.exp(-X / lam) - math.exp(-X / R))
-    return R / (lam - R) * (np.exp(-X / lam) - np.exp(-X / R))
+
+    def one(X):
+        if X <= 0:
+            return 0.0
+        x = np.linspace(0.0, float(X), samples)
+        s = tau_survival(X - x, e_tau, beta_cm2g, density_gcm3)
+        return float(_trapezoid(np.exp(-x / lam) / lam * s, x))
+
+    if np.ndim(column_depth_gcm2) == 0:
+        return one(column_depth_gcm2)
+    return np.array([one(v) for v in np.asarray(column_depth_gcm2)])
 
 
-def production_escape_optimum_gcm2(energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
-                                   density_gcm3=CRUST_DENSITY_GCM3):
+def production_escape_optimum_gcm2(energy_pev, beta_cm2g=None,
+                                   density_gcm3=CRUST_DENSITY_GCM3,
+                                   inelasticity=CC_INELASTICITY, samples=400):
     """
-    Column depth maximising :func:`tau_exit_probability`, in closed form.
+    Column depth maximising :func:`tau_exit_probability`.
 
-        X_peak = lambda R / (lambda - R) * ln(lambda / R)
-
-    Notably almost energy-independent over GRAND's range: about 4.9e6 g/cm^2 at
-    100 PeV, 8.0e6 at 1 EeV and 7.3e6 at 10 EeV -- that is **18 to 30 km of standard
-    rock**. Both terms move with energy and largely cancel.
+    Found on a log grid, since the corrected exit probability has no closed-form peak.
+    Rises with energy and then flattens -- about 12 km of standard rock at 100 PeV,
+    20 km at 1 EeV, 23 km at 10 EeV -- as the logarithmic growth of the tau range is
+    tempered by beta rising.
     """
-    lam = neutrino_interaction_length_gcm2(energy_pev)
-    R = tau_range_gcm2(energy_pev, beta_cm2g, density_gcm3)
-    if lam <= R:
-        return R
-    return lam * R / (lam - R) * math.log(lam / R)
+    grid = np.logspace(4.0, 9.0, samples)
+    p = tau_exit_probability(grid, energy_pev, beta_cm2g, density_gcm3, inelasticity)
+    return float(grid[int(np.argmax(p))])
 
 
 def depth_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.5,
-                           beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
-                           density_gcm3=CRUST_DENSITY_GCM3, samples=4000):
+                           beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3,
+                           inelasticity=CC_INELASTICITY, samples=400):
     """
     Column-depth band where the tau exit probability stays above ``fraction`` of peak.
 
-    Grounded in :func:`tau_exit_probability` rather than in factors chosen by hand.
-    The band is very wide -- roughly 1e6 to 1e8 g/cm^2 at half maximum across
-    100 PeV to 10 EeV, some two decades -- which is itself the useful result: column
-    depth is an intrinsically weak discriminant, and the criterion should not pretend
-    otherwise.
+    Very wide -- roughly 5e5 to 2.6e8 g/cm^2 at half maximum across 100 PeV to 10 EeV,
+    some two and a half decades -- which is itself the result: column depth is an
+    intrinsically weak discriminant and the criterion should not pretend otherwise.
 
-    The low edge is taken at the lowest energy and the high edge at the highest, so the
-    band covers the whole requested range.
-
-    Returns (low_gcm2, high_gcm2).
+    Returns (low_gcm2, high_gcm2), the low edge taken at the lowest energy and the high
+    edge at the highest, so the band spans the whole requested range.
     """
+    grid = np.logspace(4.0, 9.0, samples)
+
     def edges(energy):
-        X = np.logspace(3, 10, samples)
-        P = tau_exit_probability(X, energy, beta_cm2g, density_gcm3)
-        peak = P.max()
-        ok = X[P >= fraction * peak]
+        p = tau_exit_probability(grid, energy, beta_cm2g, density_gcm3, inelasticity)
+        ok = grid[p >= fraction * p.max()]
         return float(ok.min()), float(ok.max())
 
     lo = edges(energy_min_pev)[0]
@@ -319,7 +367,7 @@ def earth_absorption_cutoff_deg(energy_pev, fraction=0.5, radius_m=EARTH_RADIUS_
 
     Returns a negative angle, or None when the cut lies below the horizon entirely.
     """
-    X = np.logspace(3, 10, 4000)
+    X = np.logspace(4, 9, 400)
     P = tau_exit_probability(X, energy_pev, **kw)
     upper = float(X[P >= fraction * P.max()].max())
     chord_m = upper / density_gcm3 / 100.0

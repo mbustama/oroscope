@@ -112,9 +112,21 @@ class TestTauRange(unittest.TestCase):
         # Saturating: each decade adds proportionally less
         self.assertLess(r[4] / r[3], r[1] / r[0])
 
-    def test_range_saturates_at_the_energy_loss_length(self):
-        huge = physics.tau_range_gcm2(1.0e9)
-        self.assertLess(huge, 1.0 / physics.TAU_ENERGY_LOSS_B_CM2G)
+    def test_range_grows_logarithmically_rather_than_saturating(self):
+        """
+        Decay and energy loss couple: R = X_loss ln(1 + X_decay/X_loss). An earlier
+        version combined them harmonically, which saturates at 1/beta and understates
+        the range by 2x at an EeV and 4x at 10 EeV.
+        """
+        beta = 0.5e-6
+        for e in (100.0, 1000.0, 10000.0):
+            x_decay = physics.tau_decay_length_m(e) * 100.0 * physics.CRUST_DENSITY_GCM3
+            x_loss = 1.0 / beta
+            expected = x_loss * math.log1p(x_decay / x_loss)
+            self.assertAlmostEqual(physics.tau_range_gcm2(e, beta_cm2g=beta), expected,
+                                   delta=1e-6 * expected)
+        # and it exceeds 1/beta at high energy, which the harmonic form never does
+        self.assertGreater(physics.tau_range_gcm2(10000.0, beta_cm2g=beta), 1.0 / beta)
 
     def test_the_band_narrows_with_energy_from_both_sides(self):
         """
@@ -432,25 +444,27 @@ class TestProductionEscapeOptimum(unittest.TestCase):
         peak = physics.tau_exit_probability(physics.production_escape_optimum_gcm2(e), e)
         self.assertLess(physics.tau_exit_probability(1.0e9, e), 0.1 * peak)
 
-    def test_the_optimum_is_where_the_closed_form_says(self):
+    def test_the_optimum_maximises_the_exit_probability(self):
         for e in (100.0, 1000.0, 10000.0):
             x = physics.production_escape_optimum_gcm2(e)
-            grid = np.logspace(math.log10(x) - 0.5, math.log10(x) + 0.5, 501)
-            p = physics.tau_exit_probability(grid, e)
-            self.assertAlmostEqual(grid[int(np.argmax(p))] / x, 1.0, delta=0.02)
+            p_at = physics.tau_exit_probability(x, e)
+            for factor in (0.3, 3.0):
+                self.assertLess(physics.tau_exit_probability(x * factor, e), p_at,
+                                msg=f"{e} PeV, factor {factor}")
 
-    def test_the_optimum_is_tens_of_km_of_rock_and_nearly_energy_independent(self):
+    def test_the_optimum_is_tens_of_km_of_rock(self):
         """
-        The headline number: 18-30 km of standard rock across GRAND's whole range.
-        Both the interaction length and the tau range move with energy and largely
-        cancel.
+        The headline number: 12 km of standard rock at 100 PeV rising to about 23 km
+        at 10 EeV. It rises because the tau range grows logarithmically, and flattens
+        because beta rises with energy and tempers that growth.
         """
         km = [physics.production_escape_optimum_gcm2(e) / physics.CRUST_DENSITY_GCM3 / 1e5
               for e in (100.0, 1000.0, 10000.0)]
         for v in km:
-            self.assertGreater(v, 15.0)
-            self.assertLess(v, 35.0)
-        self.assertLess(max(km) / min(km), 2.0)
+            self.assertGreater(v, 8.0)
+            self.assertLess(v, 30.0)
+        self.assertTrue(all(b > a for a, b in zip(km, km[1:])), f"should rise: {km}")
+        self.assertLess(km[2] / km[1], 1.5, "and then flatten")
 
     def test_the_band_is_about_two_decades_wide(self):
         """Column depth is an intrinsically weak discriminant, and says so."""
@@ -459,19 +473,40 @@ class TestProductionEscapeOptimum(unittest.TestCase):
         self.assertLess(lo, 1.0e6)
         self.assertGreater(hi, 1.0e7)
 
+    def test_beta_rises_with_energy_as_photonuclear_does(self):
+        betas = [physics.tau_energy_loss_beta(e) for e in (100.0, 1000.0, 10000.0)]
+        self.assertTrue(all(b > a for a, b in zip(betas, betas[1:])))
+        self.assertAlmostEqual(betas[0], 0.38e-6, delta=0.05e-6)
+        self.assertAlmostEqual(betas[2], 0.95e-6, delta=0.1e-6)
+
+    def test_a_zero_index_recovers_a_constant_beta(self):
+        self.assertEqual(physics.tau_energy_loss_beta(100.0, index=0.0),
+                         physics.tau_energy_loss_beta(10000.0, index=0.0))
+
+    def test_survival_is_sharper_than_a_simple_exponential(self):
+        """The tau loses energy as it goes, so its decay length shrinks en route."""
+        e = 1000.0
+        r = physics.tau_range_gcm2(e)
+        self.assertAlmostEqual(float(physics.tau_survival(r, e)), math.exp(-1.0), delta=0.02)
+        self.assertLess(float(physics.tau_survival(3 * r, e)), math.exp(-3.0))
+
+    def test_survival_reduces_to_an_exponential_without_energy_loss(self):
+        e = 1000.0
+        x_decay = physics.tau_decay_length_m(e) * 100.0 * physics.CRUST_DENSITY_GCM3
+        s = float(physics.tau_survival(1.0e6, e, beta_cm2g=1e-14))
+        self.assertAlmostEqual(s, math.exp(-1.0e6 / x_decay), places=5)
+
     def test_terrain_depths_sit_on_the_rising_side_of_the_optimum(self):
         """
         Measured Arequipa depths (median 2.0e6, p90 4.9e6 g/cm^2) fall below the
         optimum, so within what topography can supply, more rock is always better and
         the upper edge of the band never binds.
         """
-        e = 1000.0
-        opt = physics.production_escape_optimum_gcm2(e)
-        self.assertLess(4.9e6, opt * 1.2)
-        median_yield = physics.tau_exit_probability(2.0e6, e) / physics.tau_exit_probability(opt, e)
-        p90_yield = physics.tau_exit_probability(4.9e6, e) / physics.tau_exit_probability(opt, e)
-        self.assertGreater(median_yield, 0.5)
-        self.assertGreater(p90_yield, median_yield)
+        for e in (100.0, 1000.0, 10000.0):
+            opt = physics.production_escape_optimum_gcm2(e)
+            peak = physics.tau_exit_probability(opt, e)
+            p90 = physics.tau_exit_probability(4.9e6, e) / peak
+            self.assertGreater(p90, 0.9, msg=f"{e} PeV")
 
     def test_earth_absorption_narrows_the_window_with_energy(self):
         """
@@ -480,8 +515,8 @@ class TestProductionEscapeOptimum(unittest.TestCase):
         rises.
         """
         cuts = [physics.earth_absorption_cutoff_deg(e) for e in (100.0, 1000.0, 10000.0)]
-        self.assertAlmostEqual(cuts[0], -4.5, delta=0.4)
-        self.assertAlmostEqual(cuts[1], -2.1, delta=0.3)
+        self.assertAlmostEqual(cuts[0], -4.4, delta=0.4)
+        self.assertAlmostEqual(cuts[1], -2.0, delta=0.3)
         self.assertAlmostEqual(cuts[2], -1.0, delta=0.3)
         self.assertTrue(all(b > a for a, b in zip(cuts, cuts[1:])), "cut should climb")
 
@@ -492,3 +527,69 @@ class TestProductionEscapeOptimum(unittest.TestCase):
         loose = physics.production_escape_optimum_gcm2(1000.0, beta_cm2g=0.4e-6)
         tight = physics.production_escape_optimum_gcm2(1000.0, beta_cm2g=1.0e-6)
         self.assertGreater(loose, tight)
+
+    def test_inelasticity_lowers_the_tau_energy_and_so_its_reach(self):
+        """
+        The tau carries (1-y) of the neutrino energy, y about 0.2, so it is less
+        boosted and cannot reach back as far through the rock. The optimum itself is
+        too broad to shift measurably on a log grid, but the reach does.
+        """
+        deep = 1.0e7
+        full = physics.tau_exit_probability(deep, 1000.0, inelasticity=0.0)
+        real = physics.tau_exit_probability(deep, 1000.0, inelasticity=0.2)
+        self.assertLess(real, full)
+        self.assertGreater(real, 0.5 * full)
+
+
+class TestPhysicsVerification(unittest.TestCase):
+    """
+    Independent checks of the derivations, against limits and constructions rather
+    than against the code's own output.
+    """
+
+    def test_quadrature_reproduces_the_closed_form_for_exponential_survival(self):
+        """
+        Replacing the true survival with a simple exponential makes the exit integral
+        analytic; the numerical integration must reproduce it.
+        """
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        R = 3.0e6
+        for X in np.logspace(4, 8, 9):
+            x = np.linspace(0.0, X, 20000)
+            num = np.trapezoid(np.exp(-x / lam) / lam * np.exp(-(X - x) / R), x)
+            ana = R / (lam - R) * (np.exp(-X / lam) - np.exp(-X / R))
+            self.assertAlmostEqual(num / ana, 1.0, places=4)
+
+    def test_earth_chord_by_direct_construction(self):
+        """
+        From P = (0, R) a ray at theta below the tangent is Q(t) = (t cos, R - t sin);
+        |Q| = R gives t = 2R sin(theta). Verified by checking Q lands on the circle.
+        """
+        R = physics.EARTH_RADIUS_M
+        for th in (0.5, 1.0, 3.0, 30.0, 90.0):
+            t = physics.earth_chord_m(-th)
+            q = (t * math.cos(math.radians(th)), R - t * math.sin(math.radians(th)))
+            self.assertAlmostEqual(math.hypot(*q), R, delta=1.0,
+                                   msg=f"chord endpoint off the sphere at {th} deg")
+
+    def test_a_diameter_at_ninety_degrees(self):
+        self.assertAlmostEqual(physics.earth_chord_m(-90.0),
+                               2 * physics.EARTH_RADIUS_M, delta=1.0)
+
+    def test_decay_length_matches_the_published_tambo_range(self):
+        """Ref. [2] Fig. 1 annotates 50 m - 5 km for 1-100 PeV."""
+        self.assertAlmostEqual(physics.tau_decay_length_m(1.0), 49.0, delta=2.0)
+        self.assertAlmostEqual(physics.tau_decay_length_m(100.0) / 1000.0, 4.9, delta=0.2)
+
+    def test_interaction_length_is_hundreds_of_km_of_rock(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        km = lam / physics.CRUST_DENSITY_GCM3 / 1e5
+        self.assertGreater(km, 300.0)
+        self.assertLess(km, 1000.0)
+
+    def test_exit_probability_is_dimensionally_a_probability(self):
+        for e in (100.0, 1000.0, 10000.0):
+            for X in (1e5, 1e6, 1e7, 1e8):
+                v = physics.tau_exit_probability(X, e)
+                self.assertGreaterEqual(v, 0.0)
+                self.assertLessEqual(v, 1.0)
