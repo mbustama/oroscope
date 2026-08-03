@@ -113,6 +113,61 @@ def peak_energy_pev(min_dist_m, max_dist_m, energies_pev=None):
     return float(energies[int(np.argmax(decay))])
 
 
+def infer_response(published_energy_pev, published_value, area_km2, solid_angle_sr,
+                   min_dist_m, max_dist_m, min_model_fraction=1e-3):
+    """
+    Response function implied by a published curve, given our geometric model.
+
+    This is the useful thing to do with an integral aperture when no differential
+    acceptance table exists. Our model supplies the two factors terrain and kinematics
+    determine -- geometric aperture and the analytic tau decay probability -- so
+    dividing a published curve by them leaves everything else:
+
+        response(E) = published(E) / (area * Omega * P_decay(E))
+
+    What remains is the neutrino interaction and tau exit probability, the trigger
+    efficiency, and any normalisation the published configuration carries. Its *shape*
+    in energy is then usable as a weight for a site of the same experiment, which is
+    exactly the piece section 4.10 had to leave out.
+
+    The caveat is the same one that applies to the published curves themselves: they
+    are integral over one array and one site, so the inferred response inherits that
+    site's geometry. It is a better weight than a flat response, not a substitute for
+    a differential table.
+
+    Where the decay probability is negligible the division is ill-conditioned and the
+    ratio explodes -- at 0.35 PeV over a canyon baseline it is of order 1e-8 -- so
+    energies whose model value falls below ``min_model_fraction`` of its own peak are
+    excluded rather than allowed to dominate the normalisation.
+
+    Returns (energies_pev, response) over the well-conditioned range, normalised to 1
+    at its maximum.
+    """
+    energies = np.asarray(published_energy_pev, dtype=np.float64)
+    published = np.asarray(published_value, dtype=np.float64)
+    model = aperture_vs_energy(area_km2, solid_angle_sr, min_dist_m, max_dist_m, energies)
+
+    usable = model > min_model_fraction * model.max()
+    energies, published, model = energies[usable], published[usable], model[usable]
+    if energies.size == 0:
+        return energies, model
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        response = np.where(model > 0, published / model, 0.0)
+    peak = response.max()
+    return energies, (response / peak if peak > 0 else response)
+
+
+def load_curve_csv(path):
+    """
+    Loads a two-column digitized curve, returning (energy_pev, value).
+
+    The files under data/ store energy in GeV, as the published axes do.
+    """
+    table = np.loadtxt(path, delimiter=",", comments="#")
+    return table[:, 0] / 1.0e6, table[:, 1]
+
+
 def summarize_sites(site_details, min_dist_m, max_dist_m, energies_pev, response=None):
     """
     Aperture-versus-energy for every site that carries scan observables, plus the total.

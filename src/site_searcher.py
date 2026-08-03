@@ -133,87 +133,6 @@ except ImportError:
         def decorator(func): return func
         return decorator
 
-@jit(nopython=True, nogil=True, fastmath=True)
-def check_physics_chunk(candidate_subset, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km):
-    """
-    Core Physics Engine: Simulates Line-of-Sight (LoS) from detector pixels to target mountains.
-
-    This function utilizes Numba for C-level execution speeds. It casts a geometric ray outward
-    from each candidate pixel in the direction it faces (aspect). It calculates if a target
-    mountain interrupts the ray within the required distance limits, actively accounting for
-    the curvature of the Earth and a Fresnel zone clearance buffer.
-
-    The ray marches in real ground distance (metres) and converts to pixel offsets with a
-    separate scale per axis, because a geographic DEM's pixels are shorter east-west than
-    north-south. Stepping in raw pixels would otherwise skew every ray away from its aspect.
-
-    Parameters:
-    - candidate_subset (ndarray): An Nx3 array of [row, col, aspect_degrees] for candidate pixels.
-    - elevation (ndarray): The full 2D array of the Digital Elevation Model (DEM).
-    - cell_size_y (float): North-south size of one pixel in meters.
-    - cell_size_x (float): East-west size of one pixel in meters.
-    - rows, cols (int): Dimensions of the elevation array.
-    - fresnel_buffer (float): Altitude buffer in meters added to account for radio wave scattering.
-    - min_dist_km, max_dist_km (float): The valid distance bounds to find a target mountain.
-
-    Returns:
-    - tuple(list, list): Two lists containing the row and column indices of successful candidate pixels.
-    """
-    hits_r = []
-    hits_c = []
-
-    # Sample the ray every kilometre of ground distance between the two bounds
-    start_dist_m = int(min_dist_km * 1000)
-    end_dist_m   = int(max_dist_km * 1000)
-    step_m       = 1000
-
-    # Precompute Earth Curvature coefficient: 1 / (2 * Earth_Radius_in_meters)
-    # Using a standard 8500km effective radius often used in radio propagation models
-    inv_2R = 1.0 / (2 * 8500000.0)
-
-    n = candidate_subset.shape[0]
-    for i in range(n):
-        r = int(candidate_subset[i, 0])
-        c = int(candidate_subset[i, 1])
-        aspect_val = candidate_subset[i, 2]
-
-        # Calculate ray directional vectors based on pixel aspect
-        look_rad = np.radians(aspect_val)
-        sin_look = np.sin(look_rad)
-        cos_look = np.cos(look_rad)
-        my_elev = elevation[r, c]
-        has_target = False
-
-        # Ray casting loop: step outward from the pixel within the specified distance bounds
-        for dist_step in range(start_dist_m, end_dist_m, step_m):
-            dist_m = float(dist_step)
-            # Ground displacement (east, north) converted to pixels one axis at a time
-            dx = int(dist_m * sin_look / cell_size_x)
-            dy = int(dist_m * cos_look / cell_size_y)
-            target_r = r - dy # Subtract dy because image y-axis points downwards
-            target_c = c + dx
-
-            # Ensure target ray index remains within DEM boundaries
-            if target_r >= 0 and target_r < rows and target_c >= 0 and target_c < cols:
-                target_elev = elevation[target_r, target_c]
-                if np.isnan(target_elev): continue
-                
-                # Apply Earth Curvature drop calculation: drop = d^2 / 2R
-                curvature_drop = (dist_m ** 2) * inv_2R
-                apparent_height = target_elev - curvature_drop
-                
-                # Condition: Target must be taller than detector + required 1km interaction depth + Fresnel buffer
-                if apparent_height > (my_elev + 1000 + fresnel_buffer):
-                    has_target = True
-                    break
-                    
-        # If the ray successfully hit a valid target mountain, record the pixel
-        if has_target:
-            hits_r.append(r)
-            hits_c.append(c)
-            
-    return hits_r, hits_c
-
 @jit(nopython=True, fastmath=True)
 def is_point_in_poly(x, y, poly_verts):
     """
@@ -760,27 +679,6 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     if not candidates_list: return np.zeros((0, 3))
     return np.vstack(candidates_list)
 
-def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, num_cores, buf_a):
-    """
-    Step 3 Pipeline: Expensive Physics computation parallelized across CPU cores.
-    Distributes batches of candidates to the ray-caster and records successful hits to the buffer map.
-
-    Returns:
-    - int: Number of candidates that found a valid target.
-    """
-    batches = np.array_split(candidates_arr, num_cores * 4)
-    results = Parallel(n_jobs=num_cores)(
-        delayed(check_physics_chunk)(batch, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km)
-        for batch in tqdm(batches, desc="   Simulating", unit="batch", colour='magenta' if USE_COLOR else None)
-    )
-    # Reconstruct the boolean mask from returned ray-cast coordinates
-    n_hits = 0
-    for r_list, c_list in results:
-        buf_a[r_list, c_list] = True
-        n_hits += len(r_list)
-    buf_a.flush()
-    return n_hits
-
 def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
                      score_config=None, min_score=0.0, rfi_zones_px=None):
     """
@@ -1282,7 +1180,6 @@ identify suitable deployment sites for the GRAND array.
 {C.BOLD}Customizable Constraints & Processing Parameters:{C.RESET}
 - Slope Bounds: Customizable minimum and maximum terrain steepness in degrees.
 - RFI Zones: Accept pre-defined sets ('lima', 'arequipa') or custom geometry lists via JSON config.
-- Fresnel Buffer: Adds a vertical clearance margin (in meters) to the line-of-sight ray.
 - Map Resolution: Read from the DEM's own GeoTIFF tags, or forced via `--cell_size_deg`. Pixels
   are square in degrees but not in metres, so each axis carries its own ground scale.
 - Candidate Stride: Thins the candidate set before ray-tracing via `--candidate_stride`.
@@ -1384,12 +1281,12 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             search_mode='single', min_sub_array_size=100,
                             min_aspect_deg=None, max_aspect_deg=None,
                             min_slope_deg=3.0, max_slope_deg=25.0,
-                            region_name=None, fresnel_buffer=200.0, 
+                            region_name=None,
                             downsample_factor=4, run_output_dir=".", 
                             output_image_format='png', tile_size=2048,
                             resume=False, resume_dir=None, num_cores=-1,
                             candidate_stride=5, slope_baseline_m=None,
-                            physics_mode='legacy', energy_min_pev=None, energy_max_pev=None,
+                            energy_min_pev=None, energy_max_pev=None,
                             n_azimuths=9, azimuth_half_width_deg=60.0,
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
@@ -1398,9 +1295,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
                             min_score=0.0,
-                            geomag_declination_deg=physics.DEFAULT_GEOMAG_DECLINATION_DEG,
-                            geomag_inclination_deg=physics.DEFAULT_GEOMAG_INCLINATION_DEG,
+                            geomag_declination_deg=None, geomag_inclination_deg=None,
                             use_geomagnetic=True, grammage_mode='radio',
+                            muon_shielding_km=None,
                             nu_interaction_length_gcm2=None):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
@@ -1428,6 +1325,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         energy_note = f" (from {energy_min_pev:g}-{energy_max_pev:g} PeV)"
 
     observables = None
+
+    # Field for this site: inclination follows from its own coordinates, so moving
+    # the search elsewhere gets that right automatically (roadmap 4.12b)
+    geomag_declination_deg, geomag_inclination_deg = physics.default_field_for_site(
+        map_grid.center_lat, origin_lon, geomag_declination_deg, geomag_inclination_deg)
 
     # RFI sources as pixel coordinates, weighted by radius as a crude strength proxy.
     # The scan can then drop the ones terrain hides, which a circular exclusion cannot.
@@ -1465,9 +1367,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "cell_size_deg": cell_size_deg, "cell_size_y_m": cell_size_y,
         "cell_size_x_m": cell_size_x, "cell_size_center_lat": map_grid.center_lat,
         "cell_size_source": map_grid.source, "candidate_stride": candidate_stride,
-        "slope_baseline_m": slope_baseline_m, "physics_mode": physics_mode,
+        "slope_baseline_m": slope_baseline_m,
         "energy_min_pev": energy_min_pev, "energy_max_pev": energy_max_pev,
-        "scan": scan_params if physics_mode == "scan" else None,
+        "scan": scan_params,
         "refraction_k": refraction_k, "fresnel_frequency_mhz": fresnel_frequency_mhz,
         "antenna_height_m": antenna_height_m, "fresnel_near_field_m": fresnel_near_field_m,
         "exclude_near_field": exclude_near_field,
@@ -1477,11 +1379,12 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
+        "muon_shielding_km": muon_shielding_km,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
         "grid_type": grid_type, "road_map": road_map_path,
-        "fresnel_buffer": fresnel_buffer, "downsample_factor": downsample_factor,
+        "downsample_factor": downsample_factor,
         "min_altitude": min_altitude, "max_altitude": max_altitude,
         "min_slope_deg": min_slope_deg, "max_slope_deg": max_slope_deg,
         "tile_size": tile_size, "resume": resume, "resume_dir": resume_dir,
@@ -1498,17 +1401,15 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"   -> Min Width: {C.MAGENTA}{min_width_km} km{C.RESET}")
     print(f"   -> Slope Range: {C.MAGENTA}{min_slope_deg}° to {max_slope_deg}°{C.RESET}")
     print(f"   -> Target Dist: {C.MAGENTA}{min_dist_km:g} - {max_dist_km:g} km{C.RESET}{energy_note}")
-    print(f"   -> Physics Mode: {C.MAGENTA}{physics_mode}{C.RESET}")
-    if physics_mode == 'scan':
-        print(f"      Arrival window: {C.MAGENTA}{elev_min_deg:g}° to {elev_max_deg:g}°{C.RESET}"
-              f" in {n_elev_bins} bins, {n_azimuths} azimuths"
-              f"{f' within ±{azimuth_half_width_deg:g}° of aspect' if azimuth_half_width_deg is not None else ' (full sweep)'}")
-        print(f"      Requires: {C.MAGENTA}{'rock' if require_terrain else 'clear sky'}{C.RESET}"
-              f", min column depth {min_column_depth_gcm2:,.0f} g/cm²")
-        _lo = arrival_scan.energy_pev_for_decay_length(min_dist_km * 1000.0)
-        _hi = arrival_scan.energy_pev_for_decay_length(max_dist_km * 1000.0)
-        print(f"      Baseline implies tau energies {C.MAGENTA}{_lo:.3g} - {_hi:.3g} PeV{C.RESET}")
-    print(f"   -> Physics: Fresnel Buffer {C.MAGENTA}{fresnel_buffer}m{C.RESET} | Downsample Factor {C.MAGENTA}{downsample_factor}{C.RESET}")
+    print(f"      Arrival window: {C.MAGENTA}{elev_min_deg:g}° to {elev_max_deg:g}°{C.RESET}"
+          f" in {n_elev_bins} bins, {n_azimuths} azimuths"
+          f"{f' within ±{azimuth_half_width_deg:g}° of aspect' if azimuth_half_width_deg is not None else ' (full sweep)'}")
+    print(f"      Requires: {C.MAGENTA}{'rock' if require_terrain else 'clear sky'}{C.RESET}"
+          f", min column depth {min_column_depth_gcm2:,.0f} g/cm²")
+    _lo = arrival_scan.energy_pev_for_decay_length(min_dist_km * 1000.0)
+    _hi = arrival_scan.energy_pev_for_decay_length(max_dist_km * 1000.0)
+    print(f"      Baseline implies tau energies {C.MAGENTA}{_lo:.3g} - {_hi:.3g} PeV{C.RESET}")
+    print(f"   -> Downsample Factor: {C.MAGENTA}{downsample_factor}{C.RESET}")
     print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
     print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
     print(f"   -> Candidate Stride: {C.MAGENTA}every {candidate_stride} px{C.RESET}")
@@ -1596,21 +1497,18 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             # Step 3: Physics Simulation
             print(f"\n{C.BOLD}[3/6]{C.RESET} {Icon.GEAR}Ray Tracing ({C.MAGENTA}{total}{C.RESET} candidates)...")
             t0 = time.time()
-            if physics_mode == 'scan':
-                n_hits, observables = run_arrival_scan(
+            n_hits, observables = run_arrival_scan(
                     candidates_arr, elevation, map_grid, buf_a, scan_params,
                     score_config={"depth_band_gcm2": depth_band_gcm2,
                                   "composition": score_composition,
                                   "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
                                   "spacing_m": antenna_spacing_km * 1000.0,
-                                  "grammage_mode": grammage_mode},
-                    min_score=min_score, rfi_zones_px=rfi_zones_px)
-                funnel.add("directions accepted", n_hits)
-                if min_score > 0:
-                    funnel.add(f"score >= {min_score:g}", n_hits)
-            else:
-                n_hits = run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
-                funnel.add("ray-tracing hits", n_hits)
+                                  "grammage_mode": grammage_mode,
+                                  "muon_shielding_km": muon_shielding_km},
+                min_score=min_score, rfi_zones_px=rfi_zones_px)
+            funnel.add("directions accepted", n_hits)
+            if min_score > 0:
+                funnel.add(f"score >= {min_score:g}", n_hits)
             timings["ray_tracing"] = time.time() - t0
             print(f"      Time: {timings['ray_tracing']:.2f}s")
         else:
@@ -1653,9 +1551,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             min_altitude, max_altitude, region_name, export_params,
             run_info={"funnel": funnel.as_dict(), "regions": region_stats,
                       "timings_sec": timings, "provenance": provenance,
-                      "aperture": (aperture_mod.summarize_sites(
+                      "aperture": aperture_mod.summarize_sites(
                           site_details, min_dist_km * 1000.0, max_dist_km * 1000.0,
-                          np.logspace(0, 5, 26)) if physics_mode == 'scan' else {})}
+                          np.logspace(0, 5, 26))}
         )
         timings["outputs"] = time.time() - t0
         print(f"      Time Elapsed: {timings['outputs']:.2f}s")
@@ -1753,7 +1651,6 @@ if __name__ == "__main__":
     # Internal Math & Physics Parameters
     parser.add_argument("--min_slope_deg", type=float, default=3.0, help="Minimum terrain steepness in degrees (default: 3.0).")
     parser.add_argument("--max_slope_deg", type=float, default=25.0, help="Maximum terrain steepness in degrees (default: 25.0).")
-    parser.add_argument("--fresnel_buffer", type=float, default=200.0, help="Clearance margin (in meters) for line-of-sight ray tracing (default: 200.0).")
     parser.add_argument("--downsample_factor", type=int, default=4, help="Internal capacity mask downsampling factor for processing speed (default: 4).")
     parser.add_argument("--cell_size_deg", type=float, default=None, help="Map resolution in degrees per pixel. Defaults to reading the DEM's GeoTIFF tags.")
     parser.add_argument("--slope_baseline_m", type=float, default=None, help="Ground distance in metres over which slope is measured. Default: the DEM's native resolution.")
@@ -1762,7 +1659,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_cores", type=int, default=-1, help="Number of CPU cores to use. Set to -1 to use all available cores (default: -1).")
     
     # Arrival-direction scan (roadmap phase 1)
-    parser.add_argument("--physics_mode", type=str, choices=['legacy', 'scan'], default='legacy', help="'legacy' casts one ray per pixel; 'scan' scans arrival directions and computes column depth (default: legacy).")
     parser.add_argument("--energy_min_pev", type=float, default=None, help="Lower tau energy in PeV. With --energy_max_pev, derives the decay-baseline distance window.")
     parser.add_argument("--energy_max_pev", type=float, default=None, help="Upper tau energy in PeV.")
     parser.add_argument("--n_azimuths", type=int, default=9, help="Azimuths scanned per candidate in scan mode (default: 9).")
@@ -1777,8 +1673,9 @@ if __name__ == "__main__":
     parser.add_argument("--antenna_height_m", type=float, default=2.0, help="Antenna height above ground, for the Fresnel measurement (default: 2).")
     parser.add_argument("--include_near_field", action="store_false", dest="exclude_near_field", help="Measure Fresnel clearance from the antenna outward instead of skipping the near field. Included for study: the result is then dominated by ground beside the antenna rather than by intervening terrain.")
     parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
-    parser.add_argument("--geomag_declination_deg", type=float, default=-6.9, help="Geomagnetic declination, degrees east of north (default: -6.9, IGRF 2026 at Arequipa). Replace with IGRF values for your site.")
-    parser.add_argument("--geomag_inclination_deg", type=float, default=-14.0, help="Geomagnetic inclination, degrees, positive downward (default: -14.0, a centered-dipole estimate at Arequipa). Replace with IGRF values for your site.")
+    parser.add_argument("--muon_shielding_km", type=float, default=None, help="Rock overburden required along the arrival direction to reject atmospheric muons, in km (TAMBO quotes >4). A floor on column depth, not a band.")
+    parser.add_argument("--geomag_declination_deg", type=float, default=None, help="Geomagnetic declination, degrees east of north. Defaults to the Arequipa IGRF 2026 value (-6.9); supply the IGRF value for other regions.")
+    parser.add_argument("--geomag_inclination_deg", type=float, default=None, help="Geomagnetic inclination, degrees, positive downward. Defaults to a centered-dipole estimate at the DEM's own centre, so it follows the site automatically.")
     parser.add_argument("--no_geomagnetic", action="store_false", dest="use_geomagnetic", help="Ignore the geomagnetic angle and weight all directions equally.")
     parser.add_argument("--grammage_mode", type=str, choices=['radio', 'particle'], default='radio', help="How atmospheric depth is scored. 'radio' is a maturity threshold, since emission comes from shower maximum and then propagates through transparent air. 'particle' is a band, since particle content dies after maximum (default: radio).")
     parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
@@ -1833,12 +1730,10 @@ if __name__ == "__main__":
             "min_dist_km": 10.0,
             "max_dist_km": 80.0,
             "grid_type": "hex",
-            "fresnel_buffer": 200.0,
             "downsample_factor": 4,
             "cell_size_deg": None,
             "candidate_stride": 5,
             "slope_baseline_m": None,
-            "physics_mode": "legacy",
             "energy_min_pev": None,
             "energy_max_pev": None,
             "n_azimuths": 9,
@@ -1853,8 +1748,9 @@ if __name__ == "__main__":
             "fresnel_near_field_m": 500.0,
             "refraction_k": None,
             "depth_band_gcm2": None,
-            "geomag_declination_deg": -6.9,
-            "geomag_inclination_deg": -14.0,
+            "geomag_declination_deg": None,
+            "geomag_inclination_deg": None,
+            "muon_shielding_km": None,
             "use_geomagnetic": True,
             "grammage_mode": "radio",
             "nu_interaction_length_gcm2": None,
@@ -2027,7 +1923,6 @@ if __name__ == "__main__":
         min_slope_deg=final_params['min_slope_deg'],
         max_slope_deg=final_params['max_slope_deg'],
         region_name=final_params['region_name'],
-        fresnel_buffer=final_params['fresnel_buffer'],
         downsample_factor=final_params['downsample_factor'],
         run_output_dir=run_output_dir,
         output_image_format=final_params['output_image_format'],
@@ -2038,7 +1933,6 @@ if __name__ == "__main__":
         cell_size_deg=final_params.get('cell_size_deg'),
         candidate_stride=final_params.get('candidate_stride', 5),
         slope_baseline_m=final_params.get('slope_baseline_m'),
-        physics_mode=final_params.get('physics_mode', 'legacy'),
         energy_min_pev=final_params.get('energy_min_pev'),
         energy_max_pev=final_params.get('energy_max_pev'),
         n_azimuths=final_params.get('n_azimuths', 9),
@@ -2058,8 +1952,9 @@ if __name__ == "__main__":
                          if final_params.get('depth_band_gcm2') else None),
         score_composition=final_params.get('score_composition', 'product'),
         min_score=final_params.get('min_score', 0.0),
-        geomag_declination_deg=final_params.get('geomag_declination_deg', -6.9),
-        geomag_inclination_deg=final_params.get('geomag_inclination_deg', -14.0),
+        geomag_declination_deg=final_params.get('geomag_declination_deg'),
+        geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
+        muon_shielding_km=final_params.get('muon_shielding_km'),
         use_geomagnetic=final_params.get('use_geomagnetic', True),
         grammage_mode=final_params.get('grammage_mode', 'radio'),
         nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')

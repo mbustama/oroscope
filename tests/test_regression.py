@@ -76,10 +76,26 @@ class TestSyntheticRegression(GoldenCase):
     def test_finds_at_least_one_site(self):
         self.assertGreater(self.results["results"]["total_sites"], 0)
 
-    def test_sites_face_the_ridge(self):
-        """Terrain east of the valley slopes down to the west, toward the ridge."""
-        for site in self.results["results"]["sites"]:
-            self.assertIn(site["facing_direction"], ("W", "SW", "NW"))
+    def test_both_valley_flanks_are_found(self):
+        """
+        The scan finds targets on both sides of the valley: the slope east of it sees
+        the ridge, and the ridge's own eastern flank sees the terrain rising beyond.
+
+        A single ray cast along each pixel's aspect only ever caught the first of the
+        two, which is the concrete form of the 2.2x under-acceptance measured in the
+        review (roadmap 2.1).
+        """
+        facings = [s["facing_direction"] for s in self.results["results"]["sites"]]
+        self.assertGreaterEqual(len(facings), 2)
+        self.assertTrue(any(f in ("W", "SW", "NW") for f in facings),
+                        f"expected a west-facing site, got {facings}")
+        self.assertTrue(any(f in ("E", "SE", "NE") for f in facings),
+                        f"expected an east-facing site, got {facings}")
+
+    def test_the_larger_site_is_the_one_facing_the_ridge(self):
+        sites = self.results["results"]["sites"]
+        largest = max(sites, key=lambda s: s["area_km2"])
+        self.assertIn(largest["facing_direction"], ("W", "SW", "NW"))
 
     def test_provenance_and_timings_are_recorded(self):
         self.assertIn("timings_sec", self.results)
@@ -104,7 +120,7 @@ class TestScanModePipeline(unittest.TestCase):
                                           ORIGIN_LAT, ORIGIN_LON)
         cls.results = run_pipeline(
             cls.dem, os.path.join(cls.tmp, "out"), ORIGIN_LAT, ORIGIN_LON,
-            physics_mode="scan", n_azimuths=5, n_elev_bins=6,
+            n_azimuths=5, n_elev_bins=6,
             min_dist_km=2.0, max_dist_km=15.0, tile_size=350)
 
     @classmethod
@@ -136,7 +152,6 @@ class TestScanModePipeline(unittest.TestCase):
 
     def test_parameters_record_the_scan_configuration(self):
         params = self.results["parameters"]
-        self.assertEqual(params["physics_mode"], "scan")
         self.assertIsNotNone(params["scan"])
         self.assertEqual(params["scan"]["n_azimuths"], 5)
 
@@ -152,7 +167,7 @@ class TestEnergyDerivedWindow(unittest.TestCase):
             dem = synthetic.write_geotiff(os.path.join(tmp, "ridge.tif"), z,
                                           ORIGIN_LAT, ORIGIN_LON)
             results = run_pipeline(dem, os.path.join(tmp, "out"), ORIGIN_LAT, ORIGIN_LON,
-                                   physics_mode="scan", n_azimuths=3, n_elev_bins=4,
+                                   n_azimuths=3, n_elev_bins=4,
                                    energy_min_pev=1.0, energy_max_pev=100.0,
                                    tile_size=250)
             params = results["parameters"]

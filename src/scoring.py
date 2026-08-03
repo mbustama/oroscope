@@ -144,6 +144,9 @@ DEFAULT_SCORE_CONFIG = {
     "nu_interaction_length_gcm2": None,
     # Antenna spacing, for comparing the array to the radio footprint
     "spacing_m": None,
+    # Rock overburden required along the arrival direction to reject atmospheric muons.
+    # A floor, not a band: more rock is always better for background rejection.
+    "muon_shielding_km": None,
     "distance_band_m": None,           # defaults to the configured decay-baseline window
     "solid_angle_half_sr": 0.05,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
@@ -184,6 +187,13 @@ def score_candidates(observables, config=None, distance_window_m=None):
     }
     if dist_band:
         components["distance"] = band_score(dist, *dist_band)
+
+    # Muon shielding: a hard floor on column depth. A direction with less rock behind
+    # it than this cannot claim neutrino purity, so it scores zero outright.
+    shielding_km = cfg.get("muon_shielding_km")
+    if shielding_km:
+        required = physics.muon_shielding_gcm2(shielding_km)
+        components["muon_shielding"] = (depth >= required).astype(np.float64)
 
     # Geomagnetic: the mean sin(alpha) over accepted directions. A site whose targets
     # all lie along the field radiates little geomagnetic signal however good its

@@ -147,6 +147,30 @@ def neutrino_survival(elevation_deg, interaction_length_gcm2,
                     / interaction_length_gcm2)
 
 
+# ------------------------------------------------------- muon shielding
+
+# Rock overburden a detector wants along the arrival direction so that atmospheric
+# muons from that direction cannot reach it. Ref. [2] Fig. 1 annotates >4 km for TAMBO.
+DEFAULT_MUON_SHIELDING_KM = 4.0
+
+
+def muon_shielding_gcm2(thickness_km, density_gcm3=CRUST_DENSITY_GCM3):
+    """
+    Column depth corresponding to a rock thickness, for muon rejection.
+
+    A mountain in the arrival direction is a muon filter: an air-shower muon from that
+    direction would have to cross the whole thickness, which a few km of rock makes
+    impossible. Anything detected from behind that much rock is therefore not a
+    cosmic-ray muon, which is what lets a surface array claim neutrino purity.
+
+    Unlike the production-and-escape band, this is a **floor**: more rock is always
+    better for background rejection, and only the signal side wants an upper limit.
+
+    4 km of standard rock is about 1.06e6 g/cm^2.
+    """
+    return thickness_km * 1000.0 * 100.0 * density_gcm3
+
+
 # ---------------------------------------------------------------- tau range
 
 def tau_decay_length_m(energy_pev, mass_gev=1.77686, ctau_m=87.03e-6):
@@ -243,6 +267,30 @@ def centered_dipole_inclination(latitude_deg, longitude_deg, **kw):
     """
     mlat = math.radians(geomagnetic_latitude_deg(latitude_deg, longitude_deg, **kw))
     return math.degrees(math.atan(2.0 * math.tan(mlat)))
+
+
+def default_field_for_site(latitude_deg, longitude_deg,
+                           declination_deg=None, inclination_deg=None):
+    """
+    Geomagnetic field for an arbitrary site, falling back sensibly.
+
+    Inclination is computed from the site's own coordinates with the dipole model, so
+    moving the search to another location gets the right inclination automatically --
+    it is the quantity that varies most across Peru, from about -5 degrees near Lima to
+    -14 near Arequipa.
+
+    Declination cannot be had that way: the dipole gives about -0.2 degrees at Arequipa
+    against an IGRF -6.9, so non-dipole terms dominate. It therefore falls back to the
+    Arequipa IGRF value, which is right for the prototype region and approximately
+    right for the rest of southern Peru. Supply the IGRF declination for anywhere else.
+
+    Returns (declination_deg, inclination_deg).
+    """
+    if declination_deg is None:
+        declination_deg = DEFAULT_GEOMAG_DECLINATION_DEG
+    if inclination_deg is None:
+        inclination_deg = centered_dipole_inclination(latitude_deg, longitude_deg)
+    return float(declination_deg), float(inclination_deg)
 
 
 def geomagnetic_unit_vector(declination_deg, inclination_deg):

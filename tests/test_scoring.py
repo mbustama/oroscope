@@ -6,6 +6,7 @@ but the invariants it must satisfy regardless of normalisation can be, and are.
 """
 
 import math
+import os
 import unittest
 
 import numpy as np
@@ -284,3 +285,104 @@ class TestSiteSummary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDigitizedCurves(unittest.TestCase):
+    """
+    The published curves, hand-digitized from the figures into data/.
+
+    These are transcriptions of vector figures, not the collaborations' tabulated
+    values, so the tests check internal consistency and documented properties rather
+    than exact numbers.
+    """
+
+    DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+    def test_tambo_curve_loads_and_covers_the_published_range(self):
+        e, a = aperture.load_curve_csv(os.path.join(self.DATA, "tambo_aperture_fig3.csv"))
+        self.assertLess(e.min(), 1.0)          # below a PeV
+        self.assertGreater(e.max(), 1000.0)    # above an EeV
+        self.assertTrue(np.all(np.diff(e) > 0))
+
+    def test_tambo_aperture_rises_monotonically(self):
+        """Non-decreasing: the running maximum used to clean the trace leaves plateaus."""
+        _, a = aperture.load_curve_csv(os.path.join(self.DATA, "tambo_aperture_fig3.csv"))
+        self.assertTrue(np.all(np.diff(a) >= 0))
+        self.assertGreater(a[-1] / a[0], 100.0)
+
+    def test_tambo_aperture_flattens_above_an_eev(self):
+        """The paper states the aperture flattens above 1 EeV."""
+        e, a = aperture.load_curve_csv(os.path.join(self.DATA, "tambo_aperture_fig3.csv"))
+        high = a[e > 1000.0]
+        self.assertGreater(len(high), 3)
+        self.assertLess(high.max() / high.min(), 2.0)
+        self.assertAlmostEqual(high.max(), 6.7e4, delta=2e4)
+
+    def test_tambo_crosses_icecube_scale_near_a_few_pev(self):
+        """Above ~3 PeV the published aperture exceeds IceCube's, of order 1e2-1e3."""
+        e, a = aperture.load_curve_csv(os.path.join(self.DATA, "tambo_aperture_fig3.csv"))
+        at_3pev = 10 ** np.interp(np.log10(3.0), np.log10(e), np.log10(a))
+        self.assertGreater(at_3pev, 1.0e2)
+        self.assertLess(at_3pev, 1.0e4)
+
+    def test_grand_effective_area_loads_and_rises(self):
+        e, a = aperture.load_curve_csv(
+            os.path.join(self.DATA, "grand_effective_area_fig25.csv"))
+        self.assertGreater(e.min(), 50.0)         # 1e8 GeV = 100 PeV
+        self.assertLess(e.min(), 200.0)
+        self.assertTrue(np.all(np.diff(a) >= 0))
+        self.assertGreater(a[-1] / a[0], 10.0)
+
+    def test_grand_effective_area_is_of_the_published_order(self):
+        """Fig. 25 shows ~1e10 cm^2 around an EeV for GRAND10k."""
+        e, a = aperture.load_curve_csv(
+            os.path.join(self.DATA, "grand_effective_area_fig25.csv"))
+        at_1eev = 10 ** np.interp(np.log10(1000.0), np.log10(e), np.log10(a))
+        self.assertGreater(at_1eev, 1e9)
+        self.assertLess(at_1eev, 1e11)
+
+
+class TestInferredResponse(unittest.TestCase):
+    """
+    Dividing a published curve by our geometric and decay factors leaves the response.
+
+    This is what makes an integral published curve useful without a differential
+    acceptance table: whatever remains after the terrain and kinematics are divided out
+    is the neutrino-interaction, tau-exit and trigger physics, and its energy shape can
+    weight a site of the same experiment.
+    """
+
+    DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+    def setUp(self):
+        e, a = aperture.load_curve_csv(os.path.join(self.DATA, "tambo_aperture_fig3.csv"))
+        self.energy, self.response = aperture.infer_response(
+            e, a, area_km2=100.0, solid_angle_sr=0.05,
+            min_dist_m=300.0, max_dist_m=4500.0)
+
+    def test_ill_conditioned_energies_are_excluded(self):
+        """Where the decay probability is ~1e-8 the ratio is meaningless."""
+        self.assertGreater(self.energy.min(), 0.5)
+
+    def test_response_is_normalised_to_its_peak(self):
+        self.assertAlmostEqual(float(self.response.max()), 1.0, places=9)
+
+    def test_response_rises_with_energy_where_it_is_well_conditioned(self):
+        well = self.energy > 60.0
+        r = self.response[well]
+        self.assertGreater(len(r), 5)
+        self.assertTrue(np.all(np.diff(r) > 0), "response should rise above ~60 PeV")
+
+    def test_the_rise_is_roughly_a_power_law(self):
+        """Slope near E^1.2, consistent with a rising cross-section and tau range."""
+        well = self.energy > 60.0
+        slope = np.polyfit(np.log10(self.energy[well]), np.log10(self.response[well]), 1)[0]
+        self.assertGreater(slope, 0.7)
+        self.assertLess(slope, 2.0)
+
+    def test_a_flat_published_curve_infers_the_inverse_decay_shape(self):
+        """Sanity: dividing out a known model returns what was divided."""
+        e = np.logspace(1, 4, 30)
+        model = aperture.aperture_vs_energy(100.0, 0.05, 300.0, 4500.0, e)
+        _, r = aperture.infer_response(e, model, 100.0, 0.05, 300.0, 4500.0)
+        np.testing.assert_allclose(r, np.ones_like(r), rtol=1e-9)

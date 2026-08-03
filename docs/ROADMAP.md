@@ -528,12 +528,33 @@ What is validated:
 - the τ decay length reproduces ref. [2]'s quoted 50 m – 5 km for 1–100 PeV;
 - the Colca fixture reproduces the published 1.5 km depth and 4.5 km separation.
 
-What is **not** validated, and why. Ref. [1] Fig. 25 and ref. [2] Fig. 3 are integral
-over a whole array, all geometries and one site, so they cannot be applied per pixel;
-they can anchor the normalisation once supplied *as data*. Reading numbers off a
-published figure by eye is not a measurement, so the module provides the machinery to
-compare against a supplied curve rather than a transcription of one. Supplying either
-curve as a two-column CSV would close this.
+**Both published curves are now digitized** into `data/`, at the request of the
+project. They were traced programmatically rather than read by eye: the plot frame and
+major ticks were located from the rendered vector figure, and the curves extracted by
+colour.
+
+Ref. [1] Fig. 25 carries its own calibration check. The caption states the GRAND200k
+curve is exactly 20x the GRAND10k one, and tracing both independently gives ratios of
+**19.9-20.1** across the well-resolved range, which validates the axis calibration and
+the tracing to about 0.5%. The TAMBO curve reproduces the paper's stated flattening
+above 1 EeV, at 6.7e4 m^2 sr.
+
+They remain transcriptions of figures, not tabulated values, and both are integral
+over one array and one site, so they still cannot weight individual pixels.
+
+**What they do enable is inferring the response.** Dividing a published curve by the
+two factors this tool computes -- geometric aperture and the analytic decay
+probability -- leaves everything else:
+
+    response(E) = published(E) / (area * Omega * P_decay(E))
+
+which is the neutrino-interaction, tau-exit and trigger physics that section 4.10 had
+to leave out. Applied to the TAMBO curve it is well-conditioned above about 60 PeV and
+rises roughly as **E^1.2**, consistent with a rising cross-section and lengthening tau
+range. Below that the decay probability is small enough that the division is
+meaningless, and `infer_response()` excludes that region rather than letting it
+dominate. This is a better weight than a flat response, not a substitute for a
+differential table.
 
 ### 4.4.1 Correction: particle geometry and radio propagation need different radii ✅
 
