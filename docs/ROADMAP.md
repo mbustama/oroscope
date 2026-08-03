@@ -724,6 +724,71 @@ phase 2 conclusion that criteria are per-channel.
 **Not worth modelling for ranking:** Galactic background noise sets the absolute
 trigger threshold but is site-independent, so it cancels in a comparison (§4.10).
 
+### 4.13 The production-and-escape optimum ✅ estimated
+
+The one substantive physics input still missing was a column-depth band with a basis.
+It can be derived rather than assumed.
+
+Two processes compete along a slab of column depth X. The neutrino must interact,
+which happens at depth x with probability `exp(-x/λ) dx/λ`; the tau must then cross
+the remaining `X - x`, surviving as `exp(-(X-x)/R)`. Integrating:
+
+```
+P(X) = R/(λ - R) · [exp(-X/λ) - exp(-X/R)]
+X_peak = λR/(λ - R) · ln(λ/R)
+```
+
+with λ the neutrino interaction length and R the tau range in rock.
+
+**The optimum is 18–30 km of standard rock, and barely moves with energy:**
+
+| E | λ_ν [g/cm²] | R_τ [g/cm²] | X_peak [g/cm²] | X_peak [km rock] |
+| --- | --- | --- | --- | --- |
+| 100 PeV | 3.8×10⁸ | 7.9×10⁵ | 4.9×10⁶ | 18.4 |
+| 1 EeV | 1.7×10⁸ | 1.7×10⁶ | 8.0×10⁶ | 30.1 |
+| 10 EeV | 7.2×10⁷ | 2.0×10⁶ | 7.3×10⁶ | 27.5 |
+
+Both terms move with energy and largely cancel. Three consequences follow, and they
+change how the criterion should be applied.
+
+**(i) Topography sits on the rising side of the optimum.** Measured on the Arequipa
+crop, the median column depth is 2.0×10⁶ g/cm² (7.5 km of rock) and the p90 is
+4.9×10⁶ (18.5 km) — at or below X_peak. Relative yield:
+
+| depth | km rock | yield at 100 PeV | at 1 EeV | at 10 EeV |
+| --- | --- | --- | --- | --- |
+| median 2.0×10⁶ | 7.5 | 0.93 | 0.71 | 0.69 |
+| p90 4.9×10⁶ | 18.5 | 1.00 | 0.97 | 0.97 |
+
+So within what mountains can supply, **more rock is always better** and the upper edge
+of the band never binds. The depth criterion should be a rising ramp over the
+accessible range, not a band — the band shape only matters for the Earth chord.
+
+**(ii) The band is two decades wide at half maximum**, roughly 10⁶ to 10⁸ g/cm².
+Column depth is an intrinsically weak discriminant, and the criterion should not
+pretend otherwise.
+
+**(iii) The upper limit lives in the Earth chord, and narrows the window with energy.**
+Setting the chord `2R sin θ` equal to the upper band edge gives the elevation at which
+acceptance has halved:
+
+| E | chord [km] | elevation |
+| --- | --- | --- |
+| 100 PeV | 1005 | −4.5° |
+| 1 EeV | 468 | −2.1° |
+| 10 EeV | 224 | −1.0° |
+
+At 100 PeV the cut lies outside the ±3° window and nothing is lost. By an EeV it has
+eaten the bottom third; by 10 EeV, two thirds. **The effective arrival window is not a
+fixed ±3° but an energy-dependent one whose lower edge climbs toward the horizon.**
+That is worth confirming against the collaboration's own acceptance, since it predicts
+a specific narrowing.
+
+Caveats. The survival term treats the tau as surviving or not, where it really exits
+with degraded energy, so the thick-rock side is optimistic. And β is uncertain to a
+factor of two, moving X_peak roughly in proportion. Neither affects (i), which is the
+conclusion that matters for site selection.
+
 ### 4.10 Working without a differential acceptance table (decided 2026-08-03)
 
 No such table is available at present. That blocks **absolute apertures**, but not
@@ -857,23 +922,18 @@ rasterio/pyproj for CRS and outputs; `--explain` funnel report; parameter sweeps
 
 ## 7. Open questions
 
-1. **A column-depth band for GRAND above 100 PeV.** Now the highest-value input.
-   Section 4.2.4 showed the geometric test barely discriminates in Andean terrain, so
-   the depth band decides nearly everything the tool selects. The scan measures a
-   median of ~2×10⁶ g/cm² (about 7.5 km of standard rock) across accepted candidates;
-   the default band is a placeholder. A band grounded in the τ production-and-escape
-   optimum would make §4.8 physical rather than merely ordinal.
-2. **Score composition** (§4.8): `product`, `mean` or `min` as the default? Now
-   answerable from real score distributions rather than in the abstract.
-3. **TAMBO muon shielding** (§5.1): is ">4 km rock" from ref. [2] Fig. 1 a
-   site-selection criterion, or a description of the geometry?
-4. **A published aperture curve as data** (§4.9). Either ref. [1] Fig. 25 or ref. [2]
-   Fig. 3 as a two-column CSV would let the tool's shape be checked against a
-   measured one, and would fix the normalisation.
-
-Answered and folded into the plan: the differential acceptance table is unavailable
-(§4.10 records how phase 1 proceeded without it), and TAMBO spacing starts at 100 m
-(§5.2).
+1. **~~A column-depth band for GRAND above 100 PeV~~** — estimated, §4.13.
+2. **~~Score composition~~** — implemented; `product` is the default.
+3. **~~TAMBO muon shielding~~** — implemented as `--muon_shielding_km`, default off.
+4. **~~A published aperture curve as data~~** — both digitized into `data/`.
+5. **IGRF field values per site.** Inclination now follows the DEM's own coordinates;
+   declination still falls back to the Arequipa value and should be supplied per site.
+6. **The tau survival model** (§4.13). The exit probability treats the tau as surviving
+   or not, where in reality it exits with degraded energy, so the thick-rock side is
+   optimistic. Replacing it with an energy-degrading treatment would sharpen the upper
+   edge of the band — though not the conclusion that topography sits below the optimum.
+7. **Beta, the tau energy-loss constant**, is uncertain to a factor of two and moves the
+   optimum roughly in proportion. Worth pinning to whatever the collaboration uses.
 
 ---
 

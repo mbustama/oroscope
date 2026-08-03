@@ -14,6 +14,8 @@ approximation, the docstring says so.
 
 import math
 
+import numpy as np
+
 # Atmosphere: an exponential isothermal approximation, adequate over the few km of
 # relief a site search spans.
 SEA_LEVEL_DENSITY_KGM3 = 1.225
@@ -197,25 +199,134 @@ def tau_range_gcm2(energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
     return x_decay * x_loss / (x_decay + x_loss)
 
 
-def depth_band_from_energy(energy_min_pev, energy_max_pev, low_factor=0.3,
-                           high_factor=3.0, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
-                           density_gcm3=CRUST_DENSITY_GCM3):
+# Charged-current nu-N cross-section, a power-law fit of the standard
+# parameterisations: sigma = A (E/GeV)^n cm^2. Good to tens of per cent over
+# 1e8-1e10 GeV and an extrapolation above that, where no data constrain it.
+SIGMA_CC_COEFF_CM2 = 6.04e-36
+SIGMA_CC_INDEX = 0.358
+AVOGADRO = 6.022e23
+
+
+def cc_cross_section_cm2(energy_pev):
+    """Charged-current neutrino-nucleon cross-section."""
+    return SIGMA_CC_COEFF_CM2 * (energy_pev * 1.0e6) ** SIGMA_CC_INDEX
+
+
+def neutrino_interaction_length_gcm2(energy_pev):
     """
-    Column-depth band implied by an energy range.
+    Column depth over which a neutrino interacts once, ``1/(N_A sigma)``.
 
-    The tau must be produced, which needs rock, and must escape, which limits how much,
-    so the useful depth sits around the tau range and the criterion is a band. The
-    range grows with energy, so the band moves too -- a fixed band cannot be right for
-    both ends of a wide energy interval.
+    Falls from about 3.8e8 g/cm^2 at 100 PeV to 7e7 at 10 EeV.
+    """
+    return 1.0 / (AVOGADRO * cc_cross_section_cm2(energy_pev))
 
-    ``low_factor`` and ``high_factor`` set how far either side of the range the band
-    extends; the defaults are deliberately generous.
+
+def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
+                         density_gcm3=CRUST_DENSITY_GCM3):
+    """
+    Relative probability that a traversing neutrino yields a tau that escapes.
+
+    Two processes compete along a slab of column depth X. The neutrino must interact,
+    which happens at depth x with probability ``exp(-x/lambda) dx/lambda``; and the tau
+    then has to cross the remaining ``X - x``, surviving as ``exp(-(X-x)/R)``.
+    Integrating,
+
+        P(X) = R/(lambda - R) * [exp(-X/lambda) - exp(-X/R)]
+
+    which rises linearly as ``X/lambda`` for thin slabs, peaks, then falls as the
+    neutrino flux itself is absorbed. It is the quantitative form of "the tau must be
+    produced and must escape".
+
+    Relative, not absolute: normalisation needs the trigger response (see aperture.py).
+
+    Caveats worth keeping in view. The survival term treats the tau as surviving or not,
+    where in reality it exits with degraded energy, so the fall-off on the thick side is
+    optimistic. And ``beta`` is uncertain to a factor of two, which moves the optimum
+    roughly in proportion.
+    """
+    X = np.asarray(column_depth_gcm2, dtype=np.float64) if hasattr(column_depth_gcm2, "__len__") \
+        else float(column_depth_gcm2)
+    lam = neutrino_interaction_length_gcm2(energy_pev)
+    R = tau_range_gcm2(energy_pev, beta_cm2g, density_gcm3)
+    if abs(lam - R) < 1e-12:
+        return 0.0
+    if isinstance(X, float):
+        return R / (lam - R) * (math.exp(-X / lam) - math.exp(-X / R))
+    return R / (lam - R) * (np.exp(-X / lam) - np.exp(-X / R))
+
+
+def production_escape_optimum_gcm2(energy_pev, beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
+                                   density_gcm3=CRUST_DENSITY_GCM3):
+    """
+    Column depth maximising :func:`tau_exit_probability`, in closed form.
+
+        X_peak = lambda R / (lambda - R) * ln(lambda / R)
+
+    Notably almost energy-independent over GRAND's range: about 4.9e6 g/cm^2 at
+    100 PeV, 8.0e6 at 1 EeV and 7.3e6 at 10 EeV -- that is **18 to 30 km of standard
+    rock**. Both terms move with energy and largely cancel.
+    """
+    lam = neutrino_interaction_length_gcm2(energy_pev)
+    R = tau_range_gcm2(energy_pev, beta_cm2g, density_gcm3)
+    if lam <= R:
+        return R
+    return lam * R / (lam - R) * math.log(lam / R)
+
+
+def depth_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.5,
+                           beta_cm2g=TAU_ENERGY_LOSS_B_CM2G,
+                           density_gcm3=CRUST_DENSITY_GCM3, samples=4000):
+    """
+    Column-depth band where the tau exit probability stays above ``fraction`` of peak.
+
+    Grounded in :func:`tau_exit_probability` rather than in factors chosen by hand.
+    The band is very wide -- roughly 1e6 to 1e8 g/cm^2 at half maximum across
+    100 PeV to 10 EeV, some two decades -- which is itself the useful result: column
+    depth is an intrinsically weak discriminant, and the criterion should not pretend
+    otherwise.
+
+    The low edge is taken at the lowest energy and the high edge at the highest, so the
+    band covers the whole requested range.
 
     Returns (low_gcm2, high_gcm2).
     """
-    lo = tau_range_gcm2(energy_min_pev, beta_cm2g, density_gcm3) * low_factor
-    hi = tau_range_gcm2(energy_max_pev, beta_cm2g, density_gcm3) * high_factor
+    def edges(energy):
+        X = np.logspace(3, 10, samples)
+        P = tau_exit_probability(X, energy, beta_cm2g, density_gcm3)
+        peak = P.max()
+        ok = X[P >= fraction * peak]
+        return float(ok.min()), float(ok.max())
+
+    lo = edges(energy_min_pev)[0]
+    hi = edges(energy_max_pev)[1]
     return (lo, hi) if lo <= hi else (hi, lo)
+
+
+def earth_absorption_cutoff_deg(energy_pev, fraction=0.5, radius_m=EARTH_RADIUS_M,
+                                density_gcm3=CRUST_DENSITY_GCM3, **kw):
+    """
+    Elevation below which the Earth chord itself exceeds the useful column depth.
+
+    The chord is ``2R sin(theta)``, hundreds of km for degrees below the horizontal, so
+    steep arrival directions carry far more matter than the optimum wants and the
+    neutrino is absorbed before reaching the exit region. Setting the chord equal to the
+    upper band edge gives the elevation at which acceptance has fallen to ``fraction``
+    of peak.
+
+    The result narrows sharply with energy -- about -4.5 degrees at 100 PeV, -2.1 at
+    1 EeV, -1.0 at 10 EeV -- so the *effective* arrival window is not a fixed +/-3
+    degrees but an energy-dependent one whose lower edge climbs toward the horizon.
+
+    Returns a negative angle, or None when the cut lies below the horizon entirely.
+    """
+    X = np.logspace(3, 10, 4000)
+    P = tau_exit_probability(X, energy_pev, **kw)
+    upper = float(X[P >= fraction * P.max()].max())
+    chord_m = upper / density_gcm3 / 100.0
+    sin_theta = chord_m / (2.0 * radius_m)
+    if sin_theta >= 1.0:
+        return None
+    return -math.degrees(math.asin(sin_theta))
 
 
 # ---------------------------------------------------------------- geomagnetic

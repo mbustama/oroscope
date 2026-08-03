@@ -116,11 +116,17 @@ class TestTauRange(unittest.TestCase):
         huge = physics.tau_range_gcm2(1.0e9)
         self.assertLess(huge, 1.0 / physics.TAU_ENERGY_LOSS_B_CM2G)
 
-    def test_depth_band_moves_with_energy(self):
-        low = physics.depth_band_from_energy(1.0, 100.0)
-        high = physics.depth_band_from_energy(100.0, 10000.0)
-        self.assertLess(low[0], high[0])
-        self.assertLess(low[1], high[1])
+    def test_the_band_narrows_with_energy_from_both_sides(self):
+        """
+        Not the naive expectation that the band simply moves up. The lower edge rises,
+        because the tau range grows and more rock is needed to produce one efficiently;
+        the upper edge *falls*, because the interaction length shrinks and the neutrino
+        is absorbed by less matter. So the acceptable window closes at both ends.
+        """
+        lo_e = [physics.depth_band_from_energy(e, e)[0] for e in (100.0, 1000.0, 10000.0)]
+        hi_e = [physics.depth_band_from_energy(e, e)[1] for e in (100.0, 1000.0, 10000.0)]
+        self.assertTrue(all(b > a for a, b in zip(lo_e, lo_e[1:])), f"lower edge {lo_e}")
+        self.assertTrue(all(b < a for a, b in zip(hi_e, hi_e[1:])), f"upper edge {hi_e}")
 
     def test_band_is_ordered(self):
         lo, hi = physics.depth_band_from_energy(1.0, 100.0)
@@ -394,3 +400,95 @@ class TestShowerMaturityIsAThresholdForRadio(unittest.TestCase):
     def test_the_two_modes_agree_only_up_to_maximum(self):
         self.assertAlmostEqual(self.shower_score(700.0), self.shower_score(700.0, "particle"))
         self.assertGreater(self.shower_score(6000.0), self.shower_score(6000.0, "particle"))
+
+
+class TestProductionEscapeOptimum(unittest.TestCase):
+    """
+    The column depth that maximises tau yield, from the competition between the
+    neutrino having to interact and the tau having to escape.
+    """
+
+    def test_cross_section_matches_the_standard_parameterisation(self):
+        """About 1e-32 cm^2 at an EeV."""
+        self.assertAlmostEqual(physics.cc_cross_section_cm2(1000.0), 1.0e-32, delta=2e-33)
+
+    def test_interaction_length_falls_with_energy(self):
+        lo = physics.neutrino_interaction_length_gcm2(100.0)
+        hi = physics.neutrino_interaction_length_gcm2(10000.0)
+        self.assertGreater(lo, hi)
+        self.assertAlmostEqual(lo, 3.8e8, delta=0.5e8)
+        self.assertAlmostEqual(hi, 7.2e7, delta=1e7)
+
+    def test_exit_probability_rises_linearly_for_thin_slabs(self):
+        """A thin slab yields taus in proportion to its interaction probability."""
+        e = 1000.0
+        lam = physics.neutrino_interaction_length_gcm2(e)
+        p1 = physics.tau_exit_probability(1.0e4, e)
+        p2 = physics.tau_exit_probability(2.0e4, e)
+        self.assertAlmostEqual(p2 / p1, 2.0, delta=0.05)
+
+    def test_exit_probability_falls_again_for_very_thick_slabs(self):
+        e = 1000.0
+        peak = physics.tau_exit_probability(physics.production_escape_optimum_gcm2(e), e)
+        self.assertLess(physics.tau_exit_probability(1.0e9, e), 0.1 * peak)
+
+    def test_the_optimum_is_where_the_closed_form_says(self):
+        for e in (100.0, 1000.0, 10000.0):
+            x = physics.production_escape_optimum_gcm2(e)
+            grid = np.logspace(math.log10(x) - 0.5, math.log10(x) + 0.5, 501)
+            p = physics.tau_exit_probability(grid, e)
+            self.assertAlmostEqual(grid[int(np.argmax(p))] / x, 1.0, delta=0.02)
+
+    def test_the_optimum_is_tens_of_km_of_rock_and_nearly_energy_independent(self):
+        """
+        The headline number: 18-30 km of standard rock across GRAND's whole range.
+        Both the interaction length and the tau range move with energy and largely
+        cancel.
+        """
+        km = [physics.production_escape_optimum_gcm2(e) / physics.CRUST_DENSITY_GCM3 / 1e5
+              for e in (100.0, 1000.0, 10000.0)]
+        for v in km:
+            self.assertGreater(v, 15.0)
+            self.assertLess(v, 35.0)
+        self.assertLess(max(km) / min(km), 2.0)
+
+    def test_the_band_is_about_two_decades_wide(self):
+        """Column depth is an intrinsically weak discriminant, and says so."""
+        lo, hi = physics.depth_band_from_energy(100.0, 10000.0)
+        self.assertGreater(hi / lo, 30.0)
+        self.assertLess(lo, 1.0e6)
+        self.assertGreater(hi, 1.0e7)
+
+    def test_terrain_depths_sit_on_the_rising_side_of_the_optimum(self):
+        """
+        Measured Arequipa depths (median 2.0e6, p90 4.9e6 g/cm^2) fall below the
+        optimum, so within what topography can supply, more rock is always better and
+        the upper edge of the band never binds.
+        """
+        e = 1000.0
+        opt = physics.production_escape_optimum_gcm2(e)
+        self.assertLess(4.9e6, opt * 1.2)
+        median_yield = physics.tau_exit_probability(2.0e6, e) / physics.tau_exit_probability(opt, e)
+        p90_yield = physics.tau_exit_probability(4.9e6, e) / physics.tau_exit_probability(opt, e)
+        self.assertGreater(median_yield, 0.5)
+        self.assertGreater(p90_yield, median_yield)
+
+    def test_earth_absorption_narrows_the_window_with_energy(self):
+        """
+        The upper limit on column depth is reached by the Earth chord, not by mountains,
+        so the effective arrival window's lower edge climbs toward the horizon as energy
+        rises.
+        """
+        cuts = [physics.earth_absorption_cutoff_deg(e) for e in (100.0, 1000.0, 10000.0)]
+        self.assertAlmostEqual(cuts[0], -4.5, delta=0.4)
+        self.assertAlmostEqual(cuts[1], -2.1, delta=0.3)
+        self.assertAlmostEqual(cuts[2], -1.0, delta=0.3)
+        self.assertTrue(all(b > a for a, b in zip(cuts, cuts[1:])), "cut should climb")
+
+    def test_at_100_pev_absorption_does_not_bite_inside_the_window(self):
+        self.assertLess(physics.earth_absorption_cutoff_deg(100.0), -3.0)
+
+    def test_a_larger_beta_shortens_the_range_and_lowers_the_optimum(self):
+        loose = physics.production_escape_optimum_gcm2(1000.0, beta_cm2g=0.4e-6)
+        tight = physics.production_escape_optimum_gcm2(1000.0, beta_cm2g=1.0e-6)
+        self.assertGreater(loose, tight)
