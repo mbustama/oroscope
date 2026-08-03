@@ -475,6 +475,72 @@ class TestFresnelClearance(unittest.TestCase):
         self.assertLess(spread(500.0), spread(0.0))
 
 
+class TestTwoRadii(unittest.TestCase):
+    """
+    Particle trajectories and radio signals do not curve the same way.
+
+    Neutrinos and taus are not refracted, so the geometry that decides where the tau
+    exits uses the true Earth radius. The radio signal is refracted by the tropospheric
+    density gradient, which the 4/3 convention absorbs -- and that applies to the
+    Fresnel clearance of the signal path and to nothing else.
+    """
+
+    def test_particle_geometry_defaults_to_the_true_radius(self):
+        self.assertAlmostEqual(scan_mod.TRUE_EARTH_RADIUS_M, 6.371e6, places=1)
+        self.assertAlmostEqual(scan_mod.DEFAULT_EARTH_RADIUS_M,
+                               scan_mod.TRUE_EARTH_RADIUS_M, places=1)
+
+    def test_radio_path_keeps_the_four_thirds_convention(self):
+        self.assertAlmostEqual(scan_mod.RADIO_EARTH_RADIUS_M, 8.5e6, places=1)
+
+    def test_the_radio_radius_does_not_affect_where_the_tau_exits(self):
+        """Changing the radio radius must leave the particle geometry untouched."""
+        grid = grid_at()
+        n = 1400
+        elevation = np.zeros((n, n), dtype=np.float32)
+        col = 200 + int(20000.0 / grid.cell_size_x)
+        elevation[:, col:col + 60] = 2000.0
+        cands = np.array([[700.0, 200.0, 90.0]])
+        common = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0,
+                      elev_max_deg=1.0, n_elev_bins=4, max_range_m=30000.0,
+                      min_dist_km=5.0, max_dist_km=30.0)
+        a = scan_mod.scan(cands, elevation, grid, radio_earth_radius_m=8.5e6, **common)
+        b = scan_mod.scan(cands, elevation, grid, radio_earth_radius_m=6.371e6, **common)
+        self.assertEqual(float(a["horizon_deg"][0]), float(b["horizon_deg"][0]))
+        self.assertEqual(float(a["mean_distance_m"][0]), float(b["mean_distance_m"][0]))
+
+
+class TestFresnelDefaults(unittest.TestCase):
+    def test_antenna_height_defaults_to_two_metres(self):
+        import inspect
+        sig = inspect.signature(scan_mod.scan)
+        self.assertEqual(sig.parameters["antenna_height_m"].default, 2.0)
+
+    def test_near_field_is_excluded_by_default(self):
+        import inspect
+        sig = inspect.signature(scan_mod.scan)
+        self.assertEqual(sig.parameters["near_field_m"].default, 500.0)
+
+    def test_near_field_can_be_included_by_setting_it_to_zero(self):
+        grid = grid_at()
+        n = 1400
+        cols = np.arange(n)
+        profile = np.clip(800.0 - (cols - 100) * grid.cell_size_x * 0.8, 0.0, 800.0)
+        profile[:100] = 800.0
+        elevation = np.repeat(profile[None, :], n, axis=0).astype(np.float32)
+        start = 100 + int(15000.0 / grid.cell_size_x)
+        elevation[:, start:start + 300] = 3000.0
+        cands = np.array([[700.0, 100.0, 90.0]])
+        common = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0,
+                      elev_max_deg=1.0, n_elev_bins=4, max_range_m=30000.0,
+                      min_dist_km=5.0, max_dist_km=30.0, frequency_mhz=50.0)
+        excluded = scan_mod.scan(cands, elevation, grid, near_field_m=500.0, **common)
+        included = scan_mod.scan(cands, elevation, grid, near_field_m=0.0, **common)
+        # Including it can only lower the measure: more of the path is examined
+        self.assertLessEqual(float(included["best_clearance_ratio"][0]),
+                             float(excluded["best_clearance_ratio"][0]))
+
+
 class TestRefractionKFactor(unittest.TestCase):
     def test_k_factor_maps_to_the_conventional_radius(self):
         self.assertAlmostEqual(scan_mod.earth_radius_for_k(1.0), 6371000.0, places=3)

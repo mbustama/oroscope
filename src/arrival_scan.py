@@ -62,8 +62,17 @@ STANDARD_ROCK_DENSITY = 2650.0          # kg/m^3
 # Tau lepton, for the boosted decay length
 TAU_MASS_GEV = 1.77686
 TAU_CTAU_M = 87.03e-6
-# Effective radius for radio line-of-sight (the 4/3-Earth refraction convention)
-DEFAULT_EARTH_RADIUS_M = 8.5e6
+# Two radii, because two different things propagate.
+#
+# Particles travel in straight lines: the neutrino and the tau are not refracted, so
+# the geometry deciding where the tau exits uses the true Earth radius. That is not a
+# modelling choice, it is what the trajectory is.
+TRUE_EARTH_RADIUS_M = 6.371e6
+# The radio signal *is* refracted by the tropospheric density gradient, and the 4/3
+# convention makes a refracted ray straight again. It applies to the Fresnel clearance
+# of the signal path, and to nothing else.
+RADIO_EARTH_RADIUS_M = 8.5e6
+DEFAULT_EARTH_RADIUS_M = TRUE_EARTH_RADIUS_M      # retained for older callers
 # Column depth is reported in g/cm^2: 1 kg/m^2 = 0.1 g/cm^2
 KGM2_TO_GCM2 = 0.1
 SPEED_OF_LIGHT = 2.99792458e8            # m/s, for the Fresnel wavelength
@@ -149,7 +158,7 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
 def _min_clearance_ratio(elevation, r0, c0, z0, azimuth_deg,
                          cell_size_y, cell_size_x, rows, cols,
                          theta_deg, d_hit, step_m, inv_2R, wavelength_m, shower_offset_m,
-                         antenna_height_m, near_field_m):
+                         antenna_height_m, near_field_m, radio_inv_2R):
     """
     Worst Fresnel clearance along the path to an intersection, in units of r1.
 
@@ -202,7 +211,9 @@ def _min_clearance_ratio(elevation, r0, c0, z0, azimuth_deg,
         z = elevation[tr, tc]
         if not np.isnan(z):
             ray_z = z0 + antenna_height_m + d * tan_theta
-            terrain_z = z - (d * d) * inv_2R
+            # The signal path is refracted; it uses the radio radius, not the true
+            # one that the particle geometry uses
+            terrain_z = z - (d * d) * radio_inv_2R
             clearance = ray_z - terrain_z
             r1 = np.sqrt(wavelength_m * d * (d_end - d) / d_end)
             if r1 > 0.0:
@@ -221,7 +232,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     min_dist_m, max_dist_m,
                     min_depth_gcm2, require_terrain,
                     rock_density, earth_radius_m, wavelength_m, shower_offset_m,
-                    antenna_height_m, near_field_m,
+                    antenna_height_m, near_field_m, radio_earth_radius_m,
                     out_cells, out_solid_angle, out_mean_dist,
                     out_max_depth, out_mean_depth, out_horizon, out_clearance):
     """
@@ -250,6 +261,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
     n_az = azimuth_offsets_deg.shape[0]
     elev_bin_deg = (elev_max_deg - elev_min_deg) / n_bins
     inv_2R = 1.0 / (2.0 * earth_radius_m)
+    radio_inv_2R = 1.0 / (2.0 * radio_earth_radius_m)
 
     # Solid angle of one (azimuth, elevation) cell: dOmega = cos(theta) dtheta dphi
     d_phi = 2.0 * np.pi / n_az if n_az > 0 else 0.0
@@ -320,7 +332,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                             elevation, r0, c0, z0, azimuth,
                             cell_size_y, cell_size_x, rows, cols,
                             theta, d_hit, step_m, inv_2R, wavelength_m, shower_offset_m,
-                            antenna_height_m, near_field_m)
+                            antenna_height_m, near_field_m, radio_inv_2R)
                         if ratio > clearance_best:
                             clearance_best = ratio
                     cells += 1
@@ -416,8 +428,9 @@ def scan(candidates, elevation, map_grid, *,
          min_dist_km=0.0, max_dist_km=80.0,
          min_depth_gcm2=0.0, require_terrain=True,
          rock_density=STANDARD_ROCK_DENSITY,
-         earth_radius_m=DEFAULT_EARTH_RADIUS_M,
-         frequency_mhz=None, shower_offset_m=3000.0, antenna_height_m=5.0,
+         earth_radius_m=TRUE_EARTH_RADIUS_M,
+         radio_earth_radius_m=RADIO_EARTH_RADIUS_M,
+         frequency_mhz=None, shower_offset_m=3000.0, antenna_height_m=2.0,
          near_field_m=500.0):
     """
     Convenience wrapper over :func:`scan_candidates` with defaults for GRAND neutrinos.
@@ -461,7 +474,7 @@ def scan(candidates, elevation, map_grid, *,
         min_dist_km * 1000.0, max_dist_km * 1000.0,
         float(min_depth_gcm2), bool(require_terrain),
         float(rock_density), float(earth_radius_m), wavelength_m, float(shower_offset_m),
-        float(antenna_height_m), float(near_field_m),
+        float(antenna_height_m), float(near_field_m), float(radio_earth_radius_m),
         out["cells"], out["solid_angle_sr"], out["mean_distance_m"],
         out["max_depth_gcm2"], out["mean_depth_gcm2"], out["horizon_deg"],
         out["best_clearance_ratio"],

@@ -1383,7 +1383,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             fresnel_frequency_mhz=None, refraction_k=None,
-                            antenna_height_m=5.0, fresnel_near_field_m=500.0,
+                            antenna_height_m=2.0, fresnel_near_field_m=500.0,
+                            exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
                             min_score=0.0):
     """
@@ -1419,9 +1420,12 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
         frequency_mhz=fresnel_frequency_mhz,
-        antenna_height_m=antenna_height_m, near_field_m=fresnel_near_field_m,
-        earth_radius_m=(arrival_scan.earth_radius_for_k(refraction_k) if refraction_k
-                        else arrival_scan.DEFAULT_EARTH_RADIUS_M),
+        antenna_height_m=antenna_height_m,
+        near_field_m=(fresnel_near_field_m if exclude_near_field else 0.0),
+        # Particle geometry is not refracted; only the radio path is
+        earth_radius_m=arrival_scan.TRUE_EARTH_RADIUS_M,
+        radio_earth_radius_m=(arrival_scan.earth_radius_for_k(refraction_k) if refraction_k
+                              else arrival_scan.RADIO_EARTH_RADIUS_M),
     )
 
 
@@ -1436,6 +1440,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "scan": scan_params if physics_mode == "scan" else None,
         "refraction_k": refraction_k, "fresnel_frequency_mhz": fresnel_frequency_mhz,
         "antenna_height_m": antenna_height_m, "fresnel_near_field_m": fresnel_near_field_m,
+        "exclude_near_field": exclude_near_field,
         "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
         "min_score": min_score,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
@@ -1732,9 +1737,10 @@ if __name__ == "__main__":
     parser.add_argument("--require_sky", action="store_true", dest="require_sky", help="Invert the test: accept directions that reach clear sky, for cosmic-ray style channels.")
 
     parser.add_argument("--fresnel_frequency_mhz", type=float, default=None, help="Radio band for the Fresnel clearance measurement, e.g. 50. Omitted skips the second pass.")
-    parser.add_argument("--antenna_height_m", type=float, default=5.0, help="Antenna height above ground, for the Fresnel measurement (default: 5).")
+    parser.add_argument("--antenna_height_m", type=float, default=2.0, help="Antenna height above ground, for the Fresnel measurement (default: 2).")
+    parser.add_argument("--include_near_field", action="store_false", dest="exclude_near_field", help="Measure Fresnel clearance from the antenna outward instead of skipping the near field. Included for study: the result is then dominated by ground beside the antenna rather than by intervening terrain.")
     parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
-    parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor. 1 is true geometry, 4/3 the radio convention (default: the inherited 8500 km radius).")
+    parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
     parser.add_argument("--score_composition", type=str, choices=['product', 'mean', 'min'], default='product', help="How component scores combine (default: product).")
     parser.add_argument("--min_score", type=float, default=0.0, help="Discard candidates scoring below this (default: 0, keep all).")
@@ -1800,7 +1806,8 @@ if __name__ == "__main__":
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
             "fresnel_frequency_mhz": None,
-            "antenna_height_m": 5.0,
+            "antenna_height_m": 2.0,
+            "exclude_near_field": True,
             "fresnel_near_field_m": 500.0,
             "refraction_k": None,
             "depth_band_gcm2": None,
@@ -1997,7 +2004,8 @@ if __name__ == "__main__":
         require_terrain=not final_params.get('require_sky', False),
         fresnel_frequency_mhz=final_params.get('fresnel_frequency_mhz'),
         refraction_k=final_params.get('refraction_k'),
-        antenna_height_m=final_params.get('antenna_height_m', 5.0),
+        antenna_height_m=final_params.get('antenna_height_m', 2.0),
+        exclude_near_field=final_params.get('exclude_near_field', True),
         fresnel_near_field_m=final_params.get('fresnel_near_field_m', 500.0),
         depth_band_gcm2=(tuple(final_params['depth_band_gcm2'])
                          if final_params.get('depth_band_gcm2') else None),

@@ -535,6 +535,82 @@ published figure by eye is not a measurement, so the module provides the machine
 compare against a supplied curve rather than a transcription of one. Supplying either
 curve as a two-column CSV would close this.
 
+### 4.4.1 Correction: particle geometry and radio propagation need different radii ✅
+
+The 4/3-Earth radius was being applied to the *particle* geometry, which is wrong.
+Neutrinos and taus are not refracted; they travel in straight lines, so the geometry
+deciding where the tau exits uses the **true** 6371 km radius. The 4/3 convention
+exists to straighten a refracted radio ray, and applies to the Fresnel clearance of
+the signal path and to nothing else. The two are now separate, and `--refraction_k`
+governs only the radio path.
+
+Effect at 25 km is small (median column depth 1.989e6 → 1.981e6 g/cm², acceptance
+64.6% → 64.5%) but it grows with distance, and it was free to fix.
+
+### 4.12 Physics not yet accounted for
+
+Recorded from a deliberate sweep for omissions rather than found by a failing test.
+Ordered by how much each would change site *ranking*, which is what the tool exists to
+produce.
+
+**(a) Atmospheric grammage — shower development is not measured in metres.** An air
+shower develops through slant depth in g/cm², not path length, and air density falls
+as `exp(-h/H)` with `H ≈ 8.4 km`. At 4000 m the density is 0.62 of sea level, so a
+20 km path yields ~1500 g/cm² against ~2450 at sea level. The tool currently treats a
+kilometre at 2000 m and at 4500 m as the same kilometre, **while comparing candidate
+sites that differ by exactly that much altitude**. Fix: integrate density along each
+accepted path and express the distance criterion relative to X_max (~700 g/cm²)
+instead of in metres. This makes the useful distance window altitude-dependent, as it
+physically is.
+
+**(b) Geomagnetic angle — the azimuth of a target matters, not just its existence.**
+Radio emission from an air shower is dominantly geomagnetic, with amplitude
+proportional to `sin(α)`, α being the angle between the shower axis and the local
+field **B**. Peru sits near the magnetic equator, where **B** is close to horizontal
+and roughly northward, so showers propagating north–south have strongly suppressed
+geomagnetic emission while east–west ones are near maximal. The scan currently treats
+all azimuths as equivalent, which is a first-order omission for GRAND: two sites with
+identical terrain statistics but differently oriented targets are not equally good.
+Fix: weight each accepted (azimuth, elevation) cell by `sin(α)` from an IGRF field
+vector for the site. Askaryan emission is not field-dependent and keeps the
+suppression finite rather than absolute.
+
+**(c) The Earth chord dominates the negative half of the window.** Tracing backward at
+angle θ below horizontal, the ray descends into the bulk Earth: the chord is
+`2R sin θ`, about 220 km at −1° and 670 km at −3°. The scan truncates column depth at
+`max_range` (tens of km), so it systematically under-measures downgoing directions.
+The physics wants two quantities, not one: the **full chord** governs neutrino
+attenuation and is analytic in θ, independent of topography; the **last tau-range
+before exit** governs tau production and escape, and *is* what the DEM chord measures.
+Splitting them would make the depth criterion mean something definite, and would
+explain why the measured depth distribution presses against the `max_range` ceiling.
+
+**(d) The depth optimum moves with energy.** The neutrino interaction length shortens
+and the tau range lengthens as energy rises, so the optimal column depth is
+energy-dependent. The band is currently a constant, which is defensible only while it
+is a placeholder (§7).
+
+**(e) Footprint versus spacing.** The radio footprint is a Cherenkov ring a few hundred
+metres across, against a 1 km antenna grid, so counted antennas are a cost proxy and
+not an effective area. Worse, `n − 1` falls with altitude, shrinking the Cherenkov
+angle and the footprint, so a high site needs *denser* spacing than a low one for the
+same trigger efficiency — an altitude–spacing coupling the layout model does not have.
+
+**(f) RFI shielding is free and is not being used.** The scan already computes horizons.
+Whether a settlement is line-of-sight visible from a candidate is therefore nearly free
+to evaluate, and far more physical than a circular exclusion zone: a town behind a
+ridge is not equivalent to one in plain view.
+
+**(g) TAMBO differs in kind, not degree.** Particle detection means no Fresnel term and
+no geomagnetic dependence, with the footprint set by lateral particle spread (~100–200 m,
+which is what the published 150 m spacing matches). And the canyon width is limited by
+grammage as much as by decay length: at 3500 m, 4.5 km of air is only ~360 g/cm²,
+well short of X_max, so TAMBO observes showers still developing. This reinforces the
+phase 2 conclusion that criteria are per-channel.
+
+**Not worth modelling for ranking:** Galactic background noise sets the absolute
+trigger threshold but is site-independent, so it cancels in a comparison (§4.10).
+
 ### 4.10 Working without a differential acceptance table (decided 2026-08-03)
 
 No such table is available at present. That blocks **absolute apertures**, but not
