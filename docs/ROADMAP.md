@@ -1036,18 +1036,89 @@ End-to-end on the 2500² Arequipa crop, 8 cores:
 Extrapolating to the full Arequipa DEM, about 20× the pixels: roughly 10 minutes,
 against something over an hour before.
 
-### 6.6 Still to do
+### 6.6 The whole-raster sweep: premise measured, and wrong
 
-- The whole-raster azimuthal sweep (§4.2.2). Memory locality is now the main remaining
-  cost: for azimuths near north or south, consecutive samples are one DEM row apart and
-  every one is a cache miss. This is the last big structural win and also the largest
-  piece of work.
-- Bilinear sampling along profiles, an accuracy item as much as a speed one.
-- Native-dtype DEM caching, to halve cache size and I/O.
+This was billed as the main remaining structural win, on the reasoning that for
+azimuths near north or south consecutive samples sit one DEM row apart — 10 KB — so
+essentially every sample is a cache miss. **Measured, it is not true.** Holding
+everything else fixed and varying only the azimuth:
 
-**Note on the baseline.** `bench/baseline.json` records the load average and the core
-count it was taken with; the harness is pinned to 8 cores so it does not saturate a
-shared workstation. A baseline taken under load is inflated and will hide regressions.
+| azimuth | row stride | seconds |
+| --- | --- | --- |
+| 90° (due east) | 0.00 | 2.27 |
+| 45° | 0.71 | 2.29 |
+| 0° (due north) | 1.00 | 2.26 |
+| 270° | 0.00 | 2.01 |
+
+Worst over best is **1.14×**. The hardware prefetcher handles a constant row stride
+perfectly well, and with eight threads the memory-level parallelism hides what latency
+remains. An earlier run appeared to show a large effect; that measurement had JIT
+compilation folded into its first case.
+
+So the sweep would buy at most ~14%, for a large rewrite which — as §4.2.2 already
+noted — does not extend cleanly to a (θ, φ) scan carrying sub-surface chords, because
+the running-max construction it relies on gives the horizon but not the per-bin first
+crossings or the depth histogram. **Not done, and not recommended** unless profiling
+on much larger DEMs contradicts this.
+
+### 6.7 Bilinear profile sampling ✅ delivered
+
+Nearest-neighbour sampling quantises the profile to pixel centres and treats terrain
+as piecewise constant, so a ray is blocked by a whole pixel's worth of the nearby
+maximum. It also samples through `int()`, which truncates toward zero and therefore
+biases the sample point back toward the candidate by up to half a pixel —
+asymmetrically, since the sign of the offset depends on the azimuth.
+
+Interpolating removes both. It is exact on a plane, since bilinear reproduces linear
+functions, which is how the tests check it.
+
+The effect is not small. On the Arequipa crop, acceptance rises 13.4%, and 9.8% of
+candidates change acceptance outright; site area rises 6.9% and capacity 5.5%. That is
+the correction of a systematic pessimism, not noise. Cost is 1.44× on the scan.
+`--nearest_sampling` restores the old behaviour.
+
+### 6.8 Streaming DEM cache ✅ delivered
+
+The cache was built with `tiff.imread(path).astype(np.float32)`, which materialises
+the whole DEM and then a second full copy of it — defeating the out-of-core design the
+rest of the pipeline rests on, and failing outright on the multi-gigabyte DEMs the
+README targets. The page is now decoded straight into a native-dtype file and
+converted a block of rows at a time.
+
+Non-evictable (anonymous) memory while building the full Arequipa cache:
+
+| | anonymous RSS |
+| --- | --- |
+| in-RAM conversion | 623 MiB |
+| streaming | **132 MiB** |
+
+and the streaming figure is bounded by the block size rather than the DEM, so a 20 GB
+DEM stays at ~130 MiB instead of needing some 30 GB. Verified byte-identical to the
+old conversion, and independent of block size.
+
+Storing float32 with NaN rather than the DEM's own int16 is deliberate: NaN propagates
+through the gradient and comparison chain in the screening stage, so nodata is excluded
+without a sentinel test in every kernel. That costs twice the disk of an int16 cache
+and buys correctness that would otherwise have to be re-established in half a dozen
+places.
+
+### 6.9 Where phase 3 stands
+
+End-to-end on the 2500² Arequipa crop, 8 cores:
+
+| | before phase 3 | now |
+| --- | --- | --- |
+| arrival scan | 69.8 s | 43.6 s |
+| morphology | 10.5 s | **1.6 s** |
+| whole run | 82.0 s | **47.9 s** |
+
+The scan figure now includes bilinear sampling, which is 1.44× dearer than the
+nearest-neighbour it replaces; against like-for-like nearest sampling the run is
+30.3 s. Both are worth quoting: 47.9 s is the honest current cost, and the extra buys
+a 13% correction to acceptance.
+
+Remaining ideas are small: none of the three items originally listed here is now
+worth doing, since the sweep is not justified (§6.6) and the other two are done.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

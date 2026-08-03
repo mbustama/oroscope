@@ -3,45 +3,45 @@
     "arequipa_2500": {
       "funnel": {
         "DEM pixels": 6250000,
-        "after gap closing": 5796836,
-        "after pruning (< 1.0 km wide)": 5790395,
-        "directions accepted": 551912,
+        "after gap closing": 5908551,
+        "after pruning (< 1.0 km wide)": 5904968,
+        "directions accepted": 617716,
         "finite elevation": 6250000,
         "kept by stride 5": 755339,
-        "pixels in selected sites (est.)": 5791812,
+        "pixels in selected sites (est.)": 5906720,
         "slope 3.0-25.0 deg": 3776685
       },
-      "peak_rss_mb": 654.2,
+      "peak_rss_mb": 654.4,
       "timings_sec": {
-        "capacity_analysis": 0.4808,
-        "load_dem": 0.0328,
-        "morphology": 1.6582,
-        "ray_tracing": 19.3415,
-        "topographic_screen": 0.5584
+        "capacity_analysis": 0.3875,
+        "load_dem": 0.0672,
+        "morphology": 1.1523,
+        "ray_tracing": 28.9825,
+        "topographic_screen": 0.6672
       },
-      "total_capacity": 6557,
+      "total_capacity": 6685,
       "total_sites": 1
     },
     "arequipa_900": {
       "funnel": {
         "DEM pixels": 810000,
-        "after gap closing": 728002,
-        "after pruning (< 1.0 km wide)": 727199,
-        "directions accepted": 79154,
+        "after gap closing": 741635,
+        "after pruning (< 1.0 km wide)": 741588,
+        "directions accepted": 89835,
         "finite elevation": 810000,
         "kept by stride 5": 116033,
-        "pixels in selected sites (est.)": 727812,
+        "pixels in selected sites (est.)": 742228,
         "slope 3.0-25.0 deg": 580129
       },
-      "peak_rss_mb": 646.3,
+      "peak_rss_mb": 645.9,
       "timings_sec": {
-        "capacity_analysis": 0.057,
-        "load_dem": 0.0042,
-        "morphology": 0.2078,
-        "ray_tracing": 2.0368,
-        "topographic_screen": 0.077
+        "capacity_analysis": 0.0887,
+        "load_dem": 0.0145,
+        "morphology": 0.3145,
+        "ray_tracing": 3.0915,
+        "topographic_screen": 0.1221
       },
-      "total_capacity": 844,
+      "total_capacity": 859,
       "total_sites": 1
     },
     "synthetic_1800": {
@@ -55,13 +55,13 @@
         "pixels in selected sites (est.)": 1129260,
         "slope 3.0-25.0 deg": 2773800
       },
-      "peak_rss_mb": 476.8,
+      "peak_rss_mb": 481.2,
       "timings_sec": {
-        "capacity_analysis": 0.1443,
-        "load_dem": 0.0256,
-        "morphology": 0.5227,
-        "ray_tracing": 8.3174,
-        "topographic_screen": 0.195
+        "capacity_analysis": 0.1068,
+        "load_dem": 0.0414,
+        "morphology": 0.519,
+        "ray_tracing": 14.4073,
+        "topographic_screen": 0.1685
       },
       "total_capacity": 1287,
       "total_sites": 2
@@ -77,13 +77,13 @@
         "pixels in selected sites (est.)": 520260,
         "slope 3.0-25.0 deg": 576900
       },
-      "peak_rss_mb": 343.8,
+      "peak_rss_mb": 344.3,
       "timings_sec": {
-        "capacity_analysis": 0.2604,
-        "load_dem": 0.0082,
-        "morphology": 0.1626,
-        "ray_tracing": 4.8942,
-        "topographic_screen": 0.0517
+        "capacity_analysis": 0.2203,
+        "load_dem": 0.014,
+        "morphology": 0.1557,
+        "ray_tracing": 5.2399,
+        "topographic_screen": 0.0661
       },
       "total_capacity": 611,
       "total_sites": 2
@@ -92,7 +92,7 @@
   "host": {
     "bench_cores": 8,
     "cpu_count": 12,
-    "load_average_1min": 6.66,
+    "load_average_1min": 8.29,
     "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
     "python": "3.12.12"
   },

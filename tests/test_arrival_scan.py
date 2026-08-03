@@ -647,3 +647,77 @@ class TestBinningBoundary(unittest.TestCase):
         self.assertGreater(float(out["max_depth_gcm2"][0]), 0.0)
         self.assertAlmostEqual(float(out["mean_distance_m"][0]), 8000.0,
                                delta=3 * grid.cell_size_x)
+
+
+class TestProfileSampling(unittest.TestCase):
+    """
+    Sub-pixel sampling of the terrain profile.
+
+    Nearest-neighbour quantises the profile to pixel centres and treats terrain as
+    piecewise constant, which over-estimates how much it blocks a ray: the ray is
+    stopped by a whole pixel's worth of the nearby maximum. It also samples through
+    ``int()``, which truncates toward zero and so biases the sample point back toward
+    the candidate by up to half a pixel, asymmetrically in azimuth.
+    """
+
+    def test_bilinear_is_exact_on_a_plane(self):
+        """
+        Bilinear interpolation reproduces linear functions exactly, so on a planar DEM
+        the sampled profile is the true one and the horizon is analytic.
+        """
+        grid = grid_at()
+        n = 800
+        slope_deg = 4.0
+        z = synthetic.planar(n, slope_deg, 90.0, grid.cell_size_y, grid.cell_size_x,
+                             base=5000.0)
+        # Look uphill: due west, since aspect 90 means the surface falls to the east
+        cands = np.array([[400.0, 600.0, 270.0]])
+        out = scan_mod.scan(cands, z, grid, n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=0.0, elev_max_deg=6.0, n_elev_bins=12,
+                            max_range_m=8000.0, min_dist_km=0.5, max_dist_km=8.0,
+                            bilinear=True)
+        # Curvature pulls the far end down slightly, so the horizon sits just under the
+        # plane's own slope
+        self.assertLess(float(out["horizon_deg"][0]), slope_deg)
+        self.assertGreater(float(out["horizon_deg"][0]), slope_deg - 0.2)
+
+    def test_both_modes_agree_on_a_plane(self):
+        """With no sub-pixel structure there is nothing for interpolation to recover."""
+        grid = grid_at()
+        z = synthetic.planar(800, 4.0, 90.0, grid.cell_size_y, grid.cell_size_x, base=5000.0)
+        cands = np.array([[400.0, 600.0, 270.0]])
+        kw = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=0.0, elev_max_deg=6.0,
+                  n_elev_bins=12, max_range_m=8000.0, min_dist_km=0.5, max_dist_km=8.0)
+        a = scan_mod.scan(cands, z, grid, bilinear=False, **kw)
+        b = scan_mod.scan(cands, z, grid, bilinear=True, **kw)
+        self.assertAlmostEqual(float(a["horizon_deg"][0]), float(b["horizon_deg"][0]),
+                               delta=0.05)
+
+    def test_nearest_sampling_blocks_more_than_bilinear(self):
+        """
+        A narrow ridge stops a nearest-neighbour ray over a wider band of directions,
+        because the ray is blocked by a whole pixel rather than by the interpolated
+        surface it actually grazes.
+        """
+        grid = grid_at()
+        n = 1000
+        z = np.zeros((n, n), dtype=np.float32)
+        col = 200 + int(6000.0 / grid.cell_size_x)
+        z[:, col:col + 2] = 400.0                  # a two-pixel ridge
+        cands = np.array([[500.0, 200.0, 90.0]])
+        kw = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0, elev_max_deg=5.0,
+                  n_elev_bins=24, max_range_m=12000.0, min_dist_km=1.0, max_dist_km=12.0)
+        near = scan_mod.scan(cands, z, grid, bilinear=False, **kw)
+        bil = scan_mod.scan(cands, z, grid, bilinear=True, **kw)
+        self.assertGreaterEqual(float(near["horizon_deg"][0]), float(bil["horizon_deg"][0]))
+
+    def test_nodata_neighbours_fall_back_to_nearest(self):
+        grid = grid_at()
+        z = np.zeros((600, 600), dtype=np.float32)
+        z[:, 400:] = np.nan
+        cands = np.array([[300.0, 100.0, 90.0]])
+        out = scan_mod.scan(cands, z, grid, n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                            max_range_m=10000.0, min_dist_km=1.0, max_dist_km=10.0,
+                            bilinear=True)
+        self.assertEqual(int(out["cells"][0]), 0)     # no crash, nothing spurious

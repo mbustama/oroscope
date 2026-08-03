@@ -102,5 +102,69 @@ class TestNonSquarePixelWarning(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+
+class TestElevationCache(unittest.TestCase):
+    """
+    The DEM cache is built without ever holding the whole DEM in memory.
+
+    ``tiff.imread(path).astype(np.float32)`` materialises the entire array and then a
+    second full copy, which defeats the out-of-core design the rest of the pipeline
+    rests on and fails outright on the multi-gigabyte DEMs this tool targets.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sitesearch_cache_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_cache_matches_a_direct_conversion(self):
+        import tifffile as tiff
+        rng = np.random.default_rng(0)
+        z = (rng.random((300, 400)) * 3000).astype(np.int16)
+        z[:20, :] = -32768                       # ocean/void
+        src = synthetic.write_geotiff(os.path.join(self.tmp, "d.tif"), z, -16.0, -72.0)
+        npy = os.path.join(self.tmp, "d.npy")
+        ss.build_elevation_cache(src, npy, block_rows=64)
+
+        got = np.load(npy, mmap_mode="r")
+        ref = tiff.imread(src).astype(np.float32)
+        ref[ref < ss.NODATA_BELOW_M] = np.nan
+        np.testing.assert_array_equal(np.isnan(got), np.isnan(ref))
+        np.testing.assert_allclose(got[~np.isnan(got)], ref[~np.isnan(ref)])
+
+    def test_nodata_becomes_nan(self):
+        rng = np.random.default_rng(1)
+        z = (rng.random((100, 100)) * 2000).astype(np.int16)
+        z[0, 0] = -9999
+        src = synthetic.write_geotiff(os.path.join(self.tmp, "n.tif"), z, -16.0, -72.0)
+        npy = os.path.join(self.tmp, "n.npy")
+        ss.build_elevation_cache(src, npy, block_rows=32)
+        got = np.load(npy, mmap_mode="r")
+        self.assertTrue(np.isnan(got[0, 0]))
+        self.assertFalse(np.isnan(got[50, 50]))
+
+    def test_result_is_independent_of_block_size(self):
+        rng = np.random.default_rng(2)
+        z = (rng.random((257, 129)) * 2000).astype(np.int16)
+        src = synthetic.write_geotiff(os.path.join(self.tmp, "b.tif"), z, -16.0, -72.0)
+        out = []
+        for block in (16, 64, 1024):
+            npy = os.path.join(self.tmp, f"b{block}.npy")
+            ss.build_elevation_cache(src, npy, block_rows=block)
+            out.append(np.array(np.load(npy, mmap_mode="r")))
+        np.testing.assert_array_equal(out[0], out[1])
+        np.testing.assert_array_equal(out[0], out[2])
+
+    def test_the_temporary_file_is_cleaned_up(self):
+        rng = np.random.default_rng(3)
+        z = (rng.random((80, 80)) * 1000).astype(np.int16)
+        src = synthetic.write_geotiff(os.path.join(self.tmp, "t.tif"), z, -16.0, -72.0)
+        npy = os.path.join(self.tmp, "t.npy")
+        ss.build_elevation_cache(src, npy)
+        self.assertFalse(os.path.exists(npy + ".raw"))
+
+
 if __name__ == "__main__":
     unittest.main()

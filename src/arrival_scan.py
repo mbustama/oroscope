@@ -96,7 +96,7 @@ def earth_radius_for_k(k_factor):
 def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
                         cell_size_y, cell_size_x, rows, cols,
                         tan_edges, n_bins,
-                        step_m, max_range_m, inv_2R,
+                        step_m, max_range_m, inv_2R, bilinear,
                         first_dist, angle_hist):
     """
     Walks one azimuth and fills, for every elevation bin:
@@ -141,7 +141,32 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
         # altered 405 of 40,000 candidates for about 5%, which the branch predictor
         # handles nearly as cheaply anyway.
 
-        z = elevation[tr, tc]
+        if bilinear:
+            # Sub-pixel sampling. Nearest-neighbour quantises the profile to pixel
+            # centres, and int() truncates toward zero, which biases the sampled point
+            # back toward the candidate by up to half a pixel -- asymmetrically, since
+            # the sign of the offset depends on the azimuth.
+            fc = c0 + d * dc_per_m
+            fr = r0 - d * dr_per_m
+            ci = int(fc) if fc >= 0.0 else int(fc) - 1
+            ri = int(fr) if fr >= 0.0 else int(fr) - 1
+            if ri < 0 or ri + 1 >= rows or ci < 0 or ci + 1 >= cols:
+                z = elevation[tr, tc]
+            else:
+                u = fc - ci
+                v = fr - ri
+                z00 = elevation[ri, ci]
+                z01 = elevation[ri, ci + 1]
+                z10 = elevation[ri + 1, ci]
+                z11 = elevation[ri + 1, ci + 1]
+                if np.isnan(z00) or np.isnan(z01) or np.isnan(z10) or np.isnan(z11):
+                    z = elevation[tr, tc]       # a nodata neighbour: fall back
+                else:
+                    z = ((1.0 - v) * ((1.0 - u) * z00 + u * z01)
+                         + v * ((1.0 - u) * z10 + u * z11))
+        else:
+            z = elevation[tr, tc]
+
         if not np.isnan(z):
             # Earth curvature lowers distant terrain: apparent height drops as d^2/2R
             slope = (z - (d * d) * inv_2R - z0) / d
@@ -257,7 +282,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     rock_density, earth_radius_m, wavelength_m, shower_offset_m,
                     antenna_height_m, near_field_m, radio_earth_radius_m,
                     bx, by, bz, use_geomag,
-                    sea_level_density, scale_height_m, crust_density,
+                    sea_level_density, scale_height_m, crust_density, bilinear,
                     out_cells, out_solid_angle, out_mean_dist,
                     out_max_depth, out_mean_depth, out_horizon, out_clearance,
                     out_geomag_omega, out_grammage, out_earth_chord):
@@ -342,7 +367,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                 elevation, r0, c0, z0, azimuth,
                 cell_size_y, cell_size_x, rows, cols,
                 tan_edges, n_bins,
-                step_m, max_range_m, inv_2R,
+                step_m, max_range_m, inv_2R, bilinear,
                 first_dist, angle_hist)
             if horizon > horizon_max:
                 horizon_max = horizon
@@ -534,7 +559,7 @@ def scan(candidates, elevation, map_grid, *,
          earth_radius_m=TRUE_EARTH_RADIUS_M,
          radio_earth_radius_m=RADIO_EARTH_RADIUS_M,
          frequency_mhz=None, shower_offset_m=3000.0, antenna_height_m=2.0,
-         near_field_m=500.0,
+         near_field_m=500.0, bilinear=True,
          geomag_declination_deg=None, geomag_inclination_deg=None):
     """
     Convenience wrapper over :func:`scan_candidates` with defaults for GRAND neutrinos.
@@ -600,7 +625,7 @@ def scan(candidates, elevation, map_grid, *,
         float(antenna_height_m), float(near_field_m), float(radio_earth_radius_m),
         float(bx), float(by), float(bz), bool(use_geomag),
         physics.SEA_LEVEL_DENSITY_KGM3, physics.DENSITY_SCALE_HEIGHT_M,
-        physics.CRUST_DENSITY_GCM3,
+        physics.CRUST_DENSITY_GCM3, bool(bilinear),
         out["cells"], out["solid_angle_sr"], out["mean_distance_m"],
         out["max_depth_gcm2"], out["mean_depth_gcm2"], out["horizon_deg"],
         out["best_clearance_ratio"],

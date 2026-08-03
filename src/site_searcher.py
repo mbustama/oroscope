@@ -464,6 +464,52 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     return MapGrid(float(cell_size_deg), float(cell_size_y), float(cell_size_x),
                    float(center_lat), source)
 
+# Values below this are ocean or void in the DEMs this tool reads
+NODATA_BELOW_M = -100.0
+
+
+def build_elevation_cache(dem_path, npy_path, block_rows=2048):
+    """
+    Converts a DEM to the memory-mapped float32 cache, without ever holding it in RAM.
+
+    The obvious ``tiff.imread(path).astype(np.float32)`` materialises the whole DEM and
+    then a second full copy of it — which defeats the point of the out-of-core design
+    the rest of the pipeline is built around, and fails outright on the multi-gigabyte
+    DEMs this tool is meant to handle. Instead the page is decoded straight into a
+    native-dtype file, then converted a block of rows at a time. Peak memory is one
+    block, whatever the size of the DEM.
+
+    float32 with NaN is kept rather than the DEM's own integer dtype: NaN propagates
+    through the gradient and comparison chain in the screening stage, so nodata is
+    excluded without a sentinel test in every kernel. That costs twice the disk of an
+    int16 cache and buys correctness that would otherwise have to be re-established in
+    half a dozen places.
+    """
+    raw_path = npy_path + ".raw"
+    try:
+        with tiff.TiffFile(dem_path) as tf:
+            page = tf.pages[0]
+            rows, cols = int(page.shape[0]), int(page.shape[1])
+            raw = np.lib.format.open_memmap(raw_path, mode="w+", shape=(rows, cols),
+                                            dtype=page.dtype)
+            page.asarray(out=raw)
+            raw.flush()
+            del raw
+
+        raw = np.load(raw_path, mmap_mode="r")
+        out = np.lib.format.open_memmap(npy_path, mode="w+", shape=(rows, cols),
+                                        dtype=np.float32)
+        for r in range(0, rows, block_rows):
+            block = raw[r:r + block_rows].astype(np.float32)
+            block[block < NODATA_BELOW_M] = np.nan      # ocean and void
+            out[r:r + block_rows] = block
+        out.flush()
+        del out, raw
+    finally:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+
+
 def load_dem_and_init_buffers(dem_path, temp_dir, resume=False, resume_dir=None):
     """
     Step 1 Pipeline: Converts TIF to memory-mapped NPY for rapid random access
@@ -479,10 +525,7 @@ def load_dem_and_init_buffers(dem_path, temp_dir, resume=False, resume_dir=None)
     """
     npy_path = dem_path.replace(".tif", ".npy")
     if not os.path.exists(npy_path):
-        temp = tiff.imread(dem_path).astype(np.float32)
-        temp[temp < -100] = np.nan # Nullify ocean/void areas
-        np.save(npy_path, temp)
-        del temp
+        build_elevation_cache(dem_path, npy_path)
     elevation = np.load(npy_path, mmap_mode='r')
     rows, cols = elevation.shape
     
@@ -1323,7 +1366,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_score=0.0,
                             geomag_declination_deg=None, geomag_inclination_deg=None,
                             use_geomagnetic=True, grammage_mode='radio',
-                            muon_shielding_km=None,
+                            muon_shielding_km=None, bilinear_sampling=True,
                             nu_interaction_length_gcm2=None):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
@@ -1377,7 +1420,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
         geomag_declination_deg=(geomag_declination_deg if use_geomagnetic else None),
         geomag_inclination_deg=(geomag_inclination_deg if use_geomagnetic else None),
-        frequency_mhz=fresnel_frequency_mhz,
+        frequency_mhz=fresnel_frequency_mhz, bilinear=bilinear_sampling,
         antenna_height_m=antenna_height_m,
         near_field_m=(fresnel_near_field_m if exclude_near_field else 0.0),
         # Particle geometry is not refracted; only the radio path is
@@ -1406,6 +1449,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
         "muon_shielding_km": muon_shielding_km,
+        "bilinear_sampling": bilinear_sampling,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1699,6 +1743,7 @@ if __name__ == "__main__":
     parser.add_argument("--antenna_height_m", type=float, default=2.0, help="Antenna height above ground, for the Fresnel measurement (default: 2).")
     parser.add_argument("--include_near_field", action="store_false", dest="exclude_near_field", help="Measure Fresnel clearance from the antenna outward instead of skipping the near field. Included for study: the result is then dominated by ground beside the antenna rather than by intervening terrain.")
     parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
+    parser.add_argument("--nearest_sampling", action="store_false", dest="bilinear_sampling", help="Sample terrain profiles at pixel centres instead of interpolating. Faster, but treats terrain as blocky, which over-estimates how much it blocks a ray.")
     parser.add_argument("--muon_shielding_km", type=float, default=None, help="Rock overburden required along the arrival direction to reject atmospheric muons, in km (TAMBO quotes >4). A floor on column depth, not a band.")
     parser.add_argument("--geomag_declination_deg", type=float, default=None, help="Geomagnetic declination, degrees east of north. Defaults to the Arequipa IGRF 2026 value (-6.9); supply the IGRF value for other regions.")
     parser.add_argument("--geomag_inclination_deg", type=float, default=None, help="Geomagnetic inclination, degrees, positive downward. Defaults to a centered-dipole estimate at the DEM's own centre, so it follows the site automatically.")
@@ -1777,6 +1822,7 @@ if __name__ == "__main__":
             "geomag_declination_deg": None,
             "geomag_inclination_deg": None,
             "muon_shielding_km": None,
+            "bilinear_sampling": True,
             "use_geomagnetic": True,
             "grammage_mode": "radio",
             "nu_interaction_length_gcm2": None,
@@ -1981,6 +2027,7 @@ if __name__ == "__main__":
         geomag_declination_deg=final_params.get('geomag_declination_deg'),
         geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
         muon_shielding_km=final_params.get('muon_shielding_km'),
+        bilinear_sampling=final_params.get('bilinear_sampling', True),
         use_geomagnetic=final_params.get('use_geomagnetic', True),
         grammage_mode=final_params.get('grammage_mode', 'radio'),
         nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
