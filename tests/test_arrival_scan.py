@@ -392,6 +392,120 @@ class TestOrientationIsSubsumedByDepth(unittest.TestCase):
         self.assertGreater(shallow, steep)
 
 
+class TestFresnelClearance(unittest.TestCase):
+    """
+    Clearance is measured only when a band is given, and against intervening terrain
+    rather than against the ground beside the antenna.
+    """
+
+    def setUp(self):
+        """
+        A candidate on a shoulder whose ground falls away, looking at a distant wall.
+
+        Flat ground would be the wrong fixture: a near-horizontal ray skims it for
+        kilometres, so the ground itself fills the first Fresnel zone and every path
+        scores poorly. Real sites score well precisely because their terrain drops
+        away, which is what this reproduces.
+        """
+        self.grid = grid_at()
+        self.n = 1400
+        self.r0, self.c0 = 700, 100
+        cols = np.arange(self.n)
+        drop_px = int(1000.0 / self.grid.cell_size_x)
+        profile = np.clip(800.0 - (cols - self.c0) * self.grid.cell_size_x * 0.8, 0.0, 800.0)
+        profile[:self.c0] = 800.0
+        self.elevation = np.repeat(profile[None, :], self.n, axis=0).astype(np.float32)
+        start = self.c0 + int(15000.0 / self.grid.cell_size_x)
+        self.elevation[:, start:start + 300] = 3000.0
+        self.cands = np.array([[float(self.r0), float(self.c0), 90.0]])
+
+    def scan(self, **kw):
+        params = dict(n_azimuths=1, half_width_deg=0.0,
+                      elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                      max_range_m=30000.0, min_dist_km=5.0, max_dist_km=30.0)
+        params.update(kw)
+        return scan_mod.scan(self.cands, self.elevation, self.grid, **params)
+
+    def test_not_measured_without_a_frequency(self):
+        out = self.scan()
+        self.assertEqual(float(out["best_clearance_ratio"][0]), 0.0)
+
+    def test_measured_when_a_frequency_is_given(self):
+        out = self.scan(frequency_mhz=50.0)
+        self.assertGreater(float(out["best_clearance_ratio"][0]), 0.0)
+
+    def test_a_clear_path_clears_many_fresnel_radii(self):
+        """Flat ground to a distant wall should not obstruct anything."""
+        out = self.scan(frequency_mhz=50.0)
+        self.assertGreater(float(out["best_clearance_ratio"][0]), 1.0)
+
+    def test_an_intervening_ridge_reduces_the_clearance(self):
+        clear = float(self.scan(frequency_mhz=50.0)["best_clearance_ratio"][0])
+        # 650 m at 8 km subtends about -1.1 deg from the 800 m shoulder, just below the
+        # window, so it obstructs the path without ever becoming a target itself.
+        blocked = self.elevation.copy()
+        mid = self.c0 + int(8000.0 / self.grid.cell_size_x)
+        blocked[:, mid:mid + 10] = 650.0
+        out = scan_mod.scan(self.cands, blocked, self.grid,
+                            n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                            max_range_m=30000.0, min_dist_km=5.0, max_dist_km=30.0,
+                            frequency_mhz=50.0)
+        self.assertLess(float(out["best_clearance_ratio"][0]), clear)
+
+    def test_higher_frequency_needs_less_clearance(self):
+        """r1 shrinks as sqrt(lambda), so the same terrain clears more radii."""
+        low = float(self.scan(frequency_mhz=50.0)["best_clearance_ratio"][0])
+        high = float(self.scan(frequency_mhz=200.0)["best_clearance_ratio"][0])
+        self.assertAlmostEqual(high / low, 2.0, delta=0.1)
+
+    def test_near_field_exclusion_removes_the_mast_height_sensitivity(self):
+        """
+        Without it the measure is dominated by ground beside the antenna and swings by
+        more than an order of magnitude with mast height, which has nothing to do with
+        site quality. On real Andean terrain the spread falls from 28x to about 2x once
+        the first 500 m are skipped.
+        """
+        def spread(near_field):
+            vals = [float(self.scan(frequency_mhz=50.0, antenna_height_m=h,
+                                    near_field_m=near_field)["best_clearance_ratio"][0])
+                    for h in (0.0, 5.0, 20.0)]
+            return max(vals) / max(min(vals), 1e-9)
+
+        self.assertLess(spread(500.0), spread(0.0))
+
+
+class TestRefractionKFactor(unittest.TestCase):
+    def test_k_factor_maps_to_the_conventional_radius(self):
+        self.assertAlmostEqual(scan_mod.earth_radius_for_k(1.0), 6371000.0, places=3)
+        self.assertAlmostEqual(scan_mod.earth_radius_for_k(4.0 / 3.0), 8494666.67, places=1)
+
+    def test_true_geometry_lowers_distant_terrain_more_than_the_radio_convention(self):
+        """At 80 km the drop is 502 m at k=1 against 376 m at k=4/3."""
+        d = 80000.0
+        drop_true = d ** 2 / (2 * scan_mod.earth_radius_for_k(1.0))
+        drop_radio = d ** 2 / (2 * scan_mod.earth_radius_for_k(4.0 / 3.0))
+        self.assertAlmostEqual(drop_true, 502.0, delta=2.0)
+        self.assertAlmostEqual(drop_radio, 376.0, delta=2.0)
+
+    def test_a_smaller_radius_makes_a_marginal_target_disappear(self):
+        grid = grid_at()
+        n = 2200
+        r0, c0 = 1100, 100
+        elevation = np.zeros((n, n), dtype=np.float32)
+        col = c0 + int(70000.0 / grid.cell_size_x)
+        elevation[:, col:col + 60] = 450.0     # clears the k=4/3 drop, not the k=1 drop
+        cands = np.array([[float(r0), float(c0), 90.0]])
+        common = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0,
+                      elev_max_deg=1.0, n_elev_bins=4, max_range_m=80000.0,
+                      min_dist_km=5.0, max_dist_km=80.0)
+        radio = scan_mod.scan(cands, elevation, grid,
+                              earth_radius_m=scan_mod.earth_radius_for_k(4 / 3), **common)
+        true_geom = scan_mod.scan(cands, elevation, grid,
+                                  earth_radius_m=scan_mod.earth_radius_for_k(1.0), **common)
+        self.assertGreater(float(radio["horizon_deg"][0]), float(true_geom["horizon_deg"][0]))
+
+
 class TestNoDataAndEdges(unittest.TestCase):
     def test_nan_candidate_elevation_yields_nothing(self):
         grid = grid_at()

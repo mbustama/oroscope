@@ -22,6 +22,8 @@ from datetime import datetime
 import re
 
 import arrival_scan
+import aperture as aperture_mod
+import scoring
 
 # Try to import psutil for RAM stats
 try:
@@ -778,7 +780,8 @@ def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x
     buf_a.flush()
     return n_hits
 
-def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params):
+def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
+                     score_config=None, min_score=0.0):
     """
     Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
 
@@ -791,7 +794,17 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params):
       observables kept for per-site aggregation.
     """
     observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
-    accepted = observables["cells"] > 0
+
+    # Score every candidate, then keep those clearing the floor. Scores travel with the
+    # observables so per-site records can report their distribution.
+    window = (scan_params.get("min_dist_km", 0.0) * 1000.0,
+              scan_params.get("max_dist_km", 0.0) * 1000.0)
+    total, components = scoring.score_candidates(observables, score_config, window)
+    observables["score"] = total
+    for name, values in components.items():
+        observables[f"score_{name}"] = values
+
+    accepted = (observables["cells"] > 0) & (total >= min_score)
     n_hits = int(np.count_nonzero(accepted))
     if n_hits:
         buf_a[candidates_arr[accepted, 0].astype(np.int64),
@@ -825,7 +838,11 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     rows, cols = rows[inside], cols[inside]
     site_of = labeled[rows, cols]
 
-    fields = ("solid_angle_sr", "mean_distance_m", "max_depth_gcm2", "horizon_deg")
+    fields = ["solid_angle_sr", "mean_distance_m", "max_depth_gcm2", "horizon_deg"]
+    for extra in ("score", "best_clearance_ratio"):
+        if extra in observables:
+            fields.append(extra)
+    fields = tuple(fields)
     values = {f: observables[f][accepted][inside] for f in fields}
 
     summary = {}
@@ -1211,6 +1228,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         "funnel": run_info.get("funnel", {}),
         "regions": run_info.get("regions", {}),
         "timings_sec": run_info.get("timings_sec", {}),
+        "aperture": run_info.get("aperture", {}),
     }
     json_name = os.path.join(run_output_dir, base_filename + ".json")
     with open(json_name, "w") as f:
@@ -1363,7 +1381,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             physics_mode='legacy', energy_min_pev=None, energy_max_pev=None,
                             n_azimuths=9, azimuth_half_width_deg=60.0,
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
-                            min_column_depth_gcm2=0.0, require_terrain=True):
+                            min_column_depth_gcm2=0.0, require_terrain=True,
+                            fresnel_frequency_mhz=None, refraction_k=None,
+                            antenna_height_m=5.0, fresnel_near_field_m=500.0,
+                            depth_band_gcm2=None, score_composition='product',
+                            min_score=0.0):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
@@ -1396,6 +1418,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         max_range_m=max_dist_km * 1000.0,
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
+        frequency_mhz=fresnel_frequency_mhz,
+        antenna_height_m=antenna_height_m, near_field_m=fresnel_near_field_m,
+        earth_radius_m=(arrival_scan.earth_radius_for_k(refraction_k) if refraction_k
+                        else arrival_scan.DEFAULT_EARTH_RADIUS_M),
     )
 
 
@@ -1408,6 +1434,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "slope_baseline_m": slope_baseline_m, "physics_mode": physics_mode,
         "energy_min_pev": energy_min_pev, "energy_max_pev": energy_max_pev,
         "scan": scan_params if physics_mode == "scan" else None,
+        "refraction_k": refraction_k, "fresnel_frequency_mhz": fresnel_frequency_mhz,
+        "antenna_height_m": antenna_height_m, "fresnel_near_field_m": fresnel_near_field_m,
+        "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
+        "min_score": min_score,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1529,8 +1559,13 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             t0 = time.time()
             if physics_mode == 'scan':
                 n_hits, observables = run_arrival_scan(
-                    candidates_arr, elevation, map_grid, buf_a, scan_params)
+                    candidates_arr, elevation, map_grid, buf_a, scan_params,
+                    score_config={"depth_band_gcm2": depth_band_gcm2,
+                                  "composition": score_composition},
+                    min_score=min_score)
                 funnel.add("directions accepted", n_hits)
+                if min_score > 0:
+                    funnel.add(f"score >= {min_score:g}", n_hits)
             else:
                 n_hits = run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x, rows, cols, fresnel_buffer, min_dist_km, max_dist_km, active_cores, buf_a)
                 funnel.add("ray-tracing hits", n_hits)
@@ -1575,7 +1610,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km,
             min_altitude, max_altitude, region_name, export_params,
             run_info={"funnel": funnel.as_dict(), "regions": region_stats,
-                      "timings_sec": timings, "provenance": provenance}
+                      "timings_sec": timings, "provenance": provenance,
+                      "aperture": (aperture_mod.summarize_sites(
+                          site_details, min_dist_km * 1000.0, max_dist_km * 1000.0,
+                          np.logspace(0, 5, 26)) if physics_mode == 'scan' else {})}
         )
         timings["outputs"] = time.time() - t0
         print(f"      Time Elapsed: {timings['outputs']:.2f}s")
@@ -1693,6 +1731,14 @@ if __name__ == "__main__":
     parser.add_argument("--min_column_depth_gcm2", type=float, default=0.0, help="Column depth a direction must have to count, in g/cm2 (default: 0).")
     parser.add_argument("--require_sky", action="store_true", dest="require_sky", help="Invert the test: accept directions that reach clear sky, for cosmic-ray style channels.")
 
+    parser.add_argument("--fresnel_frequency_mhz", type=float, default=None, help="Radio band for the Fresnel clearance measurement, e.g. 50. Omitted skips the second pass.")
+    parser.add_argument("--antenna_height_m", type=float, default=5.0, help="Antenna height above ground, for the Fresnel measurement (default: 5).")
+    parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
+    parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor. 1 is true geometry, 4/3 the radio convention (default: the inherited 8500 km radius).")
+    parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
+    parser.add_argument("--score_composition", type=str, choices=['product', 'mean', 'min'], default='product', help="How component scores combine (default: product).")
+    parser.add_argument("--min_score", type=float, default=0.0, help="Discard candidates scoring below this (default: 0, keep all).")
+
     # Logistics and Geography Arguments
     parser.add_argument("--rfi_zones", type=str, default='none', help="Can be preset ('lima', 'arequipa') or a valid JSON string outlining custom exclusion zones.")
     parser.add_argument("--road_map_path", type=str, default=None, help="Path to a raster mapping distance-to-roads (optional).")
@@ -1753,6 +1799,13 @@ if __name__ == "__main__":
             "elev_max_deg": 3.0,
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
+            "fresnel_frequency_mhz": None,
+            "antenna_height_m": 5.0,
+            "fresnel_near_field_m": 500.0,
+            "refraction_k": None,
+            "depth_band_gcm2": None,
+            "score_composition": "product",
+            "min_score": 0.0,
             "tile_size": 2048,
             "num_cores": -1,
             "rfi_zones": "none",
@@ -1941,5 +1994,13 @@ if __name__ == "__main__":
         elev_max_deg=final_params.get('elev_max_deg', 3.0),
         n_elev_bins=final_params.get('n_elev_bins', 12),
         min_column_depth_gcm2=final_params.get('min_column_depth_gcm2', 0.0),
-        require_terrain=not final_params.get('require_sky', False)
+        require_terrain=not final_params.get('require_sky', False),
+        fresnel_frequency_mhz=final_params.get('fresnel_frequency_mhz'),
+        refraction_k=final_params.get('refraction_k'),
+        antenna_height_m=final_params.get('antenna_height_m', 5.0),
+        fresnel_near_field_m=final_params.get('fresnel_near_field_m', 500.0),
+        depth_band_gcm2=(tuple(final_params['depth_band_gcm2'])
+                         if final_params.get('depth_band_gcm2') else None),
+        score_composition=final_params.get('score_composition', 'product'),
+        min_score=final_params.get('min_score', 0.0)
     )

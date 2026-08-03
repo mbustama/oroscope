@@ -1,10 +1,12 @@
 # Site Search — Development Roadmap
 
-Working document. Phases 0 and 1 are scoped for implementation; phases 2–4 are
-sketched and will be scoped in detail before each is started.
+Working document. Phase 0 and phase 1 are delivered; phases 2–4 are sketched and
+will be scoped in detail before each is started.
 
-**Status:** planning. Nothing in phases 0–4 is implemented yet. The `dev` branch
-currently contains only the georeferencing / core-scaling fixes of commit `a9843f9`.
+**Status:** phase 0 (harness) and phase 1 (physics core) are complete on `dev`.
+Sections marked ✅ are implemented and covered by tests; everything else is plan.
+Section 2 is the original review of the inherited code and is kept as the record of
+why the work was done — the defects it describes are fixed unless noted.
 
 ---
 
@@ -152,7 +154,7 @@ Two consequences, given the §1.2 window of -3° to +3°:
    directions, and for Earth-skimming trajectories arguably the more important half.
 
 A height threshold cannot express an angular acceptance band; only an explicit
-elevation-angle window can. This is the concrete case for §4.11.
+elevation-angle window can. This is the concrete case for §4.2.
 
 **D. Curvature radius 8500 km is the microwave 4/3-Earth refraction rule.** A
 defensible convention at 50–200 MHz, but it should be explicit. At 80 km it changes
@@ -265,11 +267,21 @@ directory.
 
 ---
 
-## 4. Phase 1 — Physics core
+## 4. Phase 1 — Physics core ✅ delivered
 
 **Goal:** replace the geometric core with one that computes what it claims to.
 Every change lands as an *option* with the previous behaviour reproducible, so each
 one's effect on site counts can be quantified rather than discovered later.
+
+All of phase 1 is implemented and covered by tests. In summary: slope is measured
+over a stated baseline; the engine scans arrival directions and measures column depth
+instead of looking for a tall mountain; distance windows follow from an energy range;
+Fresnel clearance and the refraction k-factor are explicit; and sites are ranked by
+composable scores whose components are reported separately.
+
+Two planned items turned out not to need separate work. Target orientation (§4.6) is
+subsumed by column depth. The whole-raster sweep (§4.2.2) moved to phase 3, where
+optimisation belongs.
 
 ### 4.1 Terrain layer ✅ delivered
 
@@ -299,7 +311,9 @@ the validated set. It is a further illustration of finding F.
 Tiling invariance is now pinned by tests — tiled screening must reproduce the untiled
 result exactly, at every tile size, with and without a slope baseline.
 
-### 4.2 / 4.5 / 4.11 Arrival-direction scan engine ✅ delivered
+### 4.2 Arrival-direction scan engine ✅ delivered
+
+*Supersedes the original §4.2 sweep plan, §4.5 column depth and §4.2 engine geometry.*
 
 `src/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
 form. Not yet wired into the pipeline — that is the next step.
@@ -333,7 +347,7 @@ independent of elevation sampling — quadrupling the bins from 6 to 24 is almos
 which is exactly what the single-walk-per-azimuth construction was for.
 
 *It is ~290× slower than the ray-caster it replaces* (51.7 s against 0.18 s), which is
-the trade §4.11 anticipated. Whole-run cost on this crop goes from ~5.4 s to ~57 s.
+the trade §4.2 anticipated. Whole-run cost on this crop goes from ~5.4 s to ~57 s.
 Phase 3 targets it; note morphology is still 77–90% of the *old* run, so the profile
 is now genuinely dominated by physics rather than cleanup.
 
@@ -341,7 +355,7 @@ is now genuinely dominated by physics rather than cleanup.
 in one number: the old single ray at a distance-dependent elevation floor was
 rejecting most of what a ±3° window admits.
 
-### 4.2b A physical constraint that emerged
+### 4.2.1 A physical constraint that emerged
 
 A detector standing on the ground has **every downward direction blocked by the ground
 at its own feet**: over flat terrain a sub-horizontal ray goes underground within a
@@ -352,7 +366,7 @@ acceptance window at all. It also says something about siting: a good GRAND site
 not merely *on* a slope, it is on a slope whose own terrain does not occlude the
 sub-horizontal half of the window. Pinned by tests.
 
-### 4.2c Deferred to phase 3: whole-raster azimuthal sweep
+### 4.2.2 Deferred to phase 3: whole-raster azimuthal sweep
 
 The original plan was to replace per-candidate scanning with a per-azimuth sweep
 across the raster, where the horizon for *every* pixel comes from one running-max walk
@@ -366,7 +380,7 @@ Two accuracy items also remain for that work: bilinear sampling instead of `int(
 truncation, which currently biases each step by up to half a pixel, and early
 termination once no further sample can qualify.
 
-### 4.2d Pipeline integration ✅ delivered
+### 4.2.3 Pipeline integration ✅ delivered
 
 `--physics_mode {legacy,scan}`, default `legacy` so the previous behaviour stays
 reproducible and every change remains measurable. Accepted candidates feed the same
@@ -382,7 +396,7 @@ absolute apertures be folded in later without re-running the terrain analysis.
 | legacy | 12.6 s | 1 | 2,176 | 1,525 km² | 11.2% |
 | scan | 77.6 s | 1 | 6,157 | 4,969 km² | 64.6% |
 
-### 4.2e The window sits below the horizon almost everywhere
+### 4.2.4 The window sits below the horizon almost everywhere
 
 The scan reports a **median horizon angle of 7.3°** across accepted candidates, with
 p90 at 17°. In terrain like this the whole ±3° acceptance window lies *below* the
@@ -399,6 +413,44 @@ This is not a defect of the engine, which is measuring correctly; it is the
 measurement telling us where the physics has to do the work. It also raises the
 priority of §4.8 (scores) and of a physically-motivated depth band over everything
 else remaining in phase 1.
+
+### 4.3 Fresnel clearance ✅ delivered
+
+`--fresnel_frequency_mhz` enables a second pass over accepted directions, measuring
+the worst clearance along the path in units of the first Fresnel radius
+`r₁ = √(λ d₁ d₂ / (d₁+d₂))`, reported as a score rather than a gate. The scan already
+guarantees an unobstructed line of sight — the intersection is by construction the
+first terrain met — so this catches paths that *graze* an intervening ridge and suffer
+diffraction loss even though the geometric path is clear.
+
+Getting a usable measure took three corrections, each found by measuring rather than
+by reasoning, and each worth recording because they are properties of the problem
+rather than of the code:
+
+1. **The far endpoint must be the shower, not the exit point.** Approaching the target
+   both the clearance and r₁ go to zero, so their ratio collapses for every path
+   regardless of whether anything obstructs it. The radio source is the air shower
+   developing some kilometres after the τ decays, and using that as the endpoint
+   removes the degeneracy.
+2. **The antenna must be given a height.** A receiver at ground level always has
+   terrain inside the first Fresnel zone immediately beside it.
+3. **The near field must be excluded.** Even at 5 m, the measure was dominated by the
+   ground next to the antenna: the median ratio swung by **28×** across mast heights
+   from 0 to 100 m, a parameter with nothing to do with site quality. Skipping the
+   first 500 m cuts that spread to **2.1×**, and the measure then responds to
+   intervening ridges as intended. Below about 500 m it is really measuring ground
+   roughness at a scale a 30 m DEM cannot resolve.
+
+Defaults: 5 m antenna height, 500 m near-field exclusion, 3 km shower offset. On the
+Arequipa crop the median best-direction clearance is then 1.7 r₁.
+
+### 4.4 Curvature and refraction ✅ delivered
+
+`--refraction_k` sets the effective Earth radius as a k-factor: k = 1 is true
+geometry, k = 4/3 the radio convention that yields the 8500 km the tool has always
+used. Over an 80 km path the apparent drop is 376 m at k = 4/3 against 502 m at
+k = 1 — a difference comparable to the Fresnel clearance itself, which is why it
+should be stated rather than assumed.
 
 ### 4.6 Target orientation — subsumed by column depth ✅
 
@@ -426,95 +478,62 @@ The mapping from an energy range to a window is a stated convention, not a deriv
 it fixes the scale correctly, but the useful window also depends on acceptance details
 this tool does not model.
 
-### 4.3 Visibility and Fresnel clearance
+### 4.8 Scores ✅ delivered
 
-A target qualifies only if it *is* the horizon at its distance. Fresnel clearance
-becomes a real test of `r₁ = √(λ d₁ d₂ / (d₁+d₂))` against the intervening profile,
-with a configurable frequency band, and the clearance fraction reported as a score
-rather than a pass/fail.
+`src/scoring.py`. Every component returns [0, 1] with a documented shape, and the
+components are reported separately so a site's weakness can be attributed rather than
+disappearing into one opaque number.
 
-### 4.4 Curvature and refraction
+| component | shape | rationale |
+| --- | --- | --- |
+| `depth` | band with soft flanks | the τ must be produced *and* escape, so an optimum, not a floor |
+| `distance` | band over the decay-baseline window | defaults to the configured window |
+| `solid_angle` | saturating, `x/(x+half)` | more is better with diminishing returns |
+| `clearance` | ramp in r₁ | present only when a frequency is configured |
 
-Effective Earth radius becomes a parameter (k-factor), defaulting to the current
-8500 km with the true-geometry option documented alongside.
+Composition is `product` (unforgiving), `mean` (compensating) or `min` (weakest link),
+selected per experiment. A component of exactly zero sinks a product — physical
+impossibilities must score zero, not merely small.
 
-### 4.5 Column depth
+The depth band default is deliberately wide (1e5–1e7 g/cm²). The physically motivated
+band for a given energy range is still open (§7), and a wide default ranks sites
+without pretending to encode physics the tool has not been given.
 
-Per the §1.1 decision. Given a detector pixel P and a target surface point X, the
-neutrino travels along the line P→X extended *beyond* X into the rock (the τ
-continues along the neutrino direction to good approximation). Column depth is then
+**Measured effect** on the Arequipa crop, 5–25 km window, 9 azimuths, 12 bins:
 
-```
-X_rock = ρ_rock · L_rock ,   L_rock = ∫ 1[z(s) < DEM(x(s), y(s))] ds
-```
+| configuration | sites | area | capacity |
+| --- | --- | --- | --- |
+| legacy ray-caster | 1 | 1,525 km² | 2,176 |
+| scan, no scoring floor | 1 | 4,969 km² | 6,157 |
+| + depth band 3e5–5e6, `min_score` 0.35 | 1 | 3,685 km² | 4,736 |
+| + Fresnel 50 MHz, k = 4/3 | 1 | 3,385 km² | 4,442 |
 
-marching outward from X along that line and integrating the sub-surface segment.
-Default ρ_rock = 2.65 g/cm³ (standard rock); reported in both g/cm² and km w.e.
+### 4.9 Validation ✅ delivered, within what is checkable
 
-Honest limitation to record in the docs: a DEM gives the surface only, so this
-assumes uniform density and no sub-surface structure. It is a large improvement on a
-height difference, not a geological model.
+`src/aperture.py` separates the estimate into three parts: the **geometric aperture**
+(area × solid angle, fully determined by terrain), the **analytic decay factor**
+(`exp(-d_min/L) - exp(-d_max/L)`, no free parameters), and a **pluggable response**
+defaulting to unity, replaceable by a table via `TabulatedResponse`. Under that split
+the absolute normalisation is unknown but the energy *shape* and the site *ranking*
+are not — and both are tested.
 
-Because the τ must both be produced *and* escape, the useful column depth is a
-**band with an optimum**, not a floor — which is exactly why scores (§1.1) are the
-right output form.
+What is validated:
 
-### 4.6 Target orientation
+- aperture scales linearly with area and with solid angle;
+- with a unit response the energy dependence is exactly the decay probability;
+- the high-energy tail falls as 1/E, since a fixed window subtends
+  `(d_max - d_min)/L`;
+- a canyon baseline peaks in TAMBO's PeV band, the inherited 10–80 km GRAND window
+  peaks near an EeV — so a site's geometry alone predicts the energies it suits;
+- the τ decay length reproduces ref. [2]'s quoted 50 m – 5 km for 1–100 PeV;
+- the Colca fixture reproduces the published 1.5 km depth and 4.5 km separation.
 
-The target face's aspect must point back at the detector within a tolerance
-(criterion C).
-
-### 4.7 Energy-derived distance windows
-
-The current 10–80 km box is replaced by a window derived from the τ decay length:
-
-```
-L_decay = (E / m_τ) · cτ_τ ,   m_τ = 1.77686 GeV, cτ_τ = 87.03 µm
-```
-
-| E | L_decay |
-| --- | --- |
-| 1 PeV | 49 m |
-| 10 PeV | 490 m |
-| 100 PeV | 4.9 km |
-| 1 EeV | 49 km |
-| 10 EeV | 490 km |
-
-Two independent consistency checks support this parameterisation:
-
-- TAMBO's stated 1–100 PeV range gives 49 m – 4.9 km, matching the "Range 50 m–5 km"
-  annotation in ref. [2] Fig. 1 exactly.
-- The current hardcoded 10–80 km GRAND window corresponds to 0.2–1.6 EeV — i.e. the
-  existing default silently encodes an energy assumption.
-
-Shower development length is added on top (ref. [2] quotes 3–10 km shower length,
-200 m diameter). Energy ranges stay configurable per experiment as required.
-
-### 4.8 Scores
-
-Every criterion returns a value in [0,1] with a documented shape, plus its diagnostic
-count for the funnel. Hard physical impossibilities remain score 0. Composition rule
-(product, weighted mean, or min) is a per-experiment setting — default to be chosen
-once we see the score distributions on real terrain.
-
-### 4.9 Validation against published results
-
-The strongest verification available: **the tool should reproduce the published
-apertures for the published sites.**
-
-- TAMBO: reproduce the Colca Canyon aperture curve, ref. [2] Fig. 3, for 5,000 units
-  at 150 m spacing.
-- GRAND: reproduce the shape of ref. [1] Fig. 25.
-
-Important caveat on how the published curves can be used. They are **integral**
-quantities — integrated over the whole array, all geometries and the whole site — so
-they cannot be applied as a per-pixel lookup. Their roles are:
-
-1. a **validation anchor** (§4.9), and
-2. an **energy-response weight** when comparing energy ranges.
-
-Per-pixel weighting needs a *differential* acceptance in (distance, elevation angle,
-column depth, energy).
+What is **not** validated, and why. Ref. [1] Fig. 25 and ref. [2] Fig. 3 are integral
+over a whole array, all geometries and one site, so they cannot be applied per pixel;
+they can anchor the normalisation once supplied *as data*. Reading numbers off a
+published figure by eye is not a measurement, so the module provides the machinery to
+compare against a supplied curve rather than a transcription of one. Supplying either
+curve as a two-column CSV would close this.
 
 ### 4.10 Working without a differential acceptance table (decided 2026-08-03)
 
@@ -554,55 +573,6 @@ our per-site model over the published Colca configuration should reproduce the
 published aperture up to a single free normalisation. That is a real test — a model
 with the wrong geometry dependence will not match the *shape* whatever the
 normalisation.
-
-### 4.11 Engine geometry: scan arrival directions, not "find a tall mountain"
-
-Working through the column-depth calculation exposed that the current formulation is
-not merely crude but structurally wrong, and that the fix reshapes the engine.
-
-The current test asks: *is there terrain 1 km taller than me at 10-80 km?* The
-physical question is: *from which arrival directions does a backward ray from this
-pixel enter rock, and how much rock does it cross?*
-
-Tracing backward from a candidate along an arrival direction (azimuth phi, elevation
-angle theta):
-
-- Rays **above** the local horizon escape to the sky and contribute nothing.
-- Rays **below** the horizon strike terrain. That first intersection is the tau exit
-  point; the distance to it is the decay baseline; and the chord beyond it, where the
-  ray runs under the surface, is the column depth.
-
-So the useful quantity is a scan over **(azimuth, elevation angle)** pairs, each
-yielding (distance, column depth) — which is exactly the differential geometry §4.10
-wants histogrammed. Note the grazing ray is the *least* useful one: at the horizon
-the column depth goes to zero. Terrain that is merely tall is not the target; terrain
-that subtends solid angle with rock behind it is.
-
-The §1.2 guidance sets the scan range directly, and makes each experiment a
-configuration of the same engine rather than a separate code path:
-
-| channel | elevation scan | what the engine reports |
-| --- | --- | --- |
-| GRAND ν | -3° to +3° about horizontal | rock-backed solid angle, distance and column-depth histograms |
-| GRAND CR | above the horizon | unobstructed sky solid angle; nearby terrain is a *penalty*, not a target |
-| TAMBO | across a canyon | opposing-wall distance, depth and subtended angle |
-
-The cosmic-ray channel is a useful check on the design: it inverts the test — terrain
-in the accepted directions *reduces* the score instead of enabling it. Any framework
-that cannot express both from one scan is not general enough for the experiments
-after these two.
-
-This supersedes §4.2's per-candidate ray fan as the engine's shape.
-
-**Sequencing correction.** §4.2 claimed the whole-raster azimuthal sweep is both the
-accuracy fix and a speedup. That holds for a pure horizon calculation, but the O(N)
-skyline algorithm does not extend cleanly to a (theta, phi) scan with sub-surface
-chords, and the curvature term is not separable in the way the convex-hull trick
-needs. Correctness first: phase 1 implements a direct scan, phase 3 optimises it
-against the phase 0 baseline. Expect phase 1 to be *slower* than the current code —
-the harness exists to quantify exactly that.
-
----
 
 ## 5. Phase 2 — Generalization beyond radio detection *(sketch — to be scoped)*
 
@@ -698,13 +668,23 @@ rasterio/pyproj for CRS and outputs; `--explain` funnel report; parameter sweeps
 
 ## 7. Open questions
 
-1. **Differential acceptance (blocking for §4.9).** Is there a simulation output —
-   NuTauSim, ZHAireS, or the collaborations' own chains — that can be tabulated as
-   acceptance vs (distance, elevation angle, column depth, energy)? Published
-   integral curves alone cannot weight individual pixels.
-2. **Score composition** (§4.8): product, weighted mean, or min?
-3. **TAMBO muon shielding** (§5.1): is ">4 km rock" a site-selection criterion?
-4. **Spacing** (§5.1): confirm 100 m as the starting value against the published 150 m.
+1. **A column-depth band for GRAND above 100 PeV.** Now the highest-value input.
+   Section 4.2.4 showed the geometric test barely discriminates in Andean terrain, so
+   the depth band decides nearly everything the tool selects. The scan measures a
+   median of ~2×10⁶ g/cm² (about 7.5 km of standard rock) across accepted candidates;
+   the default band is a placeholder. A band grounded in the τ production-and-escape
+   optimum would make §4.8 physical rather than merely ordinal.
+2. **Score composition** (§4.8): `product`, `mean` or `min` as the default? Now
+   answerable from real score distributions rather than in the abstract.
+3. **TAMBO muon shielding** (§5.1): is ">4 km rock" from ref. [2] Fig. 1 a
+   site-selection criterion, or a description of the geometry?
+4. **A published aperture curve as data** (§4.9). Either ref. [1] Fig. 25 or ref. [2]
+   Fig. 3 as a two-column CSV would let the tool's shape be checked against a
+   measured one, and would fix the normalisation.
+
+Answered and folded into the plan: the differential acceptance table is unavailable
+(§4.10 records how phase 1 proceeded without it), and TAMBO spacing starts at 100 m
+(§5.2).
 
 ---
 

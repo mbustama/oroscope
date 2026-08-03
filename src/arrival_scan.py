@@ -66,6 +66,19 @@ TAU_CTAU_M = 87.03e-6
 DEFAULT_EARTH_RADIUS_M = 8.5e6
 # Column depth is reported in g/cm^2: 1 kg/m^2 = 0.1 g/cm^2
 KGM2_TO_GCM2 = 0.1
+SPEED_OF_LIGHT = 2.99792458e8            # m/s, for the Fresnel wavelength
+
+
+def earth_radius_for_k(k_factor):
+    """
+    Effective Earth radius for a refraction k-factor.
+
+    k = 1 is true geometry; k = 4/3 is the standard radio convention and gives the
+    8500 km the searcher has always used. The choice is not negligible: over an 80 km
+    path the apparent drop is 376 m at k = 4/3 against 502 m at k = 1, a difference
+    comparable to the Fresnel clearance itself.
+    """
+    return 6371000.0 * float(k_factor)
 
 
 @jit(nopython=True, nogil=True, fastmath=True)
@@ -132,6 +145,74 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
     return horizon
 
 
+@jit(nopython=True, nogil=True, fastmath=True)
+def _min_clearance_ratio(elevation, r0, c0, z0, azimuth_deg,
+                         cell_size_y, cell_size_x, rows, cols,
+                         theta_deg, d_hit, step_m, inv_2R, wavelength_m, shower_offset_m,
+                         antenna_height_m, near_field_m):
+    """
+    Worst Fresnel clearance along the path to an intersection, in units of r1.
+
+    The scan already guarantees nothing blocks the line of sight -- the intersection is
+    by construction the first terrain met -- so this is a refinement, not a gate: a ray
+    that merely grazes a ridge on the way suffers diffraction loss even though the
+    geometric path is clear. The first Fresnel radius at distance d along a path of
+    length D is
+
+        r1 = sqrt(lambda * d * (D - d) / D)
+
+    which is why this needs the hit distance and so runs as a second pass, over
+    accepted directions only.
+
+    The far endpoint is the *shower*, not the exit point. The radio source is the air
+    shower developing over some kilometres after the tau decays, and taking the exit
+    point instead makes the measure degenerate: approaching the target both the
+    clearance and r1 go to zero, so their ratio collapses for every path regardless of
+    whether anything actually obstructs it.
+
+    The antenna sits ``antenna_height_m`` above the ground. Without that the measure is
+    meaningless: a receiver at ground level always has terrain inside the first Fresnel
+    zone immediately beside it, so every path scores near zero whatever the terrain
+    beyond does.
+
+    ``near_field_m`` skips the first stretch of the path. The criterion is meant to
+    catch an intervening ridge, but within a few hundred metres the first Fresnel zone
+    is narrow and the ground the antenna stands on fills it, so including that stretch
+    measures roughness at a scale a 30 m DEM cannot resolve.
+
+    Returns the minimum of clearance/r1, or a large value when there is no path to
+    measure.
+    """
+    d_end = d_hit - shower_offset_m
+    if d_end <= 2.0 * step_m or wavelength_m <= 0.0:
+        return 1.0e30
+
+    look = np.radians(azimuth_deg)
+    sin_look = np.sin(look)
+    cos_look = np.cos(look)
+    tan_theta = np.tan(np.radians(theta_deg))
+
+    worst = 1.0e30
+    d = max(step_m, near_field_m)
+    while d <= d_end:
+        tc = c0 + int(d * sin_look / cell_size_x)
+        tr = r0 - int(d * cos_look / cell_size_y)
+        if tr < 0 or tr >= rows or tc < 0 or tc >= cols:
+            break
+        z = elevation[tr, tc]
+        if not np.isnan(z):
+            ray_z = z0 + antenna_height_m + d * tan_theta
+            terrain_z = z - (d * d) * inv_2R
+            clearance = ray_z - terrain_z
+            r1 = np.sqrt(wavelength_m * d * (d_end - d) / d_end)
+            if r1 > 0.0:
+                ratio = clearance / r1
+                if ratio < worst:
+                    worst = ratio
+        d += step_m
+    return worst
+
+
 @jit(nopython=True, nogil=True, parallel=True)
 def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     azimuth_offsets_deg, use_aspect,
@@ -139,9 +220,10 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     step_m, max_range_m,
                     min_dist_m, max_dist_m,
                     min_depth_gcm2, require_terrain,
-                    rock_density, earth_radius_m,
+                    rock_density, earth_radius_m, wavelength_m, shower_offset_m,
+                    antenna_height_m, near_field_m,
                     out_cells, out_solid_angle, out_mean_dist,
-                    out_max_depth, out_mean_depth, out_horizon):
+                    out_max_depth, out_mean_depth, out_horizon, out_clearance):
     """
     Scans arrival directions for every candidate and reports what each one sees.
 
@@ -189,6 +271,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         depth_sum = 0.0
         depth_max = 0.0
         horizon_max = -1.0e30
+        clearance_best = -1.0e30
 
         if np.isnan(z0):
             out_cells[i] = 0
@@ -197,6 +280,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
             out_max_depth[i] = 0.0
             out_mean_depth[i] = 0.0
             out_horizon[i] = 0.0
+            out_clearance[i] = 0.0
             continue
 
         for a in range(n_az):
@@ -228,6 +312,17 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     depth = (running / cos_theta) * depth_scale
                     if depth < min_depth_gcm2:
                         continue
+                    if wavelength_m > 0.0:
+                        # Worst clearance *along* this path, but the best *across*
+                        # directions: a site can use its best-cleared direction, so
+                        # one grazing direction must not condemn the whole pixel.
+                        ratio = _min_clearance_ratio(
+                            elevation, r0, c0, z0, azimuth,
+                            cell_size_y, cell_size_x, rows, cols,
+                            theta, d_hit, step_m, inv_2R, wavelength_m, shower_offset_m,
+                            antenna_height_m, near_field_m)
+                        if ratio > clearance_best:
+                            clearance_best = ratio
                     cells += 1
                     solid_angle += cos_theta * d_theta * d_phi
                     dist_sum += d_hit
@@ -247,6 +342,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         out_max_depth[i] = depth_max
         out_mean_depth[i] = depth_sum / cells if cells > 0 else 0.0
         out_horizon[i] = horizon_max if horizon_max > -1.0e29 else 0.0
+        out_clearance[i] = clearance_best if clearance_best > -1.0e29 else 0.0
 
 
 def tau_decay_length_m(energy_pev):
@@ -320,7 +416,9 @@ def scan(candidates, elevation, map_grid, *,
          min_dist_km=0.0, max_dist_km=80.0,
          min_depth_gcm2=0.0, require_terrain=True,
          rock_density=STANDARD_ROCK_DENSITY,
-         earth_radius_m=DEFAULT_EARTH_RADIUS_M):
+         earth_radius_m=DEFAULT_EARTH_RADIUS_M,
+         frequency_mhz=None, shower_offset_m=3000.0, antenna_height_m=5.0,
+         near_field_m=500.0):
     """
     Convenience wrapper over :func:`scan_candidates` with defaults for GRAND neutrinos.
 
@@ -337,6 +435,8 @@ def scan(candidates, elevation, map_grid, *,
         step_m = min(map_grid.cell_size_y, map_grid.cell_size_x)
 
     offsets = azimuth_fan(n_azimuths, half_width_deg)
+    # Fresnel clearance is measured only when a band is given; 0 disables the second pass
+    wavelength_m = 0.0 if not frequency_mhz else SPEED_OF_LIGHT / (frequency_mhz * 1.0e6)
 
     out = {
         "cells": np.zeros(n, dtype=np.int64),
@@ -345,6 +445,7 @@ def scan(candidates, elevation, map_grid, *,
         "max_depth_gcm2": np.zeros(n, dtype=np.float64),
         "mean_depth_gcm2": np.zeros(n, dtype=np.float64),
         "horizon_deg": np.zeros(n, dtype=np.float64),
+        "best_clearance_ratio": np.zeros(n, dtype=np.float64),
     }
     if n == 0:
         return out
@@ -359,8 +460,10 @@ def scan(candidates, elevation, map_grid, *,
         float(step_m), float(max_range_m),
         min_dist_km * 1000.0, max_dist_km * 1000.0,
         float(min_depth_gcm2), bool(require_terrain),
-        float(rock_density), float(earth_radius_m),
+        float(rock_density), float(earth_radius_m), wavelength_m, float(shower_offset_m),
+        float(antenna_height_m), float(near_field_m),
         out["cells"], out["solid_angle_sr"], out["mean_distance_m"],
         out["max_depth_gcm2"], out["mean_depth_gcm2"], out["horizon_deg"],
+        out["best_clearance_ratio"],
     )
     return out
