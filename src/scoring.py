@@ -20,6 +20,8 @@ absolute apertures would need (see the roadmap, section 4.10).
 
 import numpy as np
 
+import physics
+
 # Composition rules. 'product' is unforgiving -- one bad component sinks the site --
 # while 'mean' lets a strong component compensate. 'min' reports the weakest link.
 COMPOSITION_MODES = ("product", "mean", "min")
@@ -128,6 +130,15 @@ def compose(components, mode="product", weights=None):
 # encode physics the tool has not been given.
 DEFAULT_SCORE_CONFIG = {
     "depth_band_gcm2": (1.0e5, 1.0e7),
+    # Shower maturity: at least X_max to be developed, and not so much past it that
+    # the shower has attenuated away
+    "grammage_band_gcm2": (physics.X_MAX_GCM2, 4.0 * physics.X_MAX_GCM2),
+    # Neutrino interaction length for the Earth-chord attenuation term. None leaves the
+    # term out: it is strongly energy-dependent and guessing it would be worse than
+    # reporting the chord and letting it be supplied.
+    "nu_interaction_length_gcm2": None,
+    # Antenna spacing, for comparing the array to the radio footprint
+    "spacing_m": None,
     "distance_band_m": None,           # defaults to the configured decay-baseline window
     "solid_angle_half_sr": 0.05,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
@@ -168,6 +179,39 @@ def score_candidates(observables, config=None, distance_window_m=None):
     }
     if dist_band:
         components["distance"] = band_score(dist, *dist_band)
+
+    # Geomagnetic: the mean sin(alpha) over accepted directions. A site whose targets
+    # all lie along the field radiates little geomagnetic signal however good its
+    # terrain is, which no purely geometric measure can see.
+    geomag = observables.get("geomag_solid_angle_sr")
+    if geomag is not None:
+        raw = np.asarray(geomag, dtype=np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(omega > 0, raw / np.clip(omega, 1e-30, None), 0.0)
+        if np.any(ratio < 0.999):        # all-ones means weighting was not applied
+            components["geomagnetic"] = np.clip(ratio, 0.0, 1.0)
+
+    # Shower maturity: grammage, not metres. Altitude enters here and nowhere else.
+    grammage = observables.get("path_grammage_gcm2")
+    if grammage is not None and np.any(np.asarray(grammage) > 0):
+        components["shower"] = band_score(grammage, *cfg["grammage_band_gcm2"])
+
+    # Earth-chord attenuation, only when an interaction length is supplied
+    chord = observables.get("earth_chord_gcm2")
+    x_int = cfg.get("nu_interaction_length_gcm2")
+    if chord is not None and x_int:
+        components["nu_survival"] = np.exp(-np.asarray(chord, dtype=np.float64) / x_int)
+
+    # Footprint sampling: a higher site has a narrower Cherenkov cone and so a smaller
+    # footprint, and needs a denser array for the same trigger efficiency
+    altitude = observables.get("altitude_m")
+    spacing = cfg.get("spacing_m")
+    if altitude is not None and spacing:
+        alt = np.asarray(altitude, dtype=np.float64)
+        theta_c = np.sqrt(2.0 * physics.SEA_LEVEL_REFRACTIVITY
+                          * np.exp(-alt / physics.DENSITY_SCALE_HEIGHT_M))
+        sampling = 2.0 * dist * theta_c / spacing
+        components["footprint"] = ramp_score(sampling, 0.0, 1.0)
 
     clearance = observables.get("best_clearance_ratio")
     if clearance is not None and np.any(np.asarray(clearance) > 0):

@@ -781,7 +781,7 @@ def run_ray_tracing_parallel(candidates_arr, elevation, cell_size_y, cell_size_x
     return n_hits
 
 def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
-                     score_config=None, min_score=0.0):
+                     score_config=None, min_score=0.0, rfi_zones_px=None):
     """
     Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
 
@@ -794,6 +794,14 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
       observables kept for per-site aggregation.
     """
     observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
+
+    # Site altitude enters the footprint term: a higher site has a narrower Cherenkov
+    # cone, so the same array spacing samples the footprint less well
+    observables["altitude_m"] = elevation[candidates_arr[:, 0].astype(np.int64),
+                                          candidates_arr[:, 1].astype(np.int64)]
+    if rfi_zones_px:
+        observables["rfi_exposure"] = arrival_scan.rfi_exposure(
+            candidates_arr, elevation, map_grid, rfi_zones_px)
 
     # Score every candidate, then keep those clearing the floor. Scores travel with the
     # observables so per-site records can report their distribution.
@@ -839,7 +847,9 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     site_of = labeled[rows, cols]
 
     fields = ["solid_angle_sr", "mean_distance_m", "max_depth_gcm2", "horizon_deg"]
-    for extra in ("score", "best_clearance_ratio"):
+    for extra in ("score", "best_clearance_ratio", "geomag_solid_angle_sr",
+                  "path_grammage_gcm2", "earth_chord_gcm2", "altitude_m",
+                  "rfi_exposure"):
         if extra in observables:
             fields.append(extra)
     fields = tuple(fields)
@@ -1386,7 +1396,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
-                            min_score=0.0):
+                            min_score=0.0, geomag_declination_deg=None,
+                            geomag_inclination_deg=None,
+                            nu_interaction_length_gcm2=None):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
@@ -1413,12 +1425,27 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         energy_note = f" (from {energy_min_pev:g}-{energy_max_pev:g} PeV)"
 
     observables = None
+
+    # RFI sources as pixel coordinates, weighted by radius as a crude strength proxy.
+    # The scan can then drop the ones terrain hides, which a circular exclusion cannot.
+    rfi_zones_px = []
+    if rfi_zones:
+        for item in rfi_zones:
+            if item[0] == 'circle':
+                _, zlat, zlon, zrad_km, _ = item
+                rfi_zones_px.append((
+                    (origin_lat - zlat) / map_grid.cell_size_deg,
+                    (zlon - origin_lon) / map_grid.cell_size_deg,
+                    float(zrad_km)))
+
     scan_params = dict(
         elev_min_deg=elev_min_deg, elev_max_deg=elev_max_deg, n_elev_bins=int(n_elev_bins),
         n_azimuths=int(n_azimuths), half_width_deg=azimuth_half_width_deg,
         max_range_m=max_dist_km * 1000.0,
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
+        geomag_declination_deg=geomag_declination_deg,
+        geomag_inclination_deg=geomag_inclination_deg,
         frequency_mhz=fresnel_frequency_mhz,
         antenna_height_m=antenna_height_m,
         near_field_m=(fresnel_near_field_m if exclude_near_field else 0.0),
@@ -1443,6 +1470,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "exclude_near_field": exclude_near_field,
         "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
         "min_score": min_score,
+        "geomag_declination_deg": geomag_declination_deg,
+        "geomag_inclination_deg": geomag_inclination_deg,
+        "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
         "min_dist_km": min_dist_km, "max_dist_km": max_dist_km,
         "min_sub_array": min_sub_array_size,
@@ -1566,8 +1596,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                 n_hits, observables = run_arrival_scan(
                     candidates_arr, elevation, map_grid, buf_a, scan_params,
                     score_config={"depth_band_gcm2": depth_band_gcm2,
-                                  "composition": score_composition},
-                    min_score=min_score)
+                                  "composition": score_composition,
+                                  "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
+                                  "spacing_m": antenna_spacing_km * 1000.0},
+                    min_score=min_score, rfi_zones_px=rfi_zones_px)
                 funnel.add("directions accepted", n_hits)
                 if min_score > 0:
                     funnel.add(f"score >= {min_score:g}", n_hits)
@@ -1740,6 +1772,9 @@ if __name__ == "__main__":
     parser.add_argument("--antenna_height_m", type=float, default=2.0, help="Antenna height above ground, for the Fresnel measurement (default: 2).")
     parser.add_argument("--include_near_field", action="store_false", dest="exclude_near_field", help="Measure Fresnel clearance from the antenna outward instead of skipping the near field. Included for study: the result is then dominated by ground beside the antenna rather than by intervening terrain.")
     parser.add_argument("--fresnel_near_field_m", type=float, default=500.0, help="Skip this much of the path when measuring Fresnel clearance (default: 500). Below ~500 m the measure is dominated by ground beside the antenna rather than by intervening terrain.")
+    parser.add_argument("--geomag_declination_deg", type=float, default=None, help="Geomagnetic declination at the site, degrees east of north. With --geomag_inclination_deg, weights each direction by sin(alpha) to the field. Use IGRF values for the site; omitted leaves emission unweighted.")
+    parser.add_argument("--geomag_inclination_deg", type=float, default=None, help="Geomagnetic inclination at the site, degrees, positive downward.")
+    parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
     parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
     parser.add_argument("--score_composition", type=str, choices=['product', 'mean', 'min'], default='product', help="How component scores combine (default: product).")
@@ -1811,6 +1846,9 @@ if __name__ == "__main__":
             "fresnel_near_field_m": 500.0,
             "refraction_k": None,
             "depth_band_gcm2": None,
+            "geomag_declination_deg": None,
+            "geomag_inclination_deg": None,
+            "nu_interaction_length_gcm2": None,
             "score_composition": "product",
             "min_score": 0.0,
             "tile_size": 2048,
@@ -2010,5 +2048,8 @@ if __name__ == "__main__":
         depth_band_gcm2=(tuple(final_params['depth_band_gcm2'])
                          if final_params.get('depth_band_gcm2') else None),
         score_composition=final_params.get('score_composition', 'product'),
-        min_score=final_params.get('min_score', 0.0)
+        min_score=final_params.get('min_score', 0.0),
+        geomag_declination_deg=final_params.get('geomag_declination_deg'),
+        geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
+        nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
     )

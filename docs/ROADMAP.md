@@ -547,7 +547,64 @@ governs only the radio path.
 Effect at 25 km is small (median column depth 1.989e6 → 1.981e6 g/cm², acceptance
 64.6% → 64.5%) but it grows with distance, and it was free to fix.
 
-### 4.12 Physics not yet accounted for
+### 4.12 Physics accounted for ✅ delivered
+
+The sweep of §4.12 below identified seven omissions; six are now implemented in
+`src/physics.py` and the scan kernel, with 44 tests. All the analytic pieces are
+closed-form and checkable by hand, which is why they live apart from the terrain code.
+
+**Measured on the Arequipa crop** (4335 m median site altitude, 10.1 km median
+baseline, 9 azimuths, 12 bins):
+
+| quantity | value | what it says |
+| --- | --- | --- |
+| mean `sin(α)` | **0.601** | geomagnetic weighting removes 40% of the effective acceptance |
+| median score, geometry only | 0.163 | |
+| median score, with geomagnetism | **0.094** | a 42% reduction: first-order, as predicted |
+| shower maturity | **1.07 × X_max** | these sites sit *exactly* at shower maximum |
+| footprint radius | 189 m | at 4335 m and 10.1 km |
+| antennas across the footprint | **0.38** | a 1 km grid under-samples it ~2.6× |
+
+Three of these are statements the tool could not previously make at all.
+
+**(b) Geomagnetic weighting.** `--geomag_declination_deg` / `--geomag_inclination_deg`
+weight each accepted cell by `sin(α)` to the field, giving a second solid angle
+alongside the raw one. Left unweighted unless a field is supplied, since guessing a
+field vector would be worse than declining to weight. Verified against the closed
+form: near the magnetic equator a north-facing target retains under 5% of its raw
+acceptance while an east-facing one keeps essentially all of it — two sites with
+identical terrain statistics that no geometric measure can tell apart.
+
+**(a) Atmospheric grammage.** The slant integral has a closed form, so no numerical
+integration is needed, and it is checked against a 200,000-step numerical integral.
+Reported per site and scored as a band around X_max. A given path at 4000 m carries
+0.622 of its sea-level grammage — and the tool is choosing between sites that differ
+by exactly that much altitude.
+
+**(c) Earth chord.** `2R sin θ` for downgoing directions, with an optional
+`--nu_interaction_length_gcm2` attenuation term. Reported always, weighted only when
+an interaction length is supplied. Worth noting what the measurement showed: with a
+5 km minimum baseline the negative half of the window is mostly rejected anyway,
+because near ground blocks it (§4.2.1), so the chord term rarely engages for these
+sites. It will matter more for configurations with short baselines.
+
+**(d) Energy-dependent depth band.** `depth_band_from_energy()` derives the band from
+the tau range, combining the boosted decay length and the energy-loss length
+harmonically so the range grows then saturates. The energy-loss constant β is the
+least certain number in the module — published values span roughly 0.4–1.0e-6 cm²/g —
+so this fixes the *scale* of the useful depth rather than its precise value.
+
+**(e) Footprint versus spacing.** The Cherenkov cone narrows with altitude, so a higher
+site has a *smaller* footprint and needs a *denser* array. Scored as antennas across
+the footprint diameter. The measured 0.38 quantifies GRAND's sparse-array trade.
+
+**(f) RFI line-of-sight shielding.** Sources occluded by terrain contribute nothing;
+survivors contribute as `1/d²`. This reuses the horizon machinery the scan already
+needs, so the only new cost is one short walk per candidate per source.
+
+**(g) TAMBO channel differences** remain for phase 2, where per-channel criteria live.
+
+### 4.12b Original sweep: physics not yet accounted for
 
 Recorded from a deliberate sweep for omissions rather than found by a failing test.
 Ordered by how much each would change site *ranking*, which is what the tool exists to

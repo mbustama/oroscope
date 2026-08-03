@@ -1,117 +1,330 @@
 """
-Ray-casting kernel: does the ray go where the aspect says, and do the bounds bind?
+The closed-form physics: atmosphere, Earth chord, tau range, geomagnetic angle,
+Cherenkov footprint.
 
-The A/B against an isotropic pixel scale pins the bug fixed in commit a9843f9, where
-stepping in raw pixels skewed every ray away from its stated aspect.
+Every value here is checkable by hand, which is the point of keeping them analytic.
 """
 
+import math
 import unittest
 
 import numpy as np
 
-from _support import ss
+import _support  # noqa: F401  (path setup)
+import arrival_scan as scan_mod
+import physics
 import synthetic
+from _support import ss
 
 
-class RayCastingBase(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.cell_y, cls.cell_x = synthetic.cell_sizes(-16.0)
-        cls.n = 1400
-        cls.r0, cls.c0 = 700, 300
-        cls.dist_m = 20000.0
-        # Targets are several pixels across, as real ridges are. A single-pixel target
-        # makes the test sensitive to the kernel's truncation convention rather than
-        # to its direction, which produces false failures.
-        cls.half = 3
-
-    def cast(self, elevation, aspect_deg, min_km=5.0, max_km=40.0,
-             cell_y=None, cell_x=None, fresnel=200.0):
-        cand = np.array([[self.r0, self.c0, aspect_deg]], dtype=np.float64)
-        hits_r, _ = ss.check_physics_chunk(
-            cand, elevation,
-            self.cell_y if cell_y is None else cell_y,
-            self.cell_x if cell_x is None else cell_x,
-            self.n, self.n, fresnel, min_km, max_km,
-        )
-        return len(hits_r) == 1
+def grid_at(latitude=-15.6):
+    return ss.resolve_grid_geometry("nonexistent.tif", latitude, cell_size_deg=synthetic.CELL_DEG)
 
 
-class TestRayDirection(RayCastingBase):
+class TestAtmosphere(unittest.TestCase):
+    def test_density_falls_by_a_third_between_sea_level_and_4000_m(self):
+        ratio = physics.air_density_kgm3(4000.0) / physics.air_density_kgm3(0.0)
+        self.assertAlmostEqual(ratio, math.exp(-4000.0 / 8400.0), places=9)
+        self.assertAlmostEqual(ratio, 0.622, delta=0.005)
+
+    def test_horizontal_grammage_is_density_times_length(self):
+        x = physics.slant_grammage_gcm2(0.0, 0.0, 20000.0)
+        self.assertAlmostEqual(x, 1.225 * 20000.0 * 0.1, places=6)
+        self.assertAlmostEqual(x, 2450.0, delta=1.0)
+
+    def test_the_same_path_at_altitude_yields_much_less_grammage(self):
+        """This is the whole point: a kilometre at 4000 m is not a kilometre at 0 m."""
+        low = physics.slant_grammage_gcm2(0.0, 0.0, 20000.0)
+        high = physics.slant_grammage_gcm2(4000.0, 0.0, 20000.0)
+        self.assertAlmostEqual(high, 1524.0, delta=5.0)
+        self.assertAlmostEqual(high / low, 0.622, delta=0.005)
+
+    def test_grammage_grows_with_distance_and_shrinks_with_altitude(self):
+        self.assertGreater(physics.slant_grammage_gcm2(3000.0, 0.0, 30000.0),
+                           physics.slant_grammage_gcm2(3000.0, 0.0, 10000.0))
+        self.assertGreater(physics.slant_grammage_gcm2(1000.0, 0.0, 20000.0),
+                           physics.slant_grammage_gcm2(5000.0, 0.0, 20000.0))
+
+    def test_upward_paths_accumulate_less_than_horizontal_ones(self):
+        flat = physics.slant_grammage_gcm2(3000.0, 0.0, 20000.0)
+        up = physics.slant_grammage_gcm2(3000.0, 3.0, 20000.0)
+        self.assertLess(up, flat * 1.02)
+
+    def test_the_closed_form_matches_numerical_integration(self):
+        z0, theta_deg, dist = 3500.0, 2.0, 25000.0
+        closed = physics.slant_grammage_gcm2(z0, theta_deg, dist)
+        n = 200000
+        theta = math.radians(theta_deg)
+        dl = (dist / math.cos(theta)) / n
+        total = sum(physics.air_density_kgm3(z0 + (i + 0.5) * dl * math.sin(theta)) * dl
+                    for i in range(n))
+        self.assertAlmostEqual(closed, total * 0.1, delta=0.01 * closed)
+
+    def test_zero_distance_gives_no_grammage(self):
+        self.assertEqual(physics.slant_grammage_gcm2(3000.0, 0.0, 0.0), 0.0)
+
+    def test_maturity_is_grammage_over_x_max(self):
+        self.assertAlmostEqual(physics.shower_maturity(700.0), 1.0, places=9)
+        self.assertLess(physics.shower_maturity(300.0), 1.0)
+
+
+class TestEarthChord(unittest.TestCase):
+    def test_chord_is_zero_along_and_above_the_horizontal(self):
+        self.assertEqual(physics.earth_chord_m(0.0), 0.0)
+        self.assertEqual(physics.earth_chord_m(3.0), 0.0)
+
+    def test_chord_matches_two_r_sin_theta(self):
+        for deg in (0.5, 1.0, 3.0, 30.0):
+            self.assertAlmostEqual(physics.earth_chord_m(-deg),
+                                   2 * physics.EARTH_RADIUS_M * math.sin(math.radians(deg)),
+                                   places=3)
+
+    def test_straight_down_is_a_diameter(self):
+        self.assertAlmostEqual(physics.earth_chord_m(-90.0),
+                               2 * physics.EARTH_RADIUS_M, places=3)
+
+    def test_the_chord_dwarfs_local_topography(self):
+        """At -1 deg about 220 km, at -3 deg about 670 km, against tens of km of mountain."""
+        self.assertAlmostEqual(physics.earth_chord_m(-1.0) / 1000.0, 222.0, delta=2.0)
+        self.assertAlmostEqual(physics.earth_chord_m(-3.0) / 1000.0, 667.0, delta=5.0)
+
+    def test_chord_stays_within_the_crust(self):
+        """Deepest point of a 670 km chord is only ~9 km down, so constant density holds."""
+        chord = physics.earth_chord_m(-3.0)
+        depth = (chord / 2.0) ** 2 / (2 * physics.EARTH_RADIUS_M)
+        self.assertLess(depth, 15000.0)
+
+    def test_survival_falls_with_angle_below_the_horizon(self):
+        x_int = 1.0e8
+        shallow = physics.neutrino_survival(-0.5, x_int)
+        steep = physics.neutrino_survival(-3.0, x_int)
+        self.assertGreater(shallow, steep)
+        self.assertLess(steep, 0.5)
+
+    def test_survival_is_unity_above_the_horizon(self):
+        self.assertAlmostEqual(physics.neutrino_survival(1.0, 1.0e8), 1.0, places=12)
+
+
+class TestTauRange(unittest.TestCase):
+    def test_range_grows_with_energy_then_saturates(self):
+        r = [physics.tau_range_gcm2(e) for e in (1.0, 10.0, 100.0, 1000.0, 10000.0)]
+        self.assertTrue(all(b > a for a, b in zip(r, r[1:])))
+        # Saturating: each decade adds proportionally less
+        self.assertLess(r[4] / r[3], r[1] / r[0])
+
+    def test_range_saturates_at_the_energy_loss_length(self):
+        huge = physics.tau_range_gcm2(1.0e9)
+        self.assertLess(huge, 1.0 / physics.TAU_ENERGY_LOSS_B_CM2G)
+
+    def test_depth_band_moves_with_energy(self):
+        low = physics.depth_band_from_energy(1.0, 100.0)
+        high = physics.depth_band_from_energy(100.0, 10000.0)
+        self.assertLess(low[0], high[0])
+        self.assertLess(low[1], high[1])
+
+    def test_band_is_ordered(self):
+        lo, hi = physics.depth_band_from_energy(1.0, 100.0)
+        self.assertLess(lo, hi)
+
+
+class TestGeomagnetic(unittest.TestCase):
     def setUp(self):
-        self.col_east = self.c0 + int(self.dist_m / self.cell_x)
-        self.row_north = self.r0 - int(self.dist_m / self.cell_y)
-        self.east_target = synthetic.flat_with_peak(self.n, self.r0, self.col_east,
-                                                    height=5000.0, half_width=self.half)
-        self.north_target = synthetic.flat_with_peak(self.n, self.row_north, self.c0,
-                                                     height=5000.0, half_width=self.half)
+        # Near the magnetic equator: field close to horizontal and roughly northward
+        self.equatorial = physics.geomagnetic_unit_vector(0.0, 0.0)
 
-    def test_finds_target_due_east_when_facing_east(self):
-        self.assertTrue(self.cast(self.east_target, 90.0))
+    def test_field_vector_is_a_unit_vector(self):
+        for d, i in ((0.0, 0.0), (-5.0, 10.0), (30.0, -60.0)):
+            v = physics.geomagnetic_unit_vector(d, i)
+            self.assertAlmostEqual(math.sqrt(sum(c * c for c in v)), 1.0, places=12)
 
-    def test_ignores_target_due_east_when_facing_north(self):
-        self.assertFalse(self.cast(self.east_target, 0.0))
+    def test_equatorial_field_points_north(self):
+        self.assertAlmostEqual(self.equatorial[1], 1.0, places=12)
+        self.assertAlmostEqual(self.equatorial[0], 0.0, places=12)
+        self.assertAlmostEqual(self.equatorial[2], 0.0, places=12)
 
-    def test_finds_target_due_north_when_facing_north(self):
-        self.assertTrue(self.cast(self.north_target, 0.0))
+    def test_inclination_is_positive_downward(self):
+        v = physics.geomagnetic_unit_vector(0.0, 90.0)
+        self.assertAlmostEqual(v[2], -1.0, places=12)
 
-    def test_ignores_target_due_north_when_facing_east(self):
-        self.assertFalse(self.cast(self.north_target, 90.0))
+    def test_north_south_showers_are_strongly_suppressed(self):
+        """The effect that makes target azimuth matter, not merely target existence."""
+        north = physics.geomagnetic_sin_alpha(0.0, 0.0, self.equatorial)
+        south = physics.geomagnetic_sin_alpha(180.0, 0.0, self.equatorial)
+        self.assertAlmostEqual(north, 0.0, places=9)
+        self.assertAlmostEqual(south, 0.0, places=9)
 
-    def test_isotropic_pixel_scale_misses_the_eastward_target(self):
-        """
-        Regression for a9843f9. Using the north-south scale on both axes points the
-        ray at a column ~22 px short of the target, so it must miss what the
-        corrected kernel finds.
-        """
-        wrong = self.cast(self.east_target, 90.0, cell_x=self.cell_y)
-        self.assertTrue(self.cast(self.east_target, 90.0))
-        self.assertFalse(wrong)
+    def test_east_west_showers_are_maximal(self):
+        for az in (90.0, 270.0):
+            self.assertAlmostEqual(
+                physics.geomagnetic_sin_alpha(az, 0.0, self.equatorial), 1.0, places=9)
+
+    def test_sign_of_the_axis_does_not_matter(self):
+        a = physics.geomagnetic_sin_alpha(37.0, 2.0, self.equatorial)
+        b = physics.geomagnetic_sin_alpha(217.0, -2.0, self.equatorial)
+        self.assertAlmostEqual(a, b, places=9)
+
+    def test_result_is_always_a_valid_sine(self):
+        field = physics.geomagnetic_unit_vector(-4.0, 5.0)
+        for az in range(0, 360, 17):
+            for el in (-3.0, 0.0, 3.0):
+                v = physics.geomagnetic_sin_alpha(az, el, field)
+                self.assertGreaterEqual(v, 0.0)
+                self.assertLessEqual(v, 1.0 + 1e-12)
 
 
-class TestRayBounds(RayCastingBase):
+class TestFootprint(unittest.TestCase):
+    def test_cherenkov_angle_at_sea_level_and_altitude(self):
+        self.assertAlmostEqual(math.degrees(physics.cherenkov_angle_rad(0.0)), 1.38, delta=0.03)
+        self.assertAlmostEqual(math.degrees(physics.cherenkov_angle_rad(4000.0)), 1.09, delta=0.03)
+
+    def test_a_higher_site_has_a_narrower_cone(self):
+        self.assertLess(physics.cherenkov_angle_rad(4500.0), physics.cherenkov_angle_rad(1000.0))
+
+    def test_footprint_shrinks_with_altitude(self):
+        low = physics.cherenkov_footprint_radius_m(1000.0, 10000.0)
+        high = physics.cherenkov_footprint_radius_m(4500.0, 10000.0)
+        self.assertLess(high, low)
+        self.assertAlmostEqual(low, 224.0, delta=10.0)
+
+    def test_a_kilometre_grid_undersamples_the_footprint(self):
+        """Counted antennas are a cost proxy, not an effective area."""
+        self.assertLess(physics.footprint_sampling(1000.0, 4000.0, 10000.0), 1.0)
+
+    def test_denser_spacing_samples_better(self):
+        self.assertGreater(physics.footprint_sampling(200.0, 4000.0, 10000.0),
+                           physics.footprint_sampling(1000.0, 4000.0, 10000.0))
+
+
+class TestGeomagneticInTheScan(unittest.TestCase):
+    """The weighting reaches the kernel and behaves as the closed form says."""
+
+    def build(self, azimuth_deg):
+        grid = grid_at()
+        n = 1400
+        r0, c0 = 700, 700
+        elevation = np.zeros((n, n), dtype=np.float32)
+        bearing = math.radians(azimuth_deg)
+        dist = 12000.0
+        tr = r0 - int(dist * math.cos(bearing) / grid.cell_size_y)
+        tc = c0 + int(dist * math.sin(bearing) / grid.cell_size_x)
+        elevation[tr - 80:tr + 80, tc - 80:tc + 80] = 2500.0
+        cands = np.array([[float(r0), float(c0), float(azimuth_deg)]])
+        return grid, elevation, cands
+
+    def scan(self, azimuth_deg, **kw):
+        grid, elevation, cands = self.build(azimuth_deg)
+        params = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0,
+                      elev_max_deg=1.0, n_elev_bins=4, max_range_m=20000.0,
+                      min_dist_km=5.0, max_dist_km=20.0)
+        params.update(kw)
+        return scan_mod.scan(cands, elevation, grid, **params)
+
+    def test_unweighted_by_default(self):
+        out = self.scan(0.0)
+        self.assertAlmostEqual(float(out["geomag_solid_angle_sr"][0]),
+                               float(out["solid_angle_sr"][0]), places=12)
+
+    def test_a_north_facing_target_is_suppressed_near_the_magnetic_equator(self):
+        out = self.scan(0.0, geomag_declination_deg=0.0, geomag_inclination_deg=0.0)
+        self.assertGreater(float(out["solid_angle_sr"][0]), 0.0)
+        self.assertLess(float(out["geomag_solid_angle_sr"][0]),
+                        0.05 * float(out["solid_angle_sr"][0]))
+
+    def test_an_east_facing_target_is_not_suppressed(self):
+        out = self.scan(90.0, geomag_declination_deg=0.0, geomag_inclination_deg=0.0)
+        self.assertAlmostEqual(float(out["geomag_solid_angle_sr"][0]),
+                               float(out["solid_angle_sr"][0]), delta=0.02
+                               * float(out["solid_angle_sr"][0]))
+
+    def test_two_identical_sites_differ_only_by_target_azimuth(self):
+        """The point of (b): terrain statistics alone cannot rank these."""
+        north = self.scan(0.0, geomag_declination_deg=0.0, geomag_inclination_deg=0.0)
+        east = self.scan(90.0, geomag_declination_deg=0.0, geomag_inclination_deg=0.0)
+        self.assertAlmostEqual(float(north["solid_angle_sr"][0]),
+                               float(east["solid_angle_sr"][0]), delta=0.02)
+        self.assertGreater(float(east["geomag_solid_angle_sr"][0]),
+                           10 * float(north["geomag_solid_angle_sr"][0]))
+
+
+class TestGrammageAndChordInTheScan(unittest.TestCase):
+    def scan_at_altitude(self, base_altitude):
+        grid = grid_at()
+        n = 1400
+        r0, c0 = 700, 200
+        elevation = np.full((n, n), base_altitude, dtype=np.float32)
+        col = c0 + int(12000.0 / grid.cell_size_x)
+        elevation[:, col:col + 80] = base_altitude + 2500.0
+        cands = np.array([[float(r0), float(c0), 90.0]])
+        return scan_mod.scan(cands, elevation, grid, n_azimuths=1, half_width_deg=0.0,
+                             elev_min_deg=-1.0, elev_max_deg=1.0, n_elev_bins=4,
+                             max_range_m=20000.0, min_dist_km=5.0, max_dist_km=20.0)
+
+    def test_a_higher_site_reports_less_grammage_for_the_same_geometry(self):
+        low = float(self.scan_at_altitude(0.0)["path_grammage_gcm2"][0])
+        high = float(self.scan_at_altitude(4000.0)["path_grammage_gcm2"][0])
+        self.assertGreater(low, high)
+        self.assertAlmostEqual(high / low, math.exp(-4000.0 / 8400.0), delta=0.02)
+
+    def test_grammage_matches_the_closed_form(self):
+        out = self.scan_at_altitude(3000.0)
+        expected = physics.slant_grammage_gcm2(3000.0, 0.25, 12000.0)
+        self.assertAlmostEqual(float(out["path_grammage_gcm2"][0]), expected,
+                               delta=0.25 * expected)
+
+    def test_upgoing_targets_report_no_earth_chord(self):
+        self.assertEqual(float(self.scan_at_altitude(0.0)["earth_chord_gcm2"][0]), 0.0)
+
+    def test_downgoing_directions_report_a_large_chord(self):
+        grid = grid_at()
+        n = 1400
+        cols = np.arange(n)
+        # Ground falling away, so sub-horizontal directions strike distant terrain
+        profile = np.clip(3000.0 - (cols - 200) * grid.cell_size_x * 0.05, 0.0, 3000.0)
+        profile[:200] = 3000.0
+        elevation = np.repeat(profile[None, :], n, axis=0).astype(np.float32)
+        cands = np.array([[700.0, 200.0, 90.0]])
+        out = scan_mod.scan(cands, elevation, grid, n_azimuths=1, half_width_deg=0.0,
+                            elev_min_deg=-3.0, elev_max_deg=-0.5, n_elev_bins=5,
+                            max_range_m=40000.0, min_dist_km=5.0, max_dist_km=40.0)
+        if int(out["cells"][0]) > 0:
+            self.assertGreater(float(out["earth_chord_gcm2"][0]), 1.0e7)
+
+
+class TestRfiShielding(unittest.TestCase):
     def setUp(self):
-        col_east = self.c0 + int(self.dist_m / self.cell_x)
-        self.target = synthetic.flat_with_peak(self.n, self.r0, col_east,
-                                               height=5000.0, half_width=self.half)
+        self.grid = grid_at()
+        self.n = 800
+        self.flat = np.zeros((self.n, self.n), dtype=np.float32)
+        self.cands = np.array([[400.0, 100.0, 90.0]])
+        self.zone = [(400.0, 600.0, 10.0)]
 
-    def test_target_beyond_max_distance_is_rejected(self):
-        self.assertFalse(self.cast(self.target, 90.0, min_km=5.0, max_km=15.0))
+    def test_a_visible_source_contributes_exposure(self):
+        e = scan_mod.rfi_exposure(self.cands, self.flat, self.grid, self.zone)
+        self.assertGreater(float(e[0]), 0.0)
 
-    def test_target_inside_min_distance_is_rejected(self):
-        self.assertFalse(self.cast(self.target, 90.0, min_km=25.0, max_km=40.0))
+    def test_terrain_between_removes_it_entirely(self):
+        blocked = self.flat.copy()
+        blocked[:, 300:310] = 500.0
+        e = scan_mod.rfi_exposure(self.cands, blocked, self.grid, self.zone)
+        self.assertEqual(float(e[0]), 0.0)
 
-    def test_target_below_height_threshold_is_rejected(self):
-        """Must clear detector + 1 km interaction depth + Fresnel buffer."""
-        low = self.target.copy()
-        low[low > 0] = 900.0
-        self.assertFalse(self.cast(low, 90.0))
+    def test_exposure_falls_as_inverse_square(self):
+        near = scan_mod.rfi_exposure(np.array([[400.0, 400.0, 90.0]]), self.flat,
+                                     self.grid, self.zone)[0]
+        far = scan_mod.rfi_exposure(np.array([[400.0, 200.0, 90.0]]), self.flat,
+                                    self.grid, self.zone)[0]
+        self.assertAlmostEqual(near / far, 4.0, delta=0.2)
 
-    def test_raising_the_fresnel_buffer_can_reject_a_marginal_target(self):
-        marginal = self.target.copy()
-        marginal[marginal > 0] = 1300.0        # clears 1000 + 200, but not 1000 + 500
-        self.assertTrue(self.cast(marginal, 90.0, fresnel=200.0))
-        self.assertFalse(self.cast(marginal, 90.0, fresnel=500.0))
+    def test_no_zones_means_no_exposure(self):
+        e = scan_mod.rfi_exposure(self.cands, self.flat, self.grid, [])
+        self.assertEqual(float(e[0]), 0.0)
 
-    def test_earth_curvature_lowers_distant_targets(self):
-        """
-        A target just above threshold at short range fails at long range once the
-        d^2/2R drop is applied. At 20 km the drop is ~24 m; at 80 km, ~376 m.
-        """
-        near_col = self.c0 + int(10000.0 / self.cell_x)
-        far_col = self.c0 + int(70000.0 / self.cell_x)
-        height = 1000.0 + 200.0 + 150.0        # clears threshold by 150 m before curvature
-        near = synthetic.flat_with_peak(self.n, self.r0, near_col, height, self.half)
-        far = synthetic.flat_with_peak(self.n, self.r0, far_col, height, self.half)
-        self.assertTrue(self.cast(near, 90.0, min_km=5.0, max_km=80.0))
-        self.assertFalse(self.cast(far, 90.0, min_km=60.0, max_km=80.0))
-
-
-class TestNoDataHandling(RayCastingBase):
-    def test_nan_samples_do_not_count_as_targets(self):
-        elevation = np.full((self.n, self.n), 0.0, dtype=np.float32)
-        elevation[:, self.c0 + 100:] = np.nan
-        self.assertFalse(self.cast(elevation, 90.0))
+    def test_a_stronger_source_contributes_more(self):
+        weak = scan_mod.rfi_exposure(self.cands, self.flat, self.grid,
+                                     [(400.0, 600.0, 5.0)])[0]
+        strong = scan_mod.rfi_exposure(self.cands, self.flat, self.grid,
+                                       [(400.0, 600.0, 20.0)])[0]
+        self.assertAlmostEqual(strong / weak, 4.0, places=6)
 
 
 if __name__ == "__main__":

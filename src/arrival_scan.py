@@ -44,6 +44,8 @@ import math
 
 import numpy as np
 
+import physics
+
 try:
     from numba import jit, prange
     HAS_NUMBA = True
@@ -233,8 +235,11 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     min_depth_gcm2, require_terrain,
                     rock_density, earth_radius_m, wavelength_m, shower_offset_m,
                     antenna_height_m, near_field_m, radio_earth_radius_m,
+                    bx, by, bz, use_geomag,
+                    sea_level_density, scale_height_m, crust_density,
                     out_cells, out_solid_angle, out_mean_dist,
-                    out_max_depth, out_mean_depth, out_horizon, out_clearance):
+                    out_max_depth, out_mean_depth, out_horizon, out_clearance,
+                    out_geomag_omega, out_grammage, out_earth_chord):
     """
     Scans arrival directions for every candidate and reports what each one sees.
 
@@ -284,6 +289,9 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         depth_max = 0.0
         horizon_max = -1.0e30
         clearance_best = -1.0e30
+        geomag_omega = 0.0
+        grammage_sum = 0.0
+        chord_sum = 0.0
 
         if np.isnan(z0):
             out_cells[i] = 0
@@ -293,6 +301,9 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
             out_mean_depth[i] = 0.0
             out_horizon[i] = 0.0
             out_clearance[i] = 0.0
+            out_geomag_omega[i] = 0.0
+            out_grammage[i] = 0.0
+            out_earth_chord[i] = 0.0
             continue
 
         for a in range(n_az):
@@ -335,8 +346,42 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                             antenna_height_m, near_field_m, radio_inv_2R)
                         if ratio > clearance_best:
                             clearance_best = ratio
+                    cell_omega = cos_theta * d_theta * d_phi
+
+                    # Geomagnetic emission goes as |v x B|: a shower travelling along
+                    # the field radiates almost none of it, so the azimuth of a target
+                    # matters and not merely its existence.
+                    if use_geomag:
+                        sin_t = np.sin(np.radians(theta))
+                        vx = np.sin(np.radians(azimuth)) * cos_theta
+                        vy = np.cos(np.radians(azimuth)) * cos_theta
+                        dot = vx * bx + vy * by + sin_t * bz
+                        sin_alpha = np.sqrt(max(0.0, 1.0 - dot * dot))
+                        geomag_omega += cell_omega * sin_alpha
+                    else:
+                        geomag_omega += cell_omega
+
+                    # Atmospheric depth over the path: a shower develops through
+                    # g/cm^2, and air at 4000 m is a third thinner than at sea level
+                    slant = d_hit / cos_theta
+                    sin_t2 = np.sin(np.radians(theta))
+                    base = sea_level_density * np.exp(-z0 / scale_height_m)
+                    if abs(sin_t2) < 1.0e-9:
+                        gram = base * slant
+                    else:
+                        rise = slant * sin_t2
+                        gram = base * (scale_height_m / sin_t2) * (
+                            1.0 - np.exp(-rise / scale_height_m))
+                    grammage_sum += gram * 0.1          # kg/m^2 -> g/cm^2
+
+                    # Earth chord for downgoing directions, 2R sin(theta): it dwarfs
+                    # local topography and governs neutrino attenuation
+                    if theta < 0.0:
+                        chord_sum += (2.0 * earth_radius_m
+                                      * np.sin(np.radians(-theta))) * 100.0 * crust_density
+
                     cells += 1
-                    solid_angle += cos_theta * d_theta * d_phi
+                    solid_angle += cell_omega
                     dist_sum += d_hit
                     depth_sum += depth
                     if depth > depth_max:
@@ -347,6 +392,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                         continue
                     cells += 1
                     solid_angle += cos_theta * d_theta * d_phi
+                    geomag_omega += cos_theta * d_theta * d_phi
 
         out_cells[i] = cells
         out_solid_angle[i] = solid_angle
@@ -355,6 +401,9 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         out_mean_depth[i] = depth_sum / cells if cells > 0 else 0.0
         out_horizon[i] = horizon_max if horizon_max > -1.0e29 else 0.0
         out_clearance[i] = clearance_best if clearance_best > -1.0e29 else 0.0
+        out_geomag_omega[i] = geomag_omega
+        out_grammage[i] = grammage_sum / cells if cells > 0 else 0.0
+        out_earth_chord[i] = chord_sum / cells if cells > 0 else 0.0
 
 
 def tau_decay_length_m(energy_pev):
@@ -431,7 +480,8 @@ def scan(candidates, elevation, map_grid, *,
          earth_radius_m=TRUE_EARTH_RADIUS_M,
          radio_earth_radius_m=RADIO_EARTH_RADIUS_M,
          frequency_mhz=None, shower_offset_m=3000.0, antenna_height_m=2.0,
-         near_field_m=500.0):
+         near_field_m=500.0,
+         geomag_declination_deg=None, geomag_inclination_deg=None):
     """
     Convenience wrapper over :func:`scan_candidates` with defaults for GRAND neutrinos.
 
@@ -451,6 +501,13 @@ def scan(candidates, elevation, map_grid, *,
     # Fresnel clearance is measured only when a band is given; 0 disables the second pass
     wavelength_m = 0.0 if not frequency_mhz else SPEED_OF_LIGHT / (frequency_mhz * 1.0e6)
 
+    # Geomagnetic weighting only when a field is supplied: guessing a field vector
+    # would be worse than declining to weight at all
+    use_geomag = (geomag_declination_deg is not None and geomag_inclination_deg is not None)
+    bx, by, bz = (physics.geomagnetic_unit_vector(geomag_declination_deg,
+                                                  geomag_inclination_deg)
+                  if use_geomag else (0.0, 0.0, 0.0))
+
     out = {
         "cells": np.zeros(n, dtype=np.int64),
         "solid_angle_sr": np.zeros(n, dtype=np.float64),
@@ -459,6 +516,9 @@ def scan(candidates, elevation, map_grid, *,
         "mean_depth_gcm2": np.zeros(n, dtype=np.float64),
         "horizon_deg": np.zeros(n, dtype=np.float64),
         "best_clearance_ratio": np.zeros(n, dtype=np.float64),
+        "geomag_solid_angle_sr": np.zeros(n, dtype=np.float64),
+        "path_grammage_gcm2": np.zeros(n, dtype=np.float64),
+        "earth_chord_gcm2": np.zeros(n, dtype=np.float64),
     }
     if n == 0:
         return out
@@ -475,8 +535,107 @@ def scan(candidates, elevation, map_grid, *,
         float(min_depth_gcm2), bool(require_terrain),
         float(rock_density), float(earth_radius_m), wavelength_m, float(shower_offset_m),
         float(antenna_height_m), float(near_field_m), float(radio_earth_radius_m),
+        float(bx), float(by), float(bz), bool(use_geomag),
+        physics.SEA_LEVEL_DENSITY_KGM3, physics.DENSITY_SCALE_HEIGHT_M,
+        physics.CRUST_DENSITY_GCM3,
         out["cells"], out["solid_angle_sr"], out["mean_distance_m"],
         out["max_depth_gcm2"], out["mean_depth_gcm2"], out["horizon_deg"],
         out["best_clearance_ratio"],
+        out["geomag_solid_angle_sr"], out["path_grammage_gcm2"], out["earth_chord_gcm2"],
     )
+    return out
+
+
+@jit(nopython=True, nogil=True, parallel=True)
+def _rfi_exposure(candidates, elevation, zone_rows, zone_cols, zone_weight,
+                  cell_size_y, cell_size_x, rows, cols, step_m, inv_2R, out_exposure):
+    """
+    Radio-noise exposure, counting only sources a candidate can actually see.
+
+    A circular exclusion zone treats a town behind a ridge exactly like one in plain
+    view, which the terrain says is wrong. This walks the straight line to each source
+    and drops the ones the terrain occludes; survivors contribute as 1/d^2.
+
+    The horizon machinery this reuses is already computed for the arrival scan, so the
+    only new cost is one short walk per candidate per source.
+    """
+    n = candidates.shape[0]
+    n_zones = zone_rows.shape[0]
+
+    for i in prange(n):
+        r0 = int(candidates[i, 0])
+        c0 = int(candidates[i, 1])
+        z0 = elevation[r0, c0]
+        exposure = 0.0
+        if np.isnan(z0):
+            out_exposure[i] = 0.0
+            continue
+
+        for k in range(n_zones):
+            dr = (zone_rows[k] - r0) * cell_size_y
+            dc = (zone_cols[k] - c0) * cell_size_x
+            dist = np.sqrt(dr * dr + dc * dc)
+            if dist < 1.0:
+                out_exposure[i] += zone_weight[k] * 1.0e6
+                continue
+
+            zr = int(zone_rows[k])
+            zc = int(zone_cols[k])
+            if zr < 0 or zr >= rows or zc < 0 or zc >= cols:
+                continue
+            z_zone = elevation[zr, zc]
+            if np.isnan(z_zone):
+                continue
+
+            # Walk the straight line and stop at the first terrain above it
+            blocked = False
+            steps = int(dist / step_m)
+            for sidx in range(1, steps):
+                frac = sidx / steps
+                d = dist * frac
+                tr = int(r0 + (zone_rows[k] - r0) * frac)
+                tc = int(c0 + (zone_cols[k] - c0) * frac)
+                if tr < 0 or tr >= rows or tc < 0 or tc >= cols:
+                    continue
+                z = elevation[tr, tc]
+                if np.isnan(z):
+                    continue
+                line_z = z0 + (z_zone - z0) * frac
+                if z - (d * d) * inv_2R > line_z:
+                    blocked = True
+                    break
+
+            if not blocked:
+                exposure += zone_weight[k] / (dist * dist)
+
+        out_exposure[i] = exposure
+
+
+def rfi_exposure(candidates, elevation, map_grid, zones_rowcol_weight, step_m=None,
+                 earth_radius_m=RADIO_EARTH_RADIUS_M):
+    """
+    Line-of-sight-weighted radio noise exposure for each candidate.
+
+    ``zones_rowcol_weight`` is an iterable of (row, col, weight); weight is normally the
+    zone's radius or population proxy. Sources hidden behind terrain contribute nothing.
+
+    Returns an array of exposure in weight per metre squared; smaller is quieter.
+    """
+    candidates = np.ascontiguousarray(candidates, dtype=np.float64)
+    n = candidates.shape[0]
+    out = np.zeros(n, dtype=np.float64)
+    zones = list(zones_rowcol_weight)
+    if n == 0 or not zones:
+        return out
+
+    zr = np.array([z[0] for z in zones], dtype=np.float64)
+    zc = np.array([z[1] for z in zones], dtype=np.float64)
+    zw = np.array([z[2] for z in zones], dtype=np.float64)
+    if step_m is None:
+        step_m = min(map_grid.cell_size_y, map_grid.cell_size_x)
+
+    _rfi_exposure(candidates, elevation, zr, zc, zw,
+                  map_grid.cell_size_y, map_grid.cell_size_x,
+                  elevation.shape[0], elevation.shape[1],
+                  float(step_m), 1.0 / (2.0 * earth_radius_m), out)
     return out
