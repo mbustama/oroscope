@@ -217,6 +217,38 @@ class TestManySites(unittest.TestCase):
         small_final, labeled_viz, _, _, count, _ = self.analyse(mask)
         np.testing.assert_array_equal(small_final.astype(bool), labeled_viz > 0)
 
+    def test_a_site_holds_no_more_detectors_than_its_own_area_allows(self):
+        """
+        Capacity was counted over each region's bounding *box*, which also contains
+        whatever else falls inside it -- other sites, and regions that failed the area
+        threshold. Those detectors were attributed to this site too, and since the
+        totals are summed the same ground was sold twice.
+
+        Here one region is an L whose bounding box spans the whole map, and a second
+        sits in the middle of it. The physical invariant is that no site can hold more
+        detectors than its own area divided by the area one detector occupies.
+        """
+        n = 400
+        mask = np.zeros((n, n), dtype=bool)
+        mask[0:8, :] = True                       # top bar
+        mask[:, 0:8] = True                       # left bar -- together an L
+        mask[180:260, 180:260] = True             # a separate block inside the L's box
+
+        _, _, site_details, total, count, _ = self.analyse(mask)
+        self.assertGreaterEqual(count, 2, "fixture must produce at least two regions")
+
+        spacing_km = 0.06
+        per_detector_km2 = (math.sqrt(3) / 2) * spacing_km ** 2
+        for site in site_details:
+            allowed = site["area_km2"] / per_detector_km2
+            self.assertLessEqual(
+                site["capacity_exact"], allowed * 1.05,
+                msg=(f"site {site['site_id']} claims {site['capacity_exact']} detectors "
+                     f"on {site['area_km2']:.3f} km², which only holds ~{allowed:.0f}"))
+
+        total_area = sum(s["area_km2"] for s in site_details)
+        self.assertLessEqual(total, (total_area / per_detector_km2) * 1.05)
+
 
 if __name__ == "__main__":
     unittest.main()

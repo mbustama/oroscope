@@ -593,3 +593,65 @@ class TestPhysicsVerification(unittest.TestCase):
                 v = physics.tau_exit_probability(X, e)
                 self.assertGreaterEqual(v, 0.0)
                 self.assertLessEqual(v, 1.0)
+
+
+class TestShowerProfileAndGrammageBand(unittest.TestCase):
+    """
+    The band a particle array accepts, derived from the primary energy.
+
+    A radio array wants a maturity threshold, because emission comes from around
+    shower maximum and then propagates through transparent air. A particle array wants
+    a band, because the charged-particle content dies after maximum. That band is what
+    decides whether a canyon is wide enough to be worth instrumenting, so it has to
+    come from the energy rather than from a hard-coded multiple of X_max.
+    """
+
+    def test_shower_maximum_deepens_with_energy_at_the_elongation_rate(self):
+        lo = physics.shower_maximum_gcm2(100.0)
+        hi = physics.shower_maximum_gcm2(1000.0)
+        self.assertAlmostEqual(hi - lo, physics.ELONGATION_RATE_GCM2_PER_DECADE, delta=1e-6)
+
+    def test_shower_maximum_matches_its_reference_at_the_reference_energy(self):
+        self.assertAlmostEqual(
+            float(physics.shower_maximum_gcm2(physics.X_MAX_REFERENCE_ENERGY_PEV)),
+            physics.X_MAX_GCM2, delta=1e-9)
+
+    def test_profile_peaks_at_maximum_and_is_normalised_there(self):
+        x_max = 700.0
+        grid = np.linspace(1.0, 3000.0, 3000)
+        n = physics.shower_size_fraction(grid, x_max)
+        self.assertAlmostEqual(float(n.max()), 1.0, delta=1e-3)
+        self.assertAlmostEqual(float(grid[n.argmax()]), x_max, delta=2.0)
+
+    def test_profile_rises_before_maximum_and_falls_after(self):
+        x_max = 700.0
+        rising = physics.shower_size_fraction(np.array([100.0, 300.0, 500.0]), x_max)
+        self.assertTrue(np.all(np.diff(rising) > 0))
+        falling = physics.shower_size_fraction(np.array([900.0, 1200.0, 1600.0]), x_max)
+        self.assertTrue(np.all(np.diff(falling) < 0))
+
+    def test_no_shower_before_the_first_interaction(self):
+        self.assertEqual(float(physics.shower_size_fraction(np.array([0.0]), 700.0)[0]), 0.0)
+
+    def test_band_brackets_shower_maximum(self):
+        lo, hi = physics.grammage_band_from_energy(3.0, 1000.0)
+        self.assertLess(lo, float(physics.shower_maximum_gcm2(3.0)))
+        self.assertGreater(hi, float(physics.shower_maximum_gcm2(1000.0)))
+
+    def test_a_looser_fraction_widens_the_band(self):
+        tight = physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.2)
+        loose = physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.05)
+        self.assertLess(loose[0], tight[0])
+        self.assertGreater(loose[1], tight[1])
+
+    def test_tambo_band_admits_a_full_colca_crossing_but_not_a_short_one(self):
+        """
+        The siting consequence. Colca is ~1.5 km deep and ~4.5 km rim to rim; at those
+        altitudes the air holds roughly 390 g/cm^2 across the full width and only about
+        170 g/cm^2 across 2 km. The band has to separate those, or the search cannot
+        tell a canyon worth instrumenting from a gully.
+        """
+        lo, hi = physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.1)
+        self.assertLess(lo, 390.0, "a full-width crossing must be inside the band")
+        self.assertGreater(lo, 170.0, "a 2 km crossing must not be")
+        self.assertGreater(hi, lo)

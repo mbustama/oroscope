@@ -109,6 +109,89 @@ def shower_maturity(grammage_gcm2, x_max_gcm2=X_MAX_GCM2):
     return grammage_gcm2 / x_max_gcm2 if x_max_gcm2 > 0 else 0.0
 
 
+# Shower maximum deepens with energy: more generations are needed before the average
+# particle drops below the critical energy. X_MAX_GCM2 is quoted at this reference.
+X_MAX_REFERENCE_ENERGY_PEV = 1.0e3               # 1 EeV
+# Elongation rate, g/cm^2 per decade of primary energy. ~55 is the usual hadronic
+# value; a purely electromagnetic cascade would be nearer the Heitler 85.
+ELONGATION_RATE_GCM2_PER_DECADE = 55.0
+# Gaisser-Hillas interaction length, setting how fast the profile rises and falls
+SHOWER_PROFILE_LAMBDA_GCM2 = 70.0
+
+
+def shower_maximum_gcm2(energy_pev, x_max_ref_gcm2=X_MAX_GCM2,
+                        reference_energy_pev=X_MAX_REFERENCE_ENERGY_PEV,
+                        elongation_rate=ELONGATION_RATE_GCM2_PER_DECADE):
+    """
+    Depth of shower maximum at a given primary energy.
+
+        X_max(E) = X_max(E_ref) + D * log10(E / E_ref)
+
+    Over TAMBO's 3 PeV to 1 EeV this runs from about 560 to 700 g/cm^2, so the energy
+    dependence is real but mild -- the band below is set far more by how much of the
+    profile is being accepted than by where its peak sits.
+    """
+    energy = np.asarray(energy_pev, dtype=np.float64)
+    return x_max_ref_gcm2 + elongation_rate * np.log10(energy / reference_energy_pev)
+
+
+def shower_size_fraction(grammage_gcm2, x_max_gcm2,
+                         lambda_gcm2=SHOWER_PROFILE_LAMBDA_GCM2):
+    """
+    Charged-particle content at depth X, as a fraction of the content at maximum.
+
+    Gaisser-Hillas with the first interaction at X_0 = 0:
+
+        N(X)/N_max = (X / X_max)^(X_max/lambda) * exp((X_max - X) / lambda)
+
+    Zero at and below X = 0. This is what makes a particle array's criterion a band
+    rather than a threshold: the content rises steeply, peaks, and then dies.
+    """
+    x = np.asarray(grammage_gcm2, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.where(x > 0.0, x / x_max_gcm2, 0.0)
+        out = np.where(
+            x > 0.0,
+            ratio ** (x_max_gcm2 / lambda_gcm2) * np.exp((x_max_gcm2 - x) / lambda_gcm2),
+            0.0)
+    return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def grammage_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.1,
+                              lambda_gcm2=SHOWER_PROFILE_LAMBDA_GCM2, samples=4000,
+                              **x_max_kw):
+    """
+    Atmospheric-depth band over which a particle array still sees a usable shower.
+
+    A particle detector needs the cascade to have grown but not yet died, so the
+    criterion is the depth range where the charged-particle content stays above
+    ``fraction`` of its own maximum. The band is taken across the requested energy
+    range: the low edge at the lowest energy, whose maximum is shallowest, and the high
+    edge at the highest, whose maximum is deepest.
+
+    At TAMBO's 3 PeV to 1 EeV and fraction 0.1 this gives roughly 235 to 1300 g/cm^2.
+    That matters for siting: a canyon crossing supplies only what its own width of air
+    contains -- about 170 g/cm^2 across 2 km of Colca, and ~390 g/cm^2 across its full
+    4.5 km rim to rim -- so the criterion selects the *widest* crossings, which is the
+    physically right answer and not one the default (X_max, 4*X_max) band could express.
+
+    Returns (low_gcm2, high_gcm2).
+    """
+    grid = np.linspace(1.0, 5000.0, samples)
+
+    def edges(energy):
+        x_max = float(shower_maximum_gcm2(energy, **x_max_kw))
+        n = shower_size_fraction(grid, x_max, lambda_gcm2)
+        ok = grid[n >= fraction]
+        if ok.size == 0:                            # pragma: no cover - degenerate
+            return x_max, x_max
+        return float(ok.min()), float(ok.max())
+
+    lo = edges(energy_min_pev)[0]
+    hi = edges(energy_max_pev)[1]
+    return (lo, hi) if lo <= hi else (hi, lo)
+
+
 # ---------------------------------------------------------------- Earth chord
 
 def earth_chord_m(elevation_deg, radius_m=EARTH_RADIUS_M):

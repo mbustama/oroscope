@@ -952,6 +952,50 @@ Ref. [2] Fig. 1 also annotates ">4 km shielding from background muons" — a pos
 additional criterion on rock overburden. **To confirm** whether this is a site
 requirement we should encode.
 
+### 5.3 First working TAMBO search, and GRAND+TAMBO combined ✅ delivered
+
+The structural claim in §5 held up: nearly every TAMBO requirement turned out to be
+expressible in configuration already — slope band, spacing, triangular grid, distance
+window, arrival window, no Fresnel, no geomagnetic weighting, particle grammage mode.
+One scan engine really does answer both. Only three code changes were needed.
+
+**`min_width_km = 0` is now legal.** It was validated as strictly positive, but the
+morphological opening it drives is precisely what deletes a strip-shaped array. A
+"block-like array" is a GRAND assumption, not a general one.
+
+**The shower band had to come from the energy** (§4.14 below). The default particle
+band is (X_max, 4·X_max) = 700–2800 g/cm², but a canyon crossing supplies only the air
+its own width contains. Every TAMBO candidate scored exactly zero until this was fixed.
+
+**Two more capacity bugs, both found by cross-checking area against capacity.** See
+§6.16; the second one inflated TAMBO's total by 38%.
+
+Colca crop (1981 × 3061 at 1 arc-second, cut from the existing Arequipa DEM, which
+already covers the canyon — verified 1673 m of incision against the published ~1.5 km):
+
+| | area | sites | capacity | of its own area in the joint |
+| --- | --- | --- | --- | --- |
+| GRAND | 4580.2 km² | 1 | 5317 | 2.5% |
+| TAMBO | 176.2 km² | 30 | 20385 | 65.3% |
+| joint | 115.1 km² | | | Jaccard 0.025 |
+| union | 4641.3 km² | | | |
+
+**The co-location result is the interesting one.** Two thirds of TAMBO-viable ground is
+also GRAND-viable, but that is only 2.5% of GRAND's, and the joint area is small in
+absolute terms because the two deployable slope bands barely overlap — GRAND's 3–25°
+against Colca's ~40° walls leaves only a 20–25° sliver. Co-location is possible but
+marginal, and it is the *slope* criterion that decides, not the arrival geometry.
+
+Visual check: the TAMBO selection traces the branching canyon network across the map
+while GRAND takes the open plateau, which is what the physics should produce and is the
+main evidence that the criteria are doing something real.
+
+**Still open.** TAMBO's acceptance is a score cut (`min_score`), which is a knob rather
+than a derivation; the slope band, the ±20° arrival window and the shower-band fraction
+are stated assumptions, not collaboration inputs; and slope is still tested only at the
+candidate pixel, so a *steep far wall* is not yet required — that is the per-role
+criterion of §5.2 and remains the deepest piece of the generalisation.
+
 ---
 
 ## 6. Phase 3 — Performance (in progress)
@@ -1300,6 +1344,36 @@ terrain mask cannot resolve whether those sub-pixel positions are usable.
 `tests/test_capacity.py::TestDensityMatchesTheRequestedSpacing` replaces the
 characterization tests that pinned the defect; the old ratios are now what a
 regression looks like.
+
+### 6.16 A second capacity bug: the bounding box is not the region ✅ fixed
+
+Found by checking an invariant rather than by reading code. Capacity and area are
+computed by different routes, so they must agree: `capacity × area-per-detector` should
+reconcile with the summed site area. For GRAND it did (0.99). For TAMBO it did not
+(0.725), and that gap was the bug.
+
+`count_grid_capacity` was handed `final_map_disk[bbox]` — the region's bounding **box**,
+not the region. A box also contains whatever else falls inside it: other sites, and
+regions that failed the area threshold. Their pixels were counted as this site's, and
+because the totals are summed over sites the same ground was sold more than once. One
+compact site barely notices, which is why GRAND looked fine and the goldens moved by
+only 2 DUs. A canyon network of thirty interleaved strips inflated its total by **38%**
+(28054 → 20385). A synthetic L whose box spans the map over-counted by **2.07×**.
+
+Restricting the count to `labeled[loc] == site_id` fixes it; both experiments now
+reconcile to within 0.5%. Pinned by
+`test_capacity.py::TestManySites::test_a_site_holds_no_more_detectors_than_its_own_area_allows`,
+which states the physical invariant directly — no site holds more detectors than its
+own area divides into — and fails on the previous code.
+
+Worth noting the general lesson: **the area/capacity cross-check is a cheap invariant
+that caught a bug neither the golden files nor 264 tests had noticed**, because both
+quantities were wrong in the same direction only when many sites overlapped.
+
+A related bias remains documented rather than fixed: per-site `area_km2` is measured on
+the *downsampled* map while capacity is measured at full resolution, so at
+`downsample_factor > 1` a feature only a few pixels wide loses area it keeps detectors
+on. Both Colca configs therefore run at `downsample_factor: 1`.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

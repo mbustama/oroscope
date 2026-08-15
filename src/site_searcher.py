@@ -987,6 +987,12 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     The structuring elements are sized per axis so that they cover the requested
     ground distance in both directions rather than only north-south.
 
+    ``min_width_km = 0`` degenerates the opening to a 1x1 element, i.e. an identity
+    that only carries the closed map back into ``path_A``. That is deliberate: a
+    "block-like array" is a GRAND assumption, and an experiment deployed along a
+    canyon wall is a strip a few hundred metres wide and tens of kilometres long,
+    which the opening would delete outright.
+
     Returns:
     - tuple(int, int): Set-pixel counts after closing and after pruning.
     """
@@ -1072,7 +1078,22 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 c_stop = min(c_stop, cols)
                 
                 mask_chunk = final_map_disk[r_start:r_stop, c_start:c_stop]
-                antennas_fit = count_grid_capacity(mask_chunk, cell_size_y, cell_size_x,
+
+                # Restrict to this region's own pixels. A bounding box is not the
+                # region: it also contains whatever else happens to fall inside it,
+                # including other sites and regions that failed the area threshold.
+                # Counting those attributes their detectors to this site as well, and
+                # since the totals are summed over sites the same ground is then sold
+                # twice. One compact site barely notices; a canyon network of thirty
+                # interleaved strips inflated its total by about 38%.
+                own = labeled[loc] == site_id
+                if downsample_factor > 1:
+                    own = np.repeat(np.repeat(own, downsample_factor, axis=0),
+                                    downsample_factor, axis=1)
+                h = min(own.shape[0], mask_chunk.shape[0])
+                w = min(own.shape[1], mask_chunk.shape[1])
+                site_chunk = np.logical_and(mask_chunk[:h, :w], own[:h, :w])
+                antennas_fit = count_grid_capacity(site_chunk, cell_size_y, cell_size_x,
                                                    spacing_m, grid_code)
                 
                 if antennas_fit >= threshold_antennas:
@@ -1381,6 +1402,35 @@ identify suitable deployment sites for the GRAND array.
 {C.HEADER}================================================================================{C.RESET}
     """)
 
+def parse_score_weights(value):
+    """
+    Normalises per-component score weights from either input form.
+
+    A config file is JSON, so it can carry a mapping directly. The command line
+    cannot, so it takes ``shower=2,solid_angle=1`` instead. Both end up as a dict, and
+    anything unnamed keeps weight 1.
+
+    Returns None when nothing was supplied, which leaves the composition unweighted.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):
+        return {str(k): float(v) for k, v in value.items()}
+    weights = {}
+    for pair in str(value).split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise SystemExit(f"--score_weights expects name=value pairs, got {pair!r}")
+        name, _, raw = pair.partition("=")
+        try:
+            weights[name.strip()] = float(raw)
+        except ValueError:
+            raise SystemExit(f"--score_weights value for {name.strip()!r} is not a number: {raw!r}")
+    return weights or None
+
+
 def validate_parameters(params):
     """
     Pre-flight validation checks to enforce 'Fail Fast' mechanisms. 
@@ -1394,8 +1444,11 @@ def validate_parameters(params):
         errors.append(f"DEM file not found: {params['dem_path']}")
     
     # 2. Check physical layout impossibilities
-    if params['min_width_km'] <= 0:
-        errors.append("min_width_km must be strictly positive (> 0).")
+    # 0 is legitimate and means "do not prune": an experiment whose array is a long
+    # thin strip rather than a compact blob -- TAMBO along a canyon wall -- is exactly
+    # what the opening would erase, so it has to be possible to turn off.
+    if params['min_width_km'] < 0:
+        errors.append("min_width_km cannot be negative (0 disables tendril pruning).")
         
     if params['target_antennas'] <= 0:
         errors.append("target_antennas must be strictly positive (> 0).")
@@ -1483,9 +1536,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
+                            score_weights=None, distance_band_m=None,
+                            solid_angle_half_sr=None, clearance_full_at=None,
                             min_score=0.0,
                             geomag_declination_deg=None, geomag_inclination_deg=None,
                             use_geomagnetic=True, grammage_mode='radio',
+                            grammage_band_gcm2=None, grammage_maturity_gcm2=None,
+                            grammage_band_fraction=None,
+                            shower_elongation_rate_gcm2=None, shower_lambda_gcm2=None,
                             muon_shielding_km=None, bilinear_sampling=True,
                             nu_interaction_length_gcm2=None):
     """
@@ -1512,6 +1570,27 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         lo_m, hi_m = arrival_scan.distance_window_from_energy(energy_min_pev, energy_max_pev)
         min_dist_km, max_dist_km = lo_m / 1000.0, hi_m / 1000.0
         energy_note = f" (from {energy_min_pev:g}-{energy_max_pev:g} PeV)"
+
+        # The same energies also fix a particle array's shower band, but through the
+        # shower profile rather than the tau decay length. Only derived when no band
+        # was given explicitly, and only in particle mode -- for radio the criterion
+        # is a maturity threshold, not a band.
+        if grammage_mode == 'particle' and grammage_band_gcm2 is None:
+            band_kw = {}
+            if grammage_band_fraction is not None:
+                band_kw["fraction"] = grammage_band_fraction
+            if shower_lambda_gcm2 is not None:
+                band_kw["lambda_gcm2"] = shower_lambda_gcm2
+            if shower_elongation_rate_gcm2 is not None:
+                band_kw["elongation_rate"] = shower_elongation_rate_gcm2
+            grammage_band_gcm2 = physics.grammage_band_from_energy(
+                energy_min_pev, energy_max_pev, **band_kw)
+            frac = (grammage_band_fraction
+                    if grammage_band_fraction is not None else 0.1)
+            print(f"      Shower band: {C.MAGENTA}{grammage_band_gcm2[0]:.0f}"
+                  f"-{grammage_band_gcm2[1]:.0f} g/cm²{C.RESET}"
+                  f" (from {energy_min_pev:g}-{energy_max_pev:g} PeV"
+                  f" at {frac:g} of shower maximum)")
 
     observables = None
 
@@ -1563,11 +1642,16 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "antenna_height_m": antenna_height_m, "fresnel_near_field_m": fresnel_near_field_m,
         "exclude_near_field": exclude_near_field,
         "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
+        "score_weights": score_weights, "distance_band_m": distance_band_m,
+        "solid_angle_half_sr": solid_angle_half_sr, "clearance_full_at": clearance_full_at,
+        "grammage_band_fraction": grammage_band_fraction,
         "min_score": min_score,
         "geomag_declination_deg": geomag_declination_deg,
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
+        "grammage_band_gcm2": grammage_band_gcm2,
+        "grammage_maturity_gcm2": grammage_maturity_gcm2,
         "muon_shielding_km": muon_shielding_km,
         "bilinear_sampling": bilinear_sampling,
         "target": target_antennas, "spacing_km": antenna_spacing_km,
@@ -1691,9 +1775,15 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                     candidates_arr, elevation, map_grid, buf_a, scan_params,
                     score_config={"depth_band_gcm2": depth_band_gcm2,
                                   "composition": score_composition,
+                                  "weights": score_weights,
                                   "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
                                   "spacing_m": antenna_spacing_km * 1000.0,
                                   "grammage_mode": grammage_mode,
+                                  "grammage_band_gcm2": grammage_band_gcm2,
+                                  "grammage_maturity_gcm2": grammage_maturity_gcm2,
+                                  "distance_band_m": distance_band_m,
+                                  "solid_angle_half_sr": solid_angle_half_sr,
+                                  "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
                 min_score=min_score, rfi_zones_px=rfi_zones_px)
             funnel.add("directions accepted", n_hits)
@@ -1869,6 +1959,15 @@ if __name__ == "__main__":
     parser.add_argument("--geomag_inclination_deg", type=float, default=None, help="Geomagnetic inclination, degrees, positive downward. Defaults to a centered-dipole estimate at the DEM's own centre, so it follows the site automatically.")
     parser.add_argument("--no_geomagnetic", action="store_false", dest="use_geomagnetic", help="Ignore the geomagnetic angle and weight all directions equally.")
     parser.add_argument("--grammage_mode", type=str, choices=['radio', 'particle'], default='radio', help="How atmospheric depth is scored. 'radio' is a maturity threshold, since emission comes from shower maximum and then propagates through transparent air. 'particle' is a band, since particle content dies after maximum (default: radio).")
+    parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
+    parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
+    parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
+    parser.add_argument("--shower_elongation_rate_gcm2", type=float, default=None, help="How much deeper shower maximum sits per decade of primary energy, in g/cm2 (default: 55, the usual hadronic value; a purely electromagnetic cascade is nearer 85).")
+    parser.add_argument("--shower_lambda_gcm2", type=float, default=None, help="Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).")
+    parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.")
+    parser.add_argument("--distance_band_m", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Exit-point distance band scoring 1, in metres. Defaults to the configured decay-baseline window.")
+    parser.add_argument("--clearance_full_at", type=float, default=None, help="Fresnel clearance ratio, in first-Fresnel radii, that scores 1 (default: 1.0).")
+    parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1.")
     parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
     parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
@@ -1945,6 +2044,15 @@ if __name__ == "__main__":
             "bilinear_sampling": True,
             "use_geomagnetic": True,
             "grammage_mode": "radio",
+            "grammage_band_gcm2": None,
+            "grammage_maturity_gcm2": None,
+            "grammage_band_fraction": None,
+            "shower_elongation_rate_gcm2": None,
+            "shower_lambda_gcm2": None,
+            "solid_angle_half_sr": None,
+            "distance_band_m": None,
+            "clearance_full_at": None,
+            "score_weights": None,
             "nu_interaction_length_gcm2": None,
             "score_composition": "product",
             "min_score": 0.0,
@@ -2150,5 +2258,16 @@ if __name__ == "__main__":
         bilinear_sampling=final_params.get('bilinear_sampling', True),
         use_geomagnetic=final_params.get('use_geomagnetic', True),
         grammage_mode=final_params.get('grammage_mode', 'radio'),
+        grammage_band_gcm2=(tuple(final_params['grammage_band_gcm2'])
+                            if final_params.get('grammage_band_gcm2') else None),
+        grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
+        grammage_band_fraction=final_params.get('grammage_band_fraction'),
+        shower_elongation_rate_gcm2=final_params.get('shower_elongation_rate_gcm2'),
+        shower_lambda_gcm2=final_params.get('shower_lambda_gcm2'),
+        solid_angle_half_sr=final_params.get('solid_angle_half_sr'),
+        distance_band_m=(tuple(final_params['distance_band_m'])
+                         if final_params.get('distance_band_m') else None),
+        clearance_full_at=final_params.get('clearance_full_at'),
+        score_weights=parse_score_weights(final_params.get('score_weights')),
         nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
     )
