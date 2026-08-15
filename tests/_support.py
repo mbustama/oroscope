@@ -46,10 +46,13 @@ def quiet():
 
 def run_pipeline(dem_path, out_dir, origin_lat, origin_lon, **overrides):
     """
-    Runs the full search and returns the parsed results JSON.
+    Runs the full search and returns its results.
 
     Exercising the real entry point (rather than the internals) means the golden
-    files also cover the output-writing stages.
+    files also cover the output-writing stages. The pipeline hands back the same
+    dictionary it serialises, so this no longer has to find and re-read the file --
+    but it still checks that the file was written, since that is part of the contract
+    the golden files rest on.
     """
     params = dict(
         target_antennas=100,
@@ -72,17 +75,16 @@ def run_pipeline(dem_path, out_dir, origin_lat, origin_lon, **overrides):
 
     os.makedirs(out_dir, exist_ok=True)
     with quiet():
-        ss.find_grand_regions_interactive(
+        results = ss.find_grand_regions_interactive(
             dem_path=dem_path, origin_lat=origin_lat, origin_lon=origin_lon,
             run_output_dir=out_dir, **params
         )
 
-    import json
-    found = ss.find_results_json(out_dir)
-    if not found:
+    if results is None:
+        raise AssertionError(f"pipeline returned no results for {dem_path}")
+    if not ss.find_results_json(out_dir):
         raise AssertionError(f"pipeline produced no results JSON in {out_dir}")
-    with open(found) as f:
-        return json.load(f)
+    return results
 
 
 def summarize(results):

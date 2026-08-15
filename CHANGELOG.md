@@ -5,6 +5,20 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 ## Unreleased
 
 ### Added
+- **Every run explains itself.** A plain-language summary — what was found, which
+  funnel stage set the size of the answer and the parameter behind it, which named
+  score component held each site back, and which numbers are assumptions with their
+  measured sensitivity. Printed last and saved as `explanation.txt`; on by default,
+  `--no_explain` suppresses it. `explain.explain_results(results)` is pure, so an old
+  results file can be re-explained with no DEM and nothing re-run.
+- **Named score components are now stored per site**, so a weak site can be attributed
+  rather than only reported. On the Colca configs the attribution is unambiguous:
+  `solid_angle` is the weakest component at 15 of 15 TAMBO sites.
+- **CLI/library parity.** `max_memory_gb` is a pipeline parameter and the memory
+  estimate, warning and cap are `preflight_memory()`; `load_config`,
+  `generate_config` and `default_config` are ordinary functions rather than a literal
+  inside `main()`; and the pipeline **returns its results dictionary** instead of
+  `None`, so callers no longer re-read the JSON it just wrote.
 - **Two experiments from one engine.** TAMBO is now a configuration rather than a code
   path, alongside GRAND, and `oroscope-combine` overlays two runs to report joint,
   union and co-location.

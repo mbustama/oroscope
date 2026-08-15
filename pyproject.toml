@@ -96,8 +96,8 @@ oroscope-fetch-dem = "fetch_dem:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = ["site_searcher", "arrival_scan", "physics", "scoring", "aperture",
-              "combine_experiments", "crop_dem", "sensitivity", "fetch_dem",
-              "generate_env"]
+              "explain", "combine_experiments", "crop_dem", "sensitivity",
+              "fetch_dem", "generate_env"]
 
 [tool.pytest.ini_options]
 # The suite is stdlib unittest and is normally run as `python -m unittest discover`

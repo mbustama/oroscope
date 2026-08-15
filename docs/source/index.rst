@@ -46,6 +46,17 @@ same scan, and a search can report where each is viable and where the two coinci
 
 .. jupyter-execute::
    :hide-code:
+   :hide-output:
+
+   # As physics.rst: jupyter-sphinx runs these blocks in a plain kernel, which renders
+   # a Figure as its text repr rather than as a PNG unless the inline backend is
+   # switched on. Without this the diagram below was the literal text
+   # "<Figure size 1020x415 with 2 Axes>" -- on the front page, in a build that
+   # reported no error.
+   %matplotlib inline
+
+.. jupyter-execute::
+   :hide-code:
 
    import figures
    figures.walk_mechanism()

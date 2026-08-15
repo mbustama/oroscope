@@ -23,7 +23,8 @@ import _support  # noqa: F401  (path setup)
 # site_searcher is included for the routines that take plain arrays -- the terrain
 # derivatives, the slope band, the capacity lattice. Its pipeline stages need a DEM on
 # disk and are exercised by the regression tests instead.
-DOCTESTED = ("physics", "scoring", "arrival_scan", "aperture", "site_searcher")
+DOCTESTED = ("physics", "scoring", "arrival_scan", "aperture", "explain",
+             "site_searcher")
 
 OPTIONS = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
 

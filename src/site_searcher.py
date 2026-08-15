@@ -26,6 +26,7 @@ import re
 
 import arrival_scan
 import aperture as aperture_mod
+import explain as explain_mod
 import physics
 import scoring
 
@@ -45,7 +46,13 @@ __all__ = [
     "create_world_file", "generate_kml_file", "generate_visualizations_and_outputs",
     "collect_provenance", "validate_parameters", "parse_score_weights",
     "explicitly_passed", "is_point_in_poly", "apply_poly_mask_numba",
-    "Funnel", "MapGrid", "RESULTS_PREFIX", "find_results_json",
+    "Funnel", "MapGrid", "RESULTS_PREFIX", "LEGACY_RESULTS_PREFIX",
+    "find_results_json",
+    # Everything the command line can do, the library can do too: configuration
+    # files, the memory pre-flight, and the run summary.
+    "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
+    "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
+    "preflight_memory", "emit_explanation",
 ]
 
 # Try to import psutil for RAM stats
@@ -1310,6 +1317,11 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
                   "target_slope_deg", "rfi_exposure"):
         if extra in observables:
             fields.append(extra)
+    # The named score components, each in [0, 1]. Without them the record carries the
+    # total and nothing else, so a weak site cannot be attributed to the criterion that
+    # weakened it -- which is the whole reason the components are named (scoring.py).
+    fields.extend(sorted(k for k in observables
+                         if k.startswith("score_") and k not in fields))
     fields = tuple(fields)
     values = {f: observables[f][accepted][inside] for f in fields}
 
@@ -1855,8 +1867,12 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
 
     Returns
     -------
-    str
-        Path to the results JSON.
+    generated_files : list of str
+        Absolute paths of everything written.
+    out_data : dict
+        The results as serialised into the JSON. Returned as well as written so the
+        caller does not have to find and re-read the file it was just handed the path
+        to, which is what every caller was doing.
     """
     generated_files = []
     cell_size_deg = map_grid.cell_size_deg
@@ -1999,7 +2015,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         generated_files.append(os.path.abspath(prov_name))
         print(f"      {Icon.CHECK}Provenance saved.")
 
-    return generated_files
+    return generated_files, out_data
 
 def print_tool_explanation():
     """Outputs a formatted explanation of the tool's capabilities and logic to the console."""
@@ -2295,6 +2311,79 @@ def available_memory_gb():
     return None                                          # pragma: no cover
 
 
+def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
+                     max_memory_gb=None, quiet=False):
+    """
+    Estimates what a search will need, says so, and caps the address space.
+
+    This ran only inside ``main()``, so a library user -- a sweep, a notebook, a
+    service -- got neither the warning nor the cap unless they knew to ask for both.
+    That is exactly the caller most likely to need them: a ten-point sweep once reached
+    6.9 GB and was killed by the OOM killer, taking other work with it.
+
+    Parameters
+    ----------
+    dem_path : str
+        DEM whose dimensions set the estimate. An unreadable file skips the estimate
+        but not the cap.
+    downsample_factor : int, optional
+        As the pipeline's. Dominates the estimate: the labelling arrays scale as its
+        inverse square.
+    candidate_stride : int, optional
+        As the pipeline's.
+    max_memory_gb : float, optional
+        Ceiling in GiB. ``None`` uses 80% of what the system reports available, so the
+        cap bites before the kernel does; 0 disables capping entirely.
+    quiet : bool, optional
+        Suppress the printed report, keeping the cap and the returned numbers.
+
+    Returns
+    -------
+    dict
+        ``{"estimate_gb", "available_gb", "cap_gb", "capped"}``. ``estimate_gb`` is
+        ``None`` when the DEM could not be measured.
+
+    Notes
+    -----
+    The estimate is rough by construction -- it assumes a survival fraction the
+    topographic screen has not yet measured -- so an over-large search is warned about
+    rather than refused.
+    """
+    rows = cols = None
+    try:
+        with tiff.TiffFile(dem_path) as handle:
+            rows, cols = handle.pages[0].shape[:2]
+    except Exception:
+        pass
+
+    have = available_memory_gb()
+    need = None
+    if rows and cols:
+        need = estimate_peak_memory_gb(rows, cols,
+                                       downsample_factor=int(downsample_factor or 1),
+                                       candidate_stride=int(candidate_stride or 5))
+        if not quiet:
+            print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
+                  + (f", available {have:.1f} GiB" if have else ""))
+        if have and need > 0.8 * have and not quiet:
+            print(f"{C.WARN}{Icon.WARN}This search is estimated to need {need:.1f} GiB "
+                  f"against {have:.1f} GiB available. Raise downsample_factor "
+                  f"(memory scales as its inverse square) or crop the DEM. The estimate "
+                  f"is rough, so this is a warning rather than a refusal.{C.RESET}")
+
+    cap = max_memory_gb
+    if cap is None:
+        # 80% of what is available, so the cap bites before the kernel does while
+        # leaving room for the address space numba and BLAS reserve without touching.
+        cap = 0.8 * have if have else None
+    capped = bool(cap and apply_memory_cap(cap))
+    if capped and not quiet:
+        print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
+              f" (max_memory_gb=0 disables)")
+    return {"estimate_gb": need, "available_gb": have,
+            "cap_gb": cap if capped else None, "capped": capped}
+
+
 def validate_parameters(params):
     """
     Pre-flight validation checks to enforce 'Fail Fast' mechanisms. 
@@ -2387,6 +2476,260 @@ def validate_parameters(params):
         print(f"{C.FAIL}================================================================================{C.RESET}\n")
         sys.exit(1)
 
+
+# ==========================================
+#             CONFIGURATION FILES
+# ==========================================
+# Config handling used to live inside main(), which meant a library user could load
+# neither a config file nor a template without reimplementing both. They are ordinary
+# functions on the module now, and main() calls them like anyone else.
+
+CONFIG_PRESETS = ("default", "lima", "arequipa")
+
+
+def default_config(preset="default"):
+    """
+    The full set of knobs with their default values, as a plain dictionary.
+
+    Every key the pipeline understands appears here, which is the point: a template
+    with holes in it silently falls back for whatever it omits, and the fallbacks are
+    the least visible input the tool has.
+
+    Parameters
+    ----------
+    preset : str, optional
+        ``"default"``, or ``"lima"``/``"arequipa"`` to fill in that region's origin,
+        RFI zones, name and DEM filename.
+
+    Returns
+    -------
+    dict
+        Configuration, ready to serialise or to pass to the pipeline.
+
+    Raises
+    ------
+    ValueError
+        If the preset is not one of :data:`CONFIG_PRESETS`.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> cfg = ss.default_config("arequipa")
+    >>> cfg["rfi_zones"], cfg["min_slope_deg"], cfg["explain"]
+    ('arequipa', 3.0, True)
+    """
+    if preset not in CONFIG_PRESETS:
+        raise ValueError(f"unknown preset {preset!r}; expected one of {CONFIG_PRESETS}")
+
+    config = {
+        "dem_path": "path_to_your_dem.tif",
+        "origin_lat": 0.0,
+        "origin_lon": 0.0,
+        "target_antennas": 10000,
+        "min_width_km": 2.0,
+        "min_altitude": None,
+        "max_altitude": None,
+        "min_slope_deg": 3.0,
+        "max_slope_deg": 25.0,
+        "antenna_spacing_km": 1.0,
+        "min_dist_km": 10.0,
+        "max_dist_km": 80.0,
+        "grid_type": "hex",
+        "downsample_factor": 4,
+        "cell_size_deg": None,
+        "candidate_stride": 5,
+        "slope_baseline_m": None,
+        "energy_min_pev": None,
+        "energy_max_pev": None,
+        "n_azimuths": 9,
+        "azimuth_half_width_deg": 60.0,
+        "elev_min_deg": -3.0,
+        "elev_max_deg": 3.0,
+        "n_elev_bins": 12,
+        "min_column_depth_gcm2": 0.0,
+        # The CLI's --require_sky, in its config-file spelling. The pipeline takes the
+        # positive form (require_terrain); main() inverts it.
+        "require_sky": False,
+        "decay_energy_pev": None,
+        "max_range_km": None,
+        "score_percentile": None,
+        "stop_at_target": False,
+        "max_memory_gb": None,
+        "decay_energy_min_pev": None,
+        "decay_energy_max_pev": None,
+        "decay_spectral_index": None,
+        "shower_development_m": 3000.0,
+        "gap_close_km": None,
+        "min_target_slope_deg": None,
+        "max_target_slope_deg": None,
+        "fresnel_frequency_mhz": None,
+        "antenna_height_m": 2.0,
+        "exclude_near_field": True,
+        "fresnel_near_field_m": 500.0,
+        "refraction_k": None,
+        "depth_band_gcm2": None,
+        "geomag_declination_deg": None,
+        "geomag_inclination_deg": None,
+        "muon_shielding_km": None,
+        "bilinear_sampling": True,
+        "use_geomagnetic": True,
+        "grammage_mode": "radio",
+        "grammage_band_gcm2": None,
+        "grammage_maturity_gcm2": None,
+        "grammage_band_fraction": None,
+        "shower_elongation_rate_gcm2": None,
+        "shower_lambda_gcm2": None,
+        "solid_angle_half_sr": None,
+        "distance_band_m": None,
+        "clearance_full_at": None,
+        "score_weights": None,
+        "nu_interaction_length_gcm2": None,
+        "score_composition": "product",
+        "min_score": 0.0,
+        "tile_size": 2048,
+        "num_cores": -1,
+        "rfi_zones": "none",
+        "road_map_path": None,
+        "max_road_dist_km": 20.0,
+        "search_mode": "distributed",
+        "min_sub_array_size": 500,
+        "min_aspect_deg": None,
+        "max_aspect_deg": None,
+        "region_name": "Custom Region",
+        "generate_kml": True,
+        "print_info": True,
+        "explain": True,
+        "output_directory_base_with_given_json": "../output/",
+        "output_image_format": "png",
+        "resume": False,
+        "resume_dir": None
+    }
+
+    if preset == 'lima':
+        config['origin_lat'] = ORIGIN_LAT_LIMA
+        config['origin_lon'] = ORIGIN_LON_LIMA
+        config['rfi_zones'] = 'lima'
+        config['region_name'] = 'Lima, Peru'
+        config['dem_path'] = 'lima_AW3D30.tif'
+    elif preset == 'arequipa':
+        config['origin_lat'] = ORIGIN_LAT_AREQUIPA
+        config['origin_lon'] = ORIGIN_LON_AREQUIPA
+        config['rfi_zones'] = 'arequipa'
+        config['region_name'] = 'Arequipa, Peru'
+        config['dem_path'] = 'arequipa_SRTMGL1.tif'
+    return config
+
+
+def generate_config(path, preset="default"):
+    """
+    Writes a configuration template to ``path``, creating its directory if needed.
+
+    What ``--generate_config`` does, available to anyone driving the pipeline in a
+    loop or generating a family of runs.
+
+    Parameters
+    ----------
+    path : str
+        Destination JSON file.
+    preset : str, optional
+        As :func:`default_config`.
+
+    Returns
+    -------
+    dict
+        The configuration that was written.
+
+    Notes
+    -----
+    A generated config names every key, so it also overrides every fallback. That is
+    intended -- but note the command line still wins over both, which it did not
+    always do.
+    """
+    config = default_config(preset)
+    dir_name = os.path.dirname(os.path.abspath(path))
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(config, f, indent=4)
+    return config
+
+
+def load_config(path):
+    """
+    Reads a configuration JSON.
+
+    Parameters
+    ----------
+    path : str
+        Path to the file.
+
+    Returns
+    -------
+    dict
+        Its contents, or an empty dictionary when the file does not exist -- which is
+        how the command line has always treated a missing ``--config_path``, and
+        matching it here keeps one behaviour rather than two.
+
+    Raises
+    ------
+    json.JSONDecodeError
+        If the file exists but is not valid JSON. Unlike a missing file, that is a
+        mistake worth failing on.
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def emit_explanation(results, run_output_dir=None, print_it=True):
+    """
+    Composes the run's plain-language summary, prints it, and saves it beside the run.
+
+    A thin wrapper over :func:`explain.explain_results`: the words themselves are that
+    function's business, so they can be regenerated from an old results file without
+    this one. What is added here is the placement -- last on the console, so it is what
+    a reader is left with, and in ``explanation.txt`` so the run can be handed on
+    without the terminal it was run in.
+
+    Failures are reported and swallowed. A summary that cannot be written is not a
+    reason to lose a search that already succeeded.
+
+    Parameters
+    ----------
+    results : dict
+        The run's results. Gains an ``"explanation"`` key.
+    run_output_dir : str, optional
+        Directory to write ``explanation.txt`` into. Omitted writes no file.
+    print_it : bool, optional
+        Whether to print. False still composes and stores the text.
+
+    Returns
+    -------
+    str or None
+        The summary, or ``None`` if it could not be composed.
+    """
+    try:
+        text = explain_mod.explain_results(results, results.get("provenance"))
+    except Exception as e:                               # pragma: no cover - defensive
+        print(f"   {C.WARN}{Icon.WARN}Could not compose the run summary: {e}{C.RESET}")
+        return None
+
+    results["explanation"] = text
+    if print_it:
+        print("\n" + text)
+    if run_output_dir:
+        try:
+            path = os.path.join(run_output_dir, "explanation.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            if print_it:
+                print(f"   {Icon.INFO}{os.path.abspath(path)}")
+        except OSError as e:                             # pragma: no cover - defensive
+            print(f"   {C.WARN}{Icon.WARN}Could not write explanation.txt: {e}{C.RESET}")
+    return text
+
+
 # ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
@@ -2429,7 +2772,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             grammage_band_fraction=None,
                             shower_elongation_rate_gcm2=None, shower_lambda_gcm2=None,
                             muon_shielding_km=None, bilinear_sampling=True,
-                            nu_interaction_length_gcm2=None):
+                            nu_interaction_length_gcm2=None,
+                            max_memory_gb=None, explain=True):
     """
     The main orchestrator. Now decoupled from logic, it sets up the environment,
     calls the pipeline helpers in sequence, and manages memory cleanup and checkpointing.
@@ -2558,6 +2902,23 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         *far* wall. Unset by default, which asks only that rock is present -- true
         almost everywhere in mountainous terrain.
 
+    max_range_km : float, optional
+        How far each profile is walked, in km. Defaults to ``max_dist_km``. Worth
+        setting larger for a short-range search: column depth accumulates over the
+        whole walk, so tying the two makes the reported depth a property of where the
+        walk stopped rather than of the target's thickness.
+
+    score_percentile : float, optional
+        Keep this percentage of viable candidates, ranked by score, instead of cutting
+        at an absolute ``min_score``. Preferred, and for the same reason: a rank is
+        scale-free, so it does not move when the composition or the number of
+        components changes.
+
+    stop_at_target : bool, optional
+        In distributed mode, stop selecting sites once ``target_antennas`` is reached.
+        Sites are ranked by capacity, so this reports the best sites for the array
+        actually wanted rather than every patch of qualifying ground.
+
     decay_energy_pev : float, optional
         Single energy at which to score the probability the tau decays in the gap.
         Superseded by the range below and kept for asking what one energy would have
@@ -2654,6 +3015,29 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     nu_interaction_length_gcm2 : float, optional
         Neutrino interaction length, enabling the Earth-chord attenuation term.
 
+    max_memory_gb : float, optional
+        Ceiling on this process's address space, in GiB. ``None`` uses 80% of what the
+        system reports available, so a search that outgrows the machine fails with
+        ``MemoryError`` instead of inviting the OOM killer to choose a victim; 0
+        disables the cap. See :func:`preflight_memory`.
+
+    explain : bool, optional
+        Print the plain-language account of the run -- what was found, which
+        constraint set the size of the answer, and which numbers are assumptions --
+        and save it as ``explanation.txt`` beside the results. On by default. The
+        text is also in the returned dictionary under ``"explanation"``, and can be
+        regenerated from any results file with :func:`explain.explain_results`.
+
+    Returns
+    -------
+    dict
+        The run's results: ``parameters``, ``results`` (sites, capacity), ``funnel``,
+        ``regions``, ``timings_sec``, ``aperture``, ``provenance``, ``explanation``
+        and the paths of the files written. The same content as the results JSON, so
+        a caller no longer has to find and re-read the file this just wrote. A run
+        that finds no candidate at all still returns its funnel, which is the case
+        where the funnel matters most.
+
     Notes
     -----
     Writes GeoTIFF, world file, PNG, optional KML, a results JSON and a provenance
@@ -2671,6 +3055,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"      Origin: {C.MAGENTA}{origin_lat:.6f}, {origin_lon:.6f}{C.RESET}"
           f"  ({origin_source})")
 
+    # Estimate, warn and cap before anything expensive is allocated. In the pipeline
+    # rather than in main() so that every caller is protected, not only the CLI one.
+    preflight_memory(dem_path, downsample_factor=downsample_factor,
+                     candidate_stride=candidate_stride, max_memory_gb=max_memory_gb)
 
     # Cast safety to ensure slice logic doesn't fail if passed as float via JSON
     downsample_factor = int(downsample_factor)
@@ -2798,6 +3186,15 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "downsample_factor": downsample_factor,
         "min_altitude": min_altitude, "max_altitude": max_altitude,
         "min_slope_deg": min_slope_deg, "max_slope_deg": max_slope_deg,
+        # Screening and shaping knobs that were resolved but never recorded, so a
+        # summary written from the results file could not name the filter that did
+        # the work. They cost nothing to carry and the funnel is unreadable without
+        # them: "after pruning (< 2.0 km wide)" means little if min_width_km is absent.
+        "min_width_km": min_width_km,
+        "min_aspect_deg": min_aspect_deg, "max_aspect_deg": max_aspect_deg,
+        "max_road_dist_km": max_road_dist_km,
+        "search_mode": search_mode, "region_name": region_name,
+        "rfi_zone_count": len(rfi_zones) if rfi_zones else 0,
         "tile_size": tile_size, "resume": resume, "resume_dir": resume_dir,
         "num_cores": num_cores
     }
@@ -2865,6 +3262,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     path_A = None
     path_B = None
     success_flag = False
+    results = None
+    generated_files = []
 
     # Run accounting: per-stage wall time, per-filter survivor counts, and provenance
     timings = {}
@@ -2903,7 +3302,22 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             if total == 0:
                 print(f"      {Icon.CROSS}{C.WARN}No viable candidates found in topographic pass.{C.RESET}")
                 success_flag = True
-                return
+                # Still a result, and the one where the funnel earns its keep: the
+                # stage where the count collapsed is the whole answer. Returning it
+                # (rather than None) means the explanation below can say which
+                # screening filter emptied the map.
+                results = {
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": search_mode,
+                    "parameters": export_params,
+                    "results": {"total_sites": 0, "total_capacity": 0, "sites": []},
+                    "funnel": funnel.as_dict(),
+                    "regions": {},
+                    "timings_sec": timings,
+                    "aperture": {},
+                    "provenance": provenance,
+                }
+                return results
     
             # Step 3: Physics Simulation
             print(f"\n{C.BOLD}[3/6]{C.RESET} {Icon.GEAR}Ray Tracing ({C.MAGENTA}{total}{C.RESET} candidates)...")
@@ -2968,7 +3382,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         # Step 6: Create Outputs
         print(f"\n{C.BOLD}[6/6]{C.RESET} {Icon.DISK}Saving & Visualization...")
         t0 = time.time()
-        generated_files = generate_visualizations_and_outputs(
+        generated_files, results = generate_visualizations_and_outputs(
             dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
             origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
             output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km,
@@ -3016,6 +3430,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
 
         # Mark as cleanly finished so finally block knows to purge temporary arrays
         success_flag = True
+        return results
 
     finally:
         # Smart Cleanup
@@ -3033,6 +3448,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         timings["total"] = time.time() - t_start_total
         print(f"\n{C.OK}Total Execution Time: {timings['total']:.2f} seconds{C.RESET}")
         print(f"{C.BOLD}Done.{C.RESET}")
+
+        # Last, so it is what a reader is left with. In the `finally` so that the
+        # run that found nothing is explained too -- it is the one most in need of it.
+        if results is not None:
+            results.setdefault("provenance", provenance)
+            results["output_files"] = list(generated_files or [])
+            emit_explanation(results, run_output_dir if explain else None,
+                             print_it=explain)
 
 # Custom Logger Interceptor
 class TeeLogger:
@@ -3153,6 +3576,7 @@ def main():
     parser.add_argument("--region_name", type=str, default=None, help="Cosmetic region name to print on the final visualization chart.")
     parser.add_argument("--generate_kml", action="store_true", help="Include this flag to generate a Google Earth KML file of the findings.")
     parser.add_argument("--no_print_info", action="store_false", dest="print_info", help="Include this flag to skip printing the detailed explanatory text.")
+    parser.add_argument("--no_explain", action="store_false", dest="explain", help="Skip the plain-language summary of the run. It is printed by default, and saved as explanation.txt beside the results: what was found, which constraint set the size of the answer, what held the surviving sites back, and which of the numbers are assumptions rather than measurements. A results file can be re-explained at any time with explain.explain_results().")
     
     # IO / Configs mapping & Tools
     parser.add_argument("--config_path", type=str, default=None, help="Path to external JSON configuration file.")
@@ -3163,131 +3587,25 @@ def main():
     
     # Tool Generation Arguments
     parser.add_argument("--generate_config", type=str, default=None, help="Supply a filepath to generate a default JSON config template and exit.")
-    parser.add_argument("--config_preset", type=str, choices=['default', 'lima', 'arequipa'], default='default', help="Optional presets to inject when using --generate_config.")
+    parser.add_argument("--config_preset", type=str, choices=list(CONFIG_PRESETS), default='default', help="Optional presets to inject when using --generate_config.")
 
     args = parser.parse_args()
     explicit_cli = explicitly_passed(parser)
 
     # --- Tool Execution: Generate Config Template ---
     if args.generate_config:
-        preset = args.config_preset
-        default_config = {
-            "dem_path": "path_to_your_dem.tif",
-            "origin_lat": 0.0,
-            "origin_lon": 0.0,
-            "target_antennas": 10000,
-            "min_width_km": 2.0,
-            "min_altitude": None,
-            "max_altitude": None,
-            "min_slope_deg": 3.0,
-            "max_slope_deg": 25.0,
-            "antenna_spacing_km": 1.0,
-            "min_dist_km": 10.0,
-            "max_dist_km": 80.0,
-            "grid_type": "hex",
-            "downsample_factor": 4,
-            "cell_size_deg": None,
-            "candidate_stride": 5,
-            "slope_baseline_m": None,
-            "energy_min_pev": None,
-            "energy_max_pev": None,
-            "n_azimuths": 9,
-            "azimuth_half_width_deg": 60.0,
-            "elev_min_deg": -3.0,
-            "elev_max_deg": 3.0,
-            "n_elev_bins": 12,
-            "min_column_depth_gcm2": 0.0,
-            "decay_energy_pev": None,
-            "max_range_km": None,
-            "score_percentile": None,
-            "stop_at_target": False,
-            "max_memory_gb": None,
-            "decay_energy_min_pev": None,
-            "decay_energy_max_pev": None,
-            "decay_spectral_index": None,
-            "shower_development_m": 3000.0,
-            "gap_close_km": None,
-            "min_target_slope_deg": None,
-            "max_target_slope_deg": None,
-            "fresnel_frequency_mhz": None,
-            "antenna_height_m": 2.0,
-            "exclude_near_field": True,
-            "fresnel_near_field_m": 500.0,
-            "refraction_k": None,
-            "depth_band_gcm2": None,
-            "geomag_declination_deg": None,
-            "geomag_inclination_deg": None,
-            "muon_shielding_km": None,
-            "bilinear_sampling": True,
-            "use_geomagnetic": True,
-            "grammage_mode": "radio",
-            "grammage_band_gcm2": None,
-            "grammage_maturity_gcm2": None,
-            "grammage_band_fraction": None,
-            "shower_elongation_rate_gcm2": None,
-            "shower_lambda_gcm2": None,
-            "solid_angle_half_sr": None,
-            "distance_band_m": None,
-            "clearance_full_at": None,
-            "score_weights": None,
-            "nu_interaction_length_gcm2": None,
-            "score_composition": "product",
-            "min_score": 0.0,
-            "tile_size": 2048,
-            "num_cores": -1,
-            "rfi_zones": "none",
-            "road_map_path": None,
-            "max_road_dist_km": 20.0,
-            "search_mode": "distributed",
-            "min_sub_array_size": 500,
-            "min_aspect_deg": None,
-            "max_aspect_deg": None,
-            "region_name": "Custom Region",
-            "generate_kml": True,
-            "print_info": True,
-            "output_directory_base_with_given_json": "../output/",
-            "output_image_format": "png",
-            "resume": False,
-            "resume_dir": None
-        }
-        
-        # Inject presets if specifically requested
-        if preset == 'lima':
-            default_config['origin_lat'] = ORIGIN_LAT_LIMA
-            default_config['origin_lon'] = ORIGIN_LON_LIMA
-            default_config['rfi_zones'] = 'lima'
-            default_config['region_name'] = 'Lima, Peru'
-            default_config['dem_path'] = 'lima_AW3D30.tif'
-        elif preset == 'arequipa':
-            default_config['origin_lat'] = ORIGIN_LAT_AREQUIPA
-            default_config['origin_lon'] = ORIGIN_LON_AREQUIPA
-            default_config['rfi_zones'] = 'arequipa'
-            default_config['region_name'] = 'Arequipa, Peru'
-            default_config['dem_path'] = 'arequipa_SRTMGL1.tif'
-
-        # Safely create directory structure if necessary and save
-        dir_name = os.path.dirname(os.path.abspath(args.generate_config))
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
-            
-        with open(args.generate_config, 'w') as f:
-            json.dump(default_config, f, indent=4)
-        print(f"Configuration file generated successfully at: {args.generate_config} (Preset: {preset})")
+        generate_config(args.generate_config, args.config_preset)
+        print(f"Configuration file generated successfully at: {args.generate_config}"
+              f" (Preset: {args.config_preset})")
         sys.exit(0)
 
 
     # 1. Initialize Configuration Maps
-    config_params = {}
-    if args.config_path and os.path.exists(args.config_path):
-        with open(args.config_path, 'r') as f:
-            config_params = json.load(f)
+    config_params = load_config(args.config_path)
 
     # 2. Retrieve Fallbacks
     fallback_path = os.path.join("..", "config", "fallbacks.json")
-    fallback_params = {}
-    if os.path.exists(fallback_path):
-        with open(fallback_path, 'r') as f:
-            fallback_params = json.load(f)
+    fallback_params = load_config(fallback_path)
 
     # 3. Determine Unified Logging and Output Directory Hierarchically
     base_dir = args.output_directory_base_with_given_json
@@ -3366,44 +3684,9 @@ def main():
     # 6. Run Pre-Flight Validation (Fail-Fast Mechanism)
     validate_parameters(final_params)
 
-    # Memory safeguard, before anything expensive is allocated.
-    #
-    # A search that outgrows the machine does not fail on its own: it grows until the
-    # kernel's OOM killer picks a victim, which may be the user's editor rather than
-    # this process. A 10-point sensitivity sweep did exactly that, reaching 6.9 GB.
-    # Capping our own address space converts that into a MemoryError that names the run.
-    rows_est = cols_est = None
-    try:
-        _, rows_est = read_dem_geometry(final_params['dem_path'])
-        with tiff.TiffFile(final_params['dem_path']) as _tf:
-            rows_est, cols_est = _tf.pages[0].shape[:2]
-    except Exception:
-        pass
-
-    if rows_est and cols_est:
-        need = estimate_peak_memory_gb(
-            rows_est, cols_est,
-            downsample_factor=final_params.get('downsample_factor', 1) or 1,
-            candidate_stride=final_params.get('candidate_stride', 5) or 5)
-        have = available_memory_gb()
-        print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
-              + (f", available {have:.1f} GiB" if have else ""))
-        if have and need > 0.8 * have:
-            print(f"{C.WARN}{Icon.WARN}This search is estimated to need {need:.1f} GiB "
-                  f"against {have:.1f} GiB available. Raise --downsample_factor "
-                  f"(memory scales as its inverse square) or crop the DEM. The estimate "
-                  f"is rough, so this is a warning rather than a refusal.{C.RESET}")
-
-    cap = final_params.get('max_memory_gb')
-    if cap is None:
-        have = available_memory_gb()
-        # 80% of what is available, so the cap bites before the kernel does while
-        # leaving room for the address space numba and BLAS reserve without touching.
-        cap = 0.8 * have if have else None
-    if cap and apply_memory_cap(cap):
-        print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
-              f" (--max_memory_gb 0 disables)")
-
+    # The memory estimate, the warning and the address-space cap now live in the
+    # pipeline itself (preflight_memory), so a library caller gets all three without
+    # having to know they exist. main() only passes the ceiling through.
 
     # Handle RFI Zone selection mapping (Checks Config-passed custom lists, or matches string presets)
     rfi_input = final_params.get('rfi_zones', 'none')
@@ -3429,7 +3712,7 @@ def main():
         print_tool_explanation()
 
     # Execute main search pipeline with our integrated parameters
-    find_grand_regions_interactive(
+    return find_grand_regions_interactive(
         dem_path=final_params['dem_path'],
         target_antennas=final_params['target_antennas'], 
         rfi_zones=selected_rfi,
@@ -3509,7 +3792,9 @@ def main():
                          if final_params.get('distance_band_m') else None),
         clearance_full_at=final_params.get('clearance_full_at'),
         score_weights=parse_score_weights(final_params.get('score_weights')),
-        nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
+        nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2'),
+        max_memory_gb=final_params.get('max_memory_gb'),
+        explain=final_params.get('explain', True)
     )
 
 

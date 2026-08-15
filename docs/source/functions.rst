@@ -56,6 +56,18 @@ Screening, morphology, capacity and outputs, plus the command-line entry point.
    :members:
    :undoc-members:
 
+Explaining a run
+----------------
+
+Turning a results dictionary into an account of what was found and why: which
+constraint set the size of the answer, what held the surviving sites back, and which
+of the numbers are assumptions. Pure, so an old results file can be explained months
+later with no DEM and no pipeline.
+
+.. automodule:: explain
+   :members:
+   :undoc-members:
+
 Tools
 -----
 

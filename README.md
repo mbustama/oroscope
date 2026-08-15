@@ -219,6 +219,17 @@ many pixels survived each filter, plus a `provenance.json` capturing the git com
 DEM checksum, resolved parameters and package versions. When a search returns no
 sites, the funnel is the first place to look.
 
+And every run **explains itself**, in plain language, at the end and in
+`explanation.txt`: what was found, which funnel stage set the size of the answer and
+which parameter to change, which named score component held each site back, and which
+of the numbers are assumptions rather than measurements. On by default; `--no_explain`
+suppresses it. Any results file can be re-explained later without re-running anything:
+
+```python
+import json, explain
+print(explain.explain_results(json.load(open("output/.../oroscope_results_colca.json"))))
+```
+
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the development plan and a review of the
 current selection criteria.
 
@@ -283,6 +294,7 @@ Parameters can be supplied in three ways. The script resolves parameters in the 
 | `--downsample_factor` | Int | `4` | Coarsening factor applied before final capacity counting to exponentially speed up labeling. |
 | `--cell_size_deg` | Float | `None` | Map resolution in degrees per pixel. By default this is read from the DEM's own GeoTIFF georeferencing tags; set it only to override a DEM with missing or wrong metadata. |
 | `--candidate_stride` | Int | `5` | Keeps every Nth pixel surviving the topographic screen before ray-tracing. Use `1` to trace every candidate (slower, denser sampling). |
+| `--max_memory_gb` | Float | `None` | Ceiling on the process's address space, in GiB. Defaults to 80% of what the system reports available, so a search that outgrows the machine fails with `MemoryError` rather than inviting the OOM killer to pick a victim. `0` disables the cap. |
 | `--resume` | Flag | `False` | Triggers checkpoint loading. Bypasses ray-tracing if previous buffers exist. |
 | `--resume_dir` | String | `None` | Explicit path to a failed run directory. Defaults to the current output dir if not provided. |
 
@@ -293,6 +305,7 @@ Parameters can be supplied in three ways. The script resolves parameters in the 
 | `--search_mode` | String | `distributed` | `single` forces one monolithic array. `distributed` allows combined sub-arrays. |
 | `--region_name` | String | `None` | Cosmetic name printed on the final visualization map. |
 | `--generate_kml` | Flag | `False` | Compiles bounding contours into a Google Earth `.kml` file. |
+| `--no_explain` | Flag | off | Suppresses the plain-language run summary. It is **on** by default: printed at the end and saved as `explanation.txt`. |
 | `--output_directory_base_with_given_json` | String | `../output/` | Directory to store the unified run folders (containing logs, maps, and json). |
 | `--output_image_format` | String | `png` | Format of the visual map (`png`, `pdf`, `svg`). |
 

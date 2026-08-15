@@ -1607,12 +1607,100 @@ For the full DEM the estimator says 4.5 GiB at `downsample_factor: 1` and 2.3 Gi
 against ~6 GiB typically available on this machine — so 4 is the right setting, which
 is what §6.12 already recommended for a different reason.
 
+### 6.23 The run explains itself ✅ delivered
+
+Everything needed was already in the results JSON; what was missing was the reading of
+it. `explain.explain_results(results)` takes the results dictionary and returns a
+string — no files, no DEM, nothing re-run — so the pipeline, the library and a test all
+get the same words, and a run from months ago can still be explained from its JSON.
+
+**On by default**, per the owner; `--no_explain` suppresses it. Printed last, so it is
+what a reader is left with, and saved as `explanation.txt` beside the results, because
+these runs are meant to be handed to other people and a terminal scrollback is not.
+
+It says four things:
+
+- **Which constraint bound.** The funnel stage that removed the largest share of what
+  reached it, plus the parameter behind it. Two stages are excluded by construction:
+  `kept by stride N` is a deliberate subsample and would otherwise be named on nearly
+  every run, and `after gap closing` adds pixels. A stage that leaves *nothing* wins
+  outright over any ratio downstream of it.
+- **What held each site back.** The score components were already named but were being
+  dropped by `summarize_observables_by_site`, which kept a fixed field list and so
+  stored the total and nothing else. Now stored, and the lowest median component is
+  reported per site — under a product composition it bounds the total from above.
+- **How much closing moved the area**, measured from this run rather than quoted.
+- **Which numbers are assumptions**, with the sensitivity measured in §6.20 for each.
+
+**Two things came out of running it on the existing results.**
+
+*The attribution is unambiguous, and the same on every site.* `solid_angle` is the
+weakest component at 15 of 15 TAMBO sites (median 0.57, everything else at 1.0 except
+decay at 0.96), and at GRAND's single site the ranking is `solid_angle` 0.52,
+`footprint` 0.61, `geomagnetic` 0.74, everything else 1.0. So the TAMBO result is set
+almost entirely by `solid_angle_half_sr`, whose default 0.05 sr is flagged in
+`assumptions.rst` as a GRAND-scale value. It does not saturate here, but it is what the
+score is measuring.
+
+*The closing factor is measurable per run, and disagrees with itself between the two
+configs.* Closed pixels over stride-corrected accepted pixels gives **2.19× for GRAND**,
+against the **2.29×** the stride-1 control measured in §6.11 — an independent
+cross-check of that number, from a different quantity, agreeing to 4%. But **TAMBO gives
+0.53×**: its closing element is 100 m, about three pixels, too small to bridge the gaps
+`candidate_stride: 5` leaves, so its reported area *understates* the accepted set rather
+than inflating it. ⚠️ **The §6.11 conclusion that striding is unbiased was measured at
+GRAND's 1 km element and does not transfer to TAMBO's 100 m.** A stride-1 control at
+TAMBO settings would settle it; until then TAMBO areas are a lower bound, not an upper
+one, and the summary says so.
+
+### 6.24 CLI/library parity ✅ delivered
+
+Measured, then closed. The pipeline function is now what the command line calls, not a
+subset of it.
+
+- **`max_memory_gb` was a real gap** — applied only in `main()`, so the caller most
+  likely to need it, a sweep, did not get it. The estimate, the warning and the cap are
+  now `preflight_memory()`, called by the pipeline itself. `sensitivity.py` passes the
+  ceiling as an ordinary parameter instead of the child re-applying it by hand.
+- **`load_config`, `generate_config` and `default_config`** are ordinary functions. The
+  67-key template used to be a literal inside `main()`, reachable only by running the
+  CLI with `--generate_config`. A test now asserts the template names every parameter
+  the pipeline accepts, since a template with holes falls back silently.
+- **The pipeline returns its results dictionary.** It returned `None`, so every caller
+  re-read the JSON it had just written; `tests/_support.py` no longer does. A run that
+  finds no candidate at all now returns its funnel too — the case where the funnel is
+  the entire answer. (`sensitivity.py` still reads the file: its caller is in another
+  process, which is the point of running each point in one.)
+- The origin-resolution print was already in the library, contrary to the handover note.
+
+### 6.25 What the summary cost, measured
+
+Only one stage does more work than before: `summarize_observables_by_site` now folds
+the eight named score components as well as the twelve geometric observables, so a site
+record carries 34 fields plus 3 per component.
+
+Measured the way §6.12 says to — A/B alternating in one process, 15 pairs, 200k
+candidates over 15 sites, medians: **76.6 ms without the components, 124.2 ms with,
+1.62×**, or **+48 ms per run**. Against a real search's 19 s that is a quarter of a
+percent, and it buys the attribution that made §6.23's two findings visible. Composing
+and writing the summary itself is not measurable — it is string formatting over a
+dictionary that is already in memory.
+
+**`bench/baseline.json` is deliberately NOT refreshed.** The machine could not resolve
+the difference: two consecutive benchmark passes over *identical* code reported
+`synthetic_1800/ray_tracing` at +3.4% and then +72.1% against the same baseline, and
+`arequipa_2500/ray_tracing` at +16.3% and +34.6%. Nothing in the scan path changed —
+`arrival_scan.py`, `scoring.py` and `physics.py` are untouched by this work — so those
+are noise, exactly as §6.12 warns. Updating the baseline from a run like that would
+bake the noise in. Refresh it on a quiet machine, and expect `capacity_analysis` to be
+the only stage that legitimately moved.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
 matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/fetch_dem.py`), which is not a packaging
 file and whose name hijacks `pip install`; real packaging; rasterio/pyproj for CRS and
-outputs; `--explain` funnel report; parameter sweeps.
+outputs; ~~`--explain` funnel report~~ (done, §6.23); parameter sweeps.
 
 ## 7. Open questions
 

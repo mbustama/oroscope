@@ -49,10 +49,6 @@ import site_searcher as ss
 with open(sys.argv[1]) as f:
     payload = json.load(f)
 
-cap = payload.pop("_max_memory_gb", None)
-if cap:
-    ss.apply_memory_cap(cap)
-
 params = {k: v for k, v in payload.items() if not k.startswith("_")}
 dem = params.pop("dem_path")
 lat = params.pop("origin_lat")
@@ -93,17 +89,25 @@ def run_once(config, out_dir, verbose=False, max_memory_gb=None, timeout=3600):
     Returns
     -------
     dict or None
-        The parsed results JSON, or ``None`` when the run produced nothing.
+        The parsed results JSON, or ``None`` when the run produced nothing. Read back
+        from disk rather than returned directly: the pipeline hands its results to its
+        own caller, and that caller is in another process here -- which is the whole
+        point of running each point in one.
     """
     params = {k: v for k, v in config.items() if not k.startswith("_")}
     for drop in ("print_info", "output_directory_base_with_given_json",
                  "output_image_format"):
         params.pop(drop, None)
     params["generate_kml"] = False
+    # A sweep point is a row in a table, not something anyone reads: skip the
+    # per-run summary rather than writing eighty of them nobody opens.
+    params["explain"] = False
     if params.get("score_weights") is not None:
         params["score_weights"] = ss.parse_score_weights(params["score_weights"])
     if max_memory_gb:
-        params["_max_memory_gb"] = max_memory_gb
+        # The pipeline applies the cap itself now, so this is an ordinary parameter
+        # rather than something the child had to remember to do first.
+        params["max_memory_gb"] = max_memory_gb
 
     os.makedirs(out_dir, exist_ok=True)
     payload = os.path.join(out_dir, "_params.json")
