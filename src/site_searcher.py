@@ -33,7 +33,8 @@ import scoring
 # -- Ellipse, FuncFormatter, tqdm, namedtuple -- as though they were ours.
 __all__ = [
     "find_grand_regions_interactive", "main",
-    "resolve_grid_geometry", "read_dem_geometry", "build_elevation_cache",
+    "resolve_grid_geometry", "read_dem_geometry", "read_dem_origin",
+    "resolve_origin", "build_elevation_cache",
     "load_dem_and_init_buffers",
     "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
     "slope_baseline_pixels", "get_candidates_chunked",
@@ -44,7 +45,7 @@ __all__ = [
     "create_world_file", "generate_kml_file", "generate_visualizations_and_outputs",
     "collect_provenance", "validate_parameters", "parse_score_weights",
     "explicitly_passed", "is_point_in_poly", "apply_poly_mask_numba",
-    "Funnel", "MapGrid",
+    "Funnel", "MapGrid", "RESULTS_PREFIX", "find_results_json",
 ]
 
 # Try to import psutil for RAM stats
@@ -593,6 +594,123 @@ def terrain_derivatives(elevation_block: np.ndarray, cell_size_y: float,
     return slope, aspect
 
 
+def find_results_json(run_dir):
+    """
+    Locates a run's results JSON, under either the current or the legacy prefix.
+
+    Outputs used to be named ``grand_search_results_*`` whatever the experiment. The
+    prefix is now ``oroscope_results_``, and both are accepted so that runs made before
+    the rename still load -- a reader that could not open last week's output would make
+    the rename cost more than it saves.
+
+    Parameters
+    ----------
+    run_dir : str
+        A run's output directory.
+
+    Returns
+    -------
+    str or None
+        Path to the results JSON, or ``None`` if the directory holds none.
+    """
+    import glob as _glob
+    for prefix in (RESULTS_PREFIX, LEGACY_RESULTS_PREFIX):
+        found = sorted(_glob.glob(os.path.join(run_dir, prefix + "*.json")))
+        if found:
+            return found[0]
+    return None
+
+
+def read_dem_origin(dem_path):
+    """
+    North-west corner of a GeoTIFF, from its ``ModelTiepointTag``.
+
+    Standard geographic DEMs carry their own corner, so asking a user to type it is
+    asking for a mistake that nothing catches: an origin that disagrees with the file
+    does not fail, it silently georeferences every output to the wrong ground. Reading
+    it removes the most error-prone input the tool has.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
+
+    Returns
+    -------
+    tuple
+        ``(latitude, longitude)`` of the north-west corner in degrees, or
+        ``(None, None)`` when the file or the tag cannot be read -- which is not an
+        error, since a caller may supply the origin explicitly.
+    """
+    try:
+        with tiff.TiffFile(dem_path) as tf:
+            tie = tf.pages[0].tags["ModelTiepointTag"].value
+        return float(tie[4]), float(tie[3])
+    except Exception:
+        return None, None
+
+
+def resolve_origin(dem_path, origin_lat=None, origin_lon=None, tolerance_deg=1e-3):
+    """
+    Settles the DEM's origin, preferring the file and checking anything supplied.
+
+    Two failure modes, and the second is the dangerous one. An origin nobody supplied
+    used to be a fatal error even though the file knows it. And an origin supplied
+    *wrongly* was accepted in silence, mis-georeferencing every output -- the GeoTIFF,
+    the world file, the KML and every coordinate in the results -- while the search
+    itself ran perfectly and looked right.
+
+    So the tag wins when nothing is given, and disagreement past ``tolerance_deg`` is
+    reported loudly rather than resolved quietly. 1e-3 degrees is about 100 m, which is
+    a few pixels: closer than that is rounding in a config file, further is a mistake.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
+    origin_lat, origin_lon : float, optional
+        Origin as supplied by the user, if any.
+    tolerance_deg : float, optional
+        Disagreement beyond which the supplied value is called out.
+
+    Returns
+    -------
+    tuple
+        ``(latitude, longitude, source)``, where source describes where the value came
+        from and is recorded in the run's provenance.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> lat, lon, source = ss.resolve_origin("nonexistent.tif", -15.3, -72.4)
+    >>> (lat, lon, source)
+    (-15.3, -72.4, 'supplied (DEM carries no tiepoint)')
+    """
+    file_lat, file_lon = read_dem_origin(dem_path)
+
+    if origin_lat is None or origin_lon is None:
+        if file_lat is None:
+            return None, None, "missing"
+        return file_lat, file_lon, "auto-detected from the GeoTIFF tiepoint"
+
+    if file_lat is None:
+        return float(origin_lat), float(origin_lon), "supplied (DEM carries no tiepoint)"
+
+    off = max(abs(file_lat - origin_lat), abs(file_lon - origin_lon))
+    if off > tolerance_deg:
+        print(f"{C.FAIL}{Icon.WARN}The supplied origin disagrees with the DEM's own "
+              f"tiepoint by {off:.4f} deg ({off * 111:.0f} km).{C.RESET}")
+        print(f"{C.WARN}   supplied: {origin_lat:.6f}, {origin_lon:.6f}{C.RESET}")
+        print(f"{C.WARN}   GeoTIFF:  {file_lat:.6f}, {file_lon:.6f}{C.RESET}")
+        print(f"{C.WARN}   Using the supplied value, but every output -- the GeoTIFF, "
+              f"the world file, the KML and every coordinate in the results -- will be "
+              f"georeferenced to that. Omit origin_lat/origin_lon to use the file's "
+              f"own.{C.RESET}")
+        return float(origin_lat), float(origin_lon), "supplied (DISAGREES with the tiepoint)"
+
+    return float(origin_lat), float(origin_lon), "supplied (agrees with the tiepoint)"
+
+
 def read_dem_geometry(dem_path):
     """
     Reads the angular pixel size and row count of a GeoTIFF DEM from its header.
@@ -633,6 +751,12 @@ def read_dem_geometry(dem_path):
 
 # Describes the sampling grid of the DEM. Angular pixel size is identical on both
 # axes (that is what "geographic" means), but the two metric sizes are not.
+# Stem of every output file. Was "grand_search_results_", which a TAMBO run also wrote
+# and which was plainly wrong once one engine served more than one experiment. Readers
+# accept the old prefix too, so runs made before the rename still load.
+RESULTS_PREFIX = "oroscope_results_"
+LEGACY_RESULTS_PREFIX = "grand_search_results_"
+
 MapGrid = namedtuple("MapGrid", "cell_size_deg cell_size_y cell_size_x center_lat source")
 MapGrid.__doc__ = """
 Resolved pixel geometry of a DEM.
@@ -1056,7 +1180,8 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     return np.vstack(candidates_list)
 
 def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
-                     score_config=None, min_score=0.0, rfi_zones_px=None):
+                     score_config=None, min_score=0.0, rfi_zones_px=None,
+                     score_percentile=None):
     """
     Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
 
@@ -1079,11 +1204,14 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     score_config : dict, optional
         Overrides for :data:`scoring.DEFAULT_SCORE_CONFIG`.
     min_score : float, optional
-        Score a candidate must reach to be accepted. Note the default composition is a
-        product, whose distribution piles up near zero, so any threshold in the middle
-        sits on a cliff.
+        Absolute score a candidate must reach. Used only when ``score_percentile`` is
+        not given. The default composition is a product, whose distribution piles up
+        near zero, so any threshold in the middle sits on a cliff.
     rfi_zones_px : sequence, optional
         Radio-noise sources in pixel coordinates, enabling the exposure observable.
+    score_percentile : float, optional
+        Keep this percentage of viable candidates, by score. Rank-based and so
+        scale-free: preferred over ``min_score`` for exactly the reason above.
 
     Returns
     -------
@@ -1112,7 +1240,20 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     for name, values in components.items():
         observables[f"score_{name}"] = values
 
-    accepted = (observables["cells"] > 0) & (total >= min_score)
+    # A rank-based cut where one is asked for, and an absolute one otherwise.
+    #
+    # The default score is a *product* of several components each in [0, 1], so its
+    # distribution piles up near zero and an absolute threshold sits on a cliff:
+    # measured on one search, min_score 0.0, 0.35 and 0.5 gave 45928, 2056 and zero
+    # detector positions. A percentile asks the question that was meant all along --
+    # keep the best fraction of what this terrain offers -- and is scale-free, so it
+    # does not move when the composition or the number of components changes.
+    viable = observables["cells"] > 0
+    if score_percentile is not None and np.any(viable):
+        floor = float(np.percentile(total[viable], 100.0 - float(score_percentile)))
+        accepted = viable & (total >= floor)
+    else:
+        accepted = viable & (total >= min_score)
     n_hits = int(np.count_nonzero(accepted))
     if n_hits:
         buf_a[candidates_arr[accepted, 0].astype(np.int64),
@@ -1357,7 +1498,7 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
 
 def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
                                target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=None,
-                               candidates_arr=None, observables=None):
+                               candidates_arr=None, observables=None, stop_at_target=False):
     """
     Step 5 Pipeline: Isolates unique sites and measures their capacity mathematically.
     Uses SciPy labeling to find continuous regions and simulates physical grid placement.
@@ -1400,6 +1541,10 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
         Candidates, for folding scan observables into each site's record.
     observables : dict, optional
         Their per-candidate observables.
+    stop_at_target : bool, optional
+        In distributed mode, stop selecting sites once ``target_antennas`` is reached.
+        Sites are sorted by capacity, so this takes the best ones and reports the array
+        actually wanted rather than every patch of qualifying ground.
 
     Returns
     -------
@@ -1514,7 +1659,14 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
         final_selection_ids = []
         
         if search_mode == 'distributed':
+            # Sites are already sorted by capacity, so this takes the best ones. With
+            # stop_at_target the run reports the array actually wanted rather than
+            # every patch of qualifying ground -- "the best sites for 5000 detectors"
+            # is a different and usually more useful question than "all terrain that
+            # passes", and it does not depend on where a score threshold was put.
             for site in site_details:
+                if stop_at_target and cumulative_capacity >= target_antennas:
+                    break
                 final_selection_ids.append(site['site_id'])
                 cumulative_capacity += site['capacity_exact']
         else:
@@ -1708,7 +1860,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
     """
     generated_files = []
     cell_size_deg = map_grid.cell_size_deg
-    base_filename = "grand_search_results_" + os.path.splitext(os.path.basename(dem_path))[0]
+    base_filename = RESULTS_PREFIX + os.path.splitext(os.path.basename(dem_path))[0]
     
     # Save TIF
     out_tif = os.path.join(run_output_dir, base_filename + ".tif")
@@ -2239,7 +2391,7 @@ def validate_parameters(params):
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
 def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=1000,
-                            rfi_zones=None, origin_lat=-15.0, origin_lon=-73.0,
+                            rfi_zones=None, origin_lat=None, origin_lon=None,
                             min_width_km=2.0, min_altitude=None, max_altitude=None,
                             antenna_spacing_km=1.0, min_dist_km=30.0, max_dist_km=80.0,
                             road_map_path=None, max_road_dist_km=None,
@@ -2257,6 +2409,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             min_target_slope_deg=None, max_target_slope_deg=None,
+                            max_range_km=None, score_percentile=None,
+                            stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
                             decay_spectral_index=None,
@@ -2297,9 +2451,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     rfi_zones : list or str, optional
         Exclusion zones, or the name of a bundled set.
 
-    origin_lat, origin_lon : float
-        Coordinates of the DEM's north-west corner, in degrees. They must match the
-        DEM or the output is silently mis-georeferenced.
+    origin_lat, origin_lon : float, optional
+        Coordinates of the DEM's north-west corner, in degrees. Read from the file's
+        own ``ModelTiepointTag`` when omitted, which is the recommended use; a supplied
+        value that disagrees with the tag by more than ~100 m is reported rather than
+        silently honoured.
 
     min_width_km : float, optional
         Narrowest feature to keep, in km. 0 disables pruning, which is what a
@@ -2505,6 +2661,16 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     returns nothing, the funnel is the first place to look: the constraint responsible
     is the line where the survivor count collapses.
     """
+    # The DEM knows its own corner. Prefer it, and say so loudly when a supplied one
+    # disagrees -- a wrong origin does not fail, it mis-georeferences everything.
+    origin_lat, origin_lon, origin_source = resolve_origin(dem_path, origin_lat, origin_lon)
+    if origin_lat is None:
+        raise ValueError(
+            "origin_lat/origin_lon were not given and the DEM carries no "
+            "ModelTiepointTag to read them from")
+    print(f"      Origin: {C.MAGENTA}{origin_lat:.6f}, {origin_lon:.6f}{C.RESET}"
+          f"  ({origin_source})")
+
 
     # Cast safety to ensure slice logic doesn't fail if passed as float via JSON
     downsample_factor = int(downsample_factor)
@@ -2566,7 +2732,13 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     scan_params = dict(
         elev_min_deg=elev_min_deg, elev_max_deg=elev_max_deg, n_elev_bins=int(n_elev_bins),
         n_azimuths=int(n_azimuths), half_width_deg=azimuth_half_width_deg,
-        max_range_m=max_dist_km * 1000.0,
+        # How far the profile is walked, which is *not* the same question as which
+        # intersections are accepted. Column depth accumulates over the whole walk, so
+        # tying the two meant a short-range search reported a depth set by where the
+        # walk stopped rather than by the target's thickness -- at TAMBO's 5 km the
+        # depth term scored ~1 for everything. Defaults to max_dist_km, preserving the
+        # old behaviour where it is not set.
+        max_range_m=(max_range_km if max_range_km else max_dist_km) * 1000.0,
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
         min_target_slope_deg=min_target_slope_deg,
@@ -2587,6 +2759,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     # Store explicit params for final JSON export
     export_params = {
         "dem": dem_path, "origin": [origin_lat, origin_lon],
+        "origin_source": origin_source,
         "cell_size_deg": cell_size_deg, "cell_size_y_m": cell_size_y,
         "cell_size_x_m": cell_size_x, "cell_size_center_lat": map_grid.center_lat,
         "cell_size_source": map_grid.source, "candidate_stride": candidate_stride,
@@ -2609,6 +2782,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "decay_energy_max_pev": decay_energy_max_pev,
         "decay_spectral_index": decay_spectral_index,
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
+        "max_range_km": max_range_km, "score_percentile": score_percentile,
+        "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
@@ -2752,7 +2927,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "solid_angle_half_sr": solid_angle_half_sr,
                                   "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
-                min_score=min_score, rfi_zones_px=rfi_zones_px)
+                min_score=min_score, rfi_zones_px=rfi_zones_px,
+                score_percentile=score_percentile)
             funnel.add("directions accepted", n_hits)
             if min_score > 0:
                 funnel.add(f"score >= {min_score:g}", n_hits)
@@ -2778,7 +2954,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         small_final, labeled_viz, site_details, cumulative_capacity, count, region_stats = analyze_sites_and_capacity(
             path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
             target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=funnel,
-            candidates_arr=candidates_arr, observables=observables
+            candidates_arr=candidates_arr, observables=observables,
+            stop_at_target=stop_at_target
         )
         if search_mode == 'distributed':
             print(f"      Distributed: {C.MAGENTA}{count}{C.RESET} sites found.")
@@ -2937,6 +3114,9 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--max_range_km", type=float, default=None, help="How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.")
+    parser.add_argument("--score_percentile", type=float, default=None, help="Keep this percentage of viable candidates, ranked by score, instead of cutting at an absolute --min_score. Preferred: the default score is a product whose distribution piles up near zero, so an absolute threshold sits on a cliff, while a percentile is scale-free.")
+    parser.add_argument("--stop_at_target", action="store_true", help="In distributed mode, stop selecting sites once target_antennas is reached. Sites are ranked by capacity, so this reports the best sites for the array actually wanted rather than every patch of qualifying ground.")
     parser.add_argument("--max_memory_gb", type=float, default=None, help="Ceiling on this process's address space, in GiB. Defaults to 80%% of what the system reports available, so a search that outgrows the machine fails with MemoryError instead of inviting the OOM killer to choose a victim. 0 disables the cap.")
     parser.add_argument("--decay_energy_min_pev", type=float, default=None, help="Lower end of the tau energy range for the decay term. With --decay_energy_max_pev this folds the decay probability over a power-law spectrum, which is the defensible form: the probability runs over three decades across one experiment's reach, so a single energy chooses the answer rather than approximating it.")
     parser.add_argument("--decay_energy_max_pev", type=float, default=None, help="Upper end of that range, in PeV.")
@@ -3018,6 +3198,9 @@ def main():
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
             "decay_energy_pev": None,
+            "max_range_km": None,
+            "score_percentile": None,
+            "stop_at_target": False,
             "max_memory_gb": None,
             "decay_energy_min_pev": None,
             "decay_energy_max_pev": None,
@@ -3168,8 +3351,13 @@ def main():
         print(f"{C.FAIL}{Icon.CROSS}ERROR: Critical parameter 'dem_path' must be provided via config file, fallback, or CLI.{C.RESET}")
         sys.exit(1)
     if final_params.get('origin_lat') is None or final_params.get('origin_lon') is None:
-        print(f"{C.FAIL}{Icon.CROSS}ERROR: Critical parameters 'origin_lat' and 'origin_lon' must be provided via config file, fallback, or CLI.{C.RESET}")
-        sys.exit(1)
+        # Not an error any more: a standard geographic DEM carries its own corner, and
+        # reading it removes the most error-prone input the tool had.
+        probe_lat, probe_lon = read_dem_origin(final_params['dem_path'])
+        if probe_lat is None:
+            print(f"{C.FAIL}{Icon.CROSS}ERROR: 'origin_lat'/'origin_lon' were not given "
+                  f"and the DEM carries no tiepoint to read them from.{C.RESET}")
+            sys.exit(1)
 
     # Default resume_dir to run_output_dir if resume is True and resume_dir not provided
     if final_params.get('resume') and not final_params.get('resume_dir'):
@@ -3308,6 +3496,9 @@ def main():
         decay_spectral_index=_one_or_pair(final_params.get('decay_spectral_index')),
         shower_development_m=final_params.get('shower_development_m', 3000.0),
         gap_close_km=final_params.get('gap_close_km'),
+        max_range_km=final_params.get('max_range_km'),
+        score_percentile=final_params.get('score_percentile'),
+        stop_at_target=final_params.get('stop_at_target', False),
         min_target_slope_deg=final_params.get('min_target_slope_deg'),
         max_target_slope_deg=final_params.get('max_target_slope_deg'),
         grammage_band_fraction=final_params.get('grammage_band_fraction'),

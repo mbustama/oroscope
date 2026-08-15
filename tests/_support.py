@@ -77,12 +77,11 @@ def run_pipeline(dem_path, out_dir, origin_lat, origin_lon, **overrides):
             run_output_dir=out_dir, **params
         )
 
-    import glob
     import json
-    matches = glob.glob(os.path.join(out_dir, "grand_search_results_*.json"))
-    if not matches:
+    found = ss.find_results_json(out_dir)
+    if not found:
         raise AssertionError(f"pipeline produced no results JSON in {out_dir}")
-    with open(matches[0]) as f:
+    with open(found) as f:
         return json.load(f)
 
 

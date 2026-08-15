@@ -37,6 +37,32 @@ jobs:
         working-directory: tests
         run: python -m unittest discover -v
 
+      - name: Measure coverage
+        # One version only. Coverage is a property of the suite rather than of the
+        # interpreter, so running it five times would upload five near-identical
+        # reports and slow every job to gather them.
+        if: matrix.python-version == '3.12'
+        # From the repository root, not from tests/. `source = ["src"]` in
+        # pyproject.toml is resolved against the working directory, so running this
+        # from tests/ looks for tests/src, finds nothing, and reports "No data to
+        # collect" while exiting successfully -- a green job measuring nothing. The
+        # suite itself is location-independent: every module resolves src/ and the
+        # golden files from its own __file__.
+        run: |
+          pip install coverage
+          coverage run --rcfile=pyproject.toml -m unittest discover -s tests -t tests
+          coverage report
+          coverage xml -o coverage.xml
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          # Not fatal: a coverage upload failing is not a reason to call the code
+          # broken, and codecov is a third party that occasionally is.
+          fail_ci_if_error: false
+
       - name: Confirm the modules import outside the source tree
         # Guards the packaging rather than the physics: an editable install that only
         # works from src/ would pass the suite above and fail for anyone who pip

@@ -38,6 +38,8 @@ __all__ = ["load_run", "check_alignment", "read_world_file",
            "pixel_area_km2", "capacity_of", "main"]
 import tifffile as tiff
 
+import site_searcher as ss
+
 # Matplotlib is only needed for the overview image, and the searcher already forces a
 # headless backend when it is imported in a pipeline context
 import matplotlib
@@ -109,9 +111,9 @@ def load_run(run_dir: str) -> dict:
     world = read_world_file(tfw)
 
     results = None
-    jsons = sorted(glob.glob(os.path.join(run_dir, "grand_search_results_*.json")))
-    if jsons:
-        with open(jsons[0]) as f:
+    found = ss.find_results_json(run_dir)
+    if found:
+        with open(found) as f:
             results = json.load(f)
 
     return {"dir": run_dir, "tif": tif, "mask": mask, "world": world, "results": results}

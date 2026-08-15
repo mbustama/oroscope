@@ -38,15 +38,26 @@ oroscope --config_path config/grand_colca_config.json
 
 ## Overview
 
-This tool is a high-performance topographic and radio-physics simulation engine designed to identify viable deployment sites for the **GRAND (Giant Radio Array for Neutrino Detection)** project.
+Oroscope screens digital elevation models for ground that can host a
+particle-astrophysics observatory, and reports where each experiment is viable, where
+several are, and how much of the answer rests on assumptions.
 
-Because identifying suitable mountain slopes for arrays of 10,000+ antennas requires evaluating billions of pixels, this script utilizes **out-of-core memory mapping** (to prevent RAM exhaustion) and **Numba JIT compilation** (for C-speed parallel ray-tracing). It evaluates geographic coordinates against physical slope constraints, Line-of-Sight (LoS) radio propagation physics, dynamic exclusion zones (RFI), and logistical constraints.
+It was written for **GRAND** (radio detection of air showers from Earth-skimming tau
+neutrinos) and now serves **TAMBO** (particle detection across a deep canyon) through
+the same scan engine, because the two ask the same structural question and differ in
+their numbers. Adding an experiment means writing a configuration, not a code path.
+
+Searching a DEM of hundreds of millions of pixels needs care with both memory and time,
+so the tool uses **out-of-core memory mapping** throughout and a **Numba-compiled,
+parallel** scan kernel. Terrain is screened by slope, aspect, altitude and exclusion
+zones; the survivors are scanned over arrival directions; the results are scored against
+per-experiment criteria and turned into sites with detector capacity.
 
 ---
 
 ## 1. Requirements
 
-The script is built for **Python 3.8+**. Due to the heavy reliance on C-compiled math and geospatial array processing, using a virtual environment (like Conda) is highly recommended.
+The package requires **Python 3.9+**. Due to the heavy reliance on C-compiled math and geospatial array processing, using a virtual environment (like Conda) is highly recommended.
 
 ### Core Dependencies:
 
@@ -61,9 +72,11 @@ The script is built for **Python 3.8+**. Due to the heavy reliance on C-compiled
 **Installation via pip:**
 
 ```bash
-pip install numpy scipy numba tifffile matplotlib tqdm psutil
-
+pip install oroscope          # or, from a clone: pip install -e .
 ```
+
+That installs the dependencies and five console scripts: `oroscope`,
+`oroscope-combine`, `oroscope-crop`, `oroscope-sensitivity` and `oroscope-fetch-dem`.
 
 ### Automated Conda Environment Generation:
 
@@ -79,7 +92,7 @@ python generate_env.py
 conda env create -f environment.yml
 
 # Activate the environment
-conda activate grand_site_search
+conda activate oroscope
 
 ```
 
@@ -126,10 +139,10 @@ The easiest way to run the script is using a JSON configuration file. You can au
 
 ```bash
 # Generate a template specifically pre-configured for the Arequipa region
-python site_searcher.py --generate_config arequipa_config.json --config_preset arequipa
+oroscope --generate_config arequipa_config.json --config_preset arequipa
 
-# Run the script using the newly generated configuration file
-python site_searcher.py --config_path arequipa_config.json
+# Run the search using the newly generated configuration file
+oroscope --config_path arequipa_config.json
 
 ```
 
@@ -138,15 +151,17 @@ python site_searcher.py --config_path arequipa_config.json
 If you prefer scripting environments (like bash scripts or Makefiles), you can supply all parameters directly to the command line:
 
 ```bash
-python site_searcher.py \
+oroscope \
     --dem_path "my_custom_map.tif" \
-    --origin_lat -15.5 \
-    --origin_lon -73.1 \
     --target_antennas 5000 \
     --grid_type hex \
     --min_slope_deg 5.0 \
     --max_slope_deg 20.0 \
     --generate_kml
+
+# origin_lat/origin_lon are optional: the DEM's own tiepoint is used when they are
+# omitted, and a supplied value that disagrees with it is reported rather than
+# silently honoured.
 
 ```
 
@@ -155,7 +170,7 @@ python site_searcher.py \
 If a run crashes halfway through (e.g., your laptop runs out of battery during Step 5), you can instantly skip the expensive ray-tracing step by pointing the script to the failed run's directory.
 
 ```bash
-python site_searcher.py --config_path my_config.json --resume --resume_dir ../output/20260227_153000
+oroscope --config_path my_config.json --resume --resume_dir ../output/20260227_153000
 
 ```
 
@@ -305,14 +320,31 @@ The code steps through the DEM in defined RAM chunks (configured by `--tile_size
 4. Evaluates geographic spatial logic. RFI exclusion zones are tested by real ground distance in metres, using the separate north-south and east-west pixel sizes, so a zone stays a true circle on the ground rather than becoming an ellipse.
 5. Surviving pixels are thinned by `--candidate_stride` (default 5x) and passed forward as raw candidate coordinates.
 
-### Step 3: Physics Simulation (Ray Tracing)
+### Step 3: The arrival scan
 
-This is the most computationally expensive step. It distributes the candidate pixels across the user's CPU cores using `joblib`.
+The expensive step, and the heart of the tool. For every surviving pixel it traces rays
+*backwards* along a fan of arrival directions and asks what each one meets.
 
-* **Numba JIT**: The core loop (`check_physics_chunk`) is compiled to native C-speed.
-* **The Ray-Cast**: For each candidate pixel, a geometric ray is cast outward in its "aspect" direction up to the `max_dist_km`. The ray marches in real ground distance (1 km steps) and converts to row/column offsets with a separate scale per axis, so its heading matches the aspect regardless of latitude.
-* **Earth Curvature**: The script applies real-world geometry. The target mountain's apparent height is reduced based on distance ($d^2 / 2R$) using an effective Earth radius of 8,500 km.
-* **Fresnel Margin**: The target must exceed the detector's altitude + a 1km required interaction depth + the `fresnel_buffer` clearance margin to successfully count as a hit.
+* **One walk per (candidate, azimuth).** Writing the terrain's elevation angle at ground
+  distance `d` as `atan((z(d) - d²/2R - z₀)/d)`, a ray at angle θ first meets terrain at
+  the smallest `d` where that exceeds θ. Because the running maximum only increases,
+  each new maximum claims a contiguous band of elevation bins — so a single pass fills
+  every bin at once. Elevation binning is therefore nearly free, and the **azimuth count
+  is what sets the cost**.
+* **Column depth from the same samples.** The ray is underground wherever the terrain
+  angle exceeds θ, so binning the terrain angle and taking a suffix sum gives the
+  underground path length for every bin, accumulating all the rock a ray crosses rather
+  than only the first chord.
+* **Compiled and parallel.** The kernel is Numba-compiled and spread across cores with
+  `prange`, with candidates dealt in blocks so threads get comparable work without
+  losing memory locality.
+* **Two Earth radii.** Particles are not refracted, so the geometry uses the true
+  6371 km; the radio path uses the 4/3 convention, and only for the Fresnel term.
+
+The scan reports per-candidate observables — accepted solid angle, distance to the exit
+point, column depth, horizon, atmospheric depth, Earth chord, far-wall slope — which are
+then scored. See [the physics](https://mbustama.github.io/oroscope/physics.html) for the
+derivation of each criterion.
 
 ### Step 4: Spatial Pruning
 

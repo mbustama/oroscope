@@ -22,7 +22,6 @@ interaction will not show up -- for that, sweep the pair explicitly.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import shutil
@@ -122,10 +121,10 @@ def run_once(config, out_dir, verbose=False, max_memory_gb=None, timeout=3600):
               + (f": {detail[0][:120]}" if detail else ""))
         return None
 
-    matches = glob.glob(os.path.join(out_dir, "grand_search_results_*.json"))
-    if not matches:
+    found = ss.find_results_json(out_dir)
+    if not found:
         return None
-    with open(matches[0]) as f:
+    with open(found) as f:
         return json.load(f)
 
 
