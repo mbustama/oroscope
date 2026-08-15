@@ -1548,7 +1548,7 @@ is worth more than any further criterion.
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
-matching current configs to ~1e-4°); rename `src/setup.py`, which is not a packaging
+matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/fetch_dem.py`), which is not a packaging
 file and whose name hijacks `pip install`; real packaging; rasterio/pyproj for CRS and
 outputs; `--explain` funnel report; parameter sweeps.
 

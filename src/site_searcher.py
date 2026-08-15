@@ -1950,7 +1950,15 @@ class TeeLogger:
         self.terminal.flush()
         self.log_file.flush()
 
-if __name__ == "__main__":
+def main():
+    """
+    Command-line entry point: parses arguments, reconciles them against the config
+    file and the fallbacks, validates, and runs one search.
+
+    Kept as a function rather than a bare ``__main__`` block so the console script
+    declared in pyproject.toml has something to call, and so the argument handling
+    can be exercised from a test without spawning a subprocess.
+    """
     parser = argparse.ArgumentParser(description="GRAND Neutrino Array - Automated Site Search Tool")
     
     # Made DEM and Origin optional here so they can be exclusively provided via config or fallbacks
@@ -2335,3 +2343,7 @@ if __name__ == "__main__":
         score_weights=parse_score_weights(final_params.get('score_weights')),
         nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2')
     )
+
+
+if __name__ == "__main__":
+    main()

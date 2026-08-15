@@ -13,3 +13,8 @@ output/
 old/
 *.npy
 environment.yml
+
+# Packaging artefacts
+*.egg-info/
+build/
+dist/

@@ -55,7 +55,7 @@ The script requires a **Digital Elevation Model (DEM)** in `.tif` format, optimi
 
 ### Automated Setup (Recommended)
 
-We provide a `setup.py` script that verifies your environment dependencies, automatically downloads the required DEM files for the primary target regions (Lima and Arequipa), and generates ready-to-use configuration files.
+We provide a `fetch_dem.py` script that verifies your environment dependencies, automatically downloads the required DEM files for the primary target regions (Lima and Arequipa), and generates ready-to-use configuration files.
 
 **Step 1: Obtain an OpenTopography API Key**
 
@@ -67,7 +67,7 @@ We provide a `setup.py` script that verifies your environment dependencies, auto
 Pass your API key to the setup script to begin the automated download and configuration process:
 
 ```bash
-python setup.py --open_topography_api_key YOUR_API_KEY_HERE
+python fetch_dem.py --open_topography_api_key YOUR_API_KEY_HERE
 
 ```
 

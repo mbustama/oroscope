@@ -57,7 +57,7 @@ cd src && python site_searcher.py --config_path ../config/arequipa_config.json
 | `src/physics.py` | Closed-form physics: atmosphere, Earth chord, tau range and exit probability, geomagnetic field, Cherenkov footprint. Pure Python/NumPy, no terrain. |
 | `src/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
 | `src/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
-| `src/setup.py` | **Not a packaging file** — downloads DEMs. Rename in Phase 4; the name hijacks `pip install`. |
+| `src/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`; renamed with packaging. |
 | `src/generate_env.py` | AST-based conda env generator. |
 | `tests/` | 250 tests. `synthetic.py` builds terrain with closed-form answers. |
 | `bench/benchmark.py` | Per-stage timings and peak RSS on fixed cases, gated at 30% regression. |
@@ -319,7 +319,7 @@ because particle content dies after shower maximum whereas radio simply propagat
 
 - **Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint.** Verified present
   and matching the current configs to ~1e-4°. Removes the most error-prone input.
-- **Rename `src/setup.py`** — it is not a packaging file and the name hijacks `pip install`.
+- ~~Rename `src/setup.py`~~ — done; it is now `src/fetch_dem.py`.
 - Real packaging: `pyproject.toml`, console entry points, pinned env including `imagecodecs`.
 - rasterio/pyproj for CRS and outputs, retiring the hand-written `.tfw`.
 - `--explain` funnel report; parameter sweeps with a sensitivity table.

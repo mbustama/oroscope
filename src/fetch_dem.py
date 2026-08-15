@@ -149,7 +149,15 @@ def generate_and_patch_config(region_name, preset, dem_filepath):
 # ==========================================
 #                  MAIN
 # ==========================================
-if __name__ == "__main__":
+def main():
+    """
+    Command-line entry point.
+
+    Downloads the DEM tiles a search needs and writes matching config files.
+
+    Kept as a function so the console script declared in pyproject.toml has something
+    to call.
+    """
     parser = argparse.ArgumentParser(description="GRAND Site Search - Data Setup & Downloader")
     parser.add_argument("--open_topography_api_key", type=str, default=None, 
                         help="Your OpenTopography API key (Required to download DEMs).")
@@ -214,3 +222,7 @@ if __name__ == "__main__":
     print(f"You can now run the main script using your new configs:")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/lima_config.json{C.RESET}")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/arequipa_config.json{C.RESET}\n")
+
+
+if __name__ == "__main__":
+    main()
