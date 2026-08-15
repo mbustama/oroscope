@@ -888,7 +888,7 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     fields = ["solid_angle_sr", "mean_distance_m", "max_depth_gcm2", "horizon_deg"]
     for extra in ("score", "best_clearance_ratio", "geomag_solid_angle_sr",
                   "path_grammage_gcm2", "earth_chord_gcm2", "altitude_m",
-                  "rfi_exposure"):
+                  "target_slope_deg", "rfi_exposure"):
         if extra in observables:
             fields.append(extra)
     fields = tuple(fields)
@@ -1532,6 +1532,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             n_azimuths=9, azimuth_half_width_deg=60.0,
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
+                            min_target_slope_deg=None, max_target_slope_deg=None,
                             fresnel_frequency_mhz=None, refraction_k=None,
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
                             exclude_near_field=True,
@@ -1617,6 +1618,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         max_range_m=max_dist_km * 1000.0,
         min_dist_km=min_dist_km, max_dist_km=max_dist_km,
         min_depth_gcm2=min_column_depth_gcm2, require_terrain=require_terrain,
+        min_target_slope_deg=min_target_slope_deg,
+        max_target_slope_deg=max_target_slope_deg,
         geomag_declination_deg=(geomag_declination_deg if use_geomagnetic else None),
         geomag_inclination_deg=(geomag_inclination_deg if use_geomagnetic else None),
         frequency_mhz=fresnel_frequency_mhz, bilinear=bilinear_sampling,
@@ -1649,6 +1652,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "geomag_declination_deg": geomag_declination_deg,
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
+        "min_target_slope_deg": min_target_slope_deg,
+        "max_target_slope_deg": max_target_slope_deg,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
         "grammage_band_gcm2": grammage_band_gcm2,
         "grammage_maturity_gcm2": grammage_maturity_gcm2,
@@ -1961,6 +1966,8 @@ if __name__ == "__main__":
     parser.add_argument("--grammage_mode", type=str, choices=['radio', 'particle'], default='radio', help="How atmospheric depth is scored. 'radio' is a maturity threshold, since emission comes from shower maximum and then propagates through transparent air. 'particle' is a band, since particle content dies after maximum (default: radio).")
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
+    parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
+    parser.add_argument("--max_target_slope_deg", type=float, default=None, help="Upper bound on the struck terrain's slope along the arrival azimuth. Unset by default. Note a ceiling does not empty the result: a flat valley floor passes any ceiling, so this removes walls rather than everything.")
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
     parser.add_argument("--shower_elongation_rate_gcm2", type=float, default=None, help="How much deeper shower maximum sits per decade of primary energy, in g/cm2 (default: 55, the usual hadronic value; a purely electromagnetic cascade is nearer 85).")
     parser.add_argument("--shower_lambda_gcm2", type=float, default=None, help="Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).")
@@ -2032,6 +2039,8 @@ if __name__ == "__main__":
             "elev_max_deg": 3.0,
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
+            "min_target_slope_deg": None,
+            "max_target_slope_deg": None,
             "fresnel_frequency_mhz": None,
             "antenna_height_m": 2.0,
             "exclude_near_field": True,
@@ -2261,6 +2270,8 @@ if __name__ == "__main__":
         grammage_band_gcm2=(tuple(final_params['grammage_band_gcm2'])
                             if final_params.get('grammage_band_gcm2') else None),
         grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
+        min_target_slope_deg=final_params.get('min_target_slope_deg'),
+        max_target_slope_deg=final_params.get('max_target_slope_deg'),
         grammage_band_fraction=final_params.get('grammage_band_fraction'),
         shower_elongation_rate_gcm2=final_params.get('shower_elongation_rate_gcm2'),
         shower_lambda_gcm2=final_params.get('shower_lambda_gcm2'),

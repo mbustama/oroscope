@@ -990,11 +990,55 @@ Visual check: the TAMBO selection traces the branching canyon network across the
 while GRAND takes the open plateau, which is what the physics should produce and is the
 main evidence that the criteria are doing something real.
 
+### 5.4 Per-role slope: the far wall ✅ delivered
+
+The per-role criterion §5.2 called for. Slope was tested only at the candidate pixel —
+the *near* wall the array stands on. The far wall, which is where the tau actually
+exits, was never required to be a wall at all: the scan asked whether rock lay at the
+right range and bearing, which on real Andean terrain is nearly always true somewhere.
+That is why 92% of candidates passed before this existed.
+
+The walk now records, per elevation bin, how fast the terrain was climbing along the
+ray where it was first met — `dz/dd` between the previous sample and the intersection.
+Measured along the arrival azimuth, so an obliquely-viewed wall counts as the tau would
+actually cross it. It is reported as `target_slope_deg` and optionally bounded by
+`min_target_slope_deg` / `max_target_slope_deg`, unset by default so GRAND is unchanged.
+
+Verified against `synthetic.canyon`, whose wall slope is a fixture parameter. Filtered
+to wall hits, the measured slope recovers the built value **exactly**:
+
+| wall built | measured |
+| --- | --- |
+| 15° | 15.0° |
+| 25° | 25.0° |
+| 35° | 35.0° |
+| 45° | 45.0° |
+
+Two things the fixture made obvious and worth stating, because both broke a first draft
+of the tests. The *unfiltered* mean is not the wall slope: rays aimed lower strike the
+flat canyon floor, whose slope really is zero, so the mean over all accepted directions
+is a mixture — filtering is what isolates the wall. And an *upper* bound does not empty
+the result: a flat floor passes any ceiling, so a ceiling removes walls, not everything.
+
+Effect at Colca, with a deliberately permissive 25° floor against ~40° walls:
+
+| | before | after |
+| --- | --- | --- |
+| candidates accepted | 35.9% | **18.9%** |
+| sites | 30 | 17 |
+| capacity | 20385 | 10878 |
+| usable area | 176.2 km² | 93.1 km² |
+| joint with GRAND | 115.1 km² | 54.9 km² |
+
+**The physical check that matters:** the surviving sites look at walls of 34.7–44.3°,
+median **38.6°** — which is Colca's published wall steepness, recovered rather than
+assumed. The criterion is selecting canyon-wall geometry, not terrain in general.
+
 **Still open.** TAMBO's acceptance is a score cut (`min_score`), which is a knob rather
-than a derivation; the slope band, the ±20° arrival window and the shower-band fraction
-are stated assumptions, not collaboration inputs; and slope is still tested only at the
-candidate pixel, so a *steep far wall* is not yet required — that is the per-role
-criterion of §5.2 and remains the deepest piece of the generalisation.
+than a derivation; and the slope bands, the ±20° arrival window, the shower-band
+fraction and the 25° far-wall floor are stated assumptions rather than collaboration
+inputs. Every one of them is now a config knob, so re-running under different values
+costs about six seconds.
 
 ---
 

@@ -25,6 +25,10 @@
     "azimuth_half_width_deg": 60.0,
     "min_column_depth_gcm2": 0.0,
 
+    "_comment_far_wall": "The per-role half of the slope criterion. min_slope/max_slope above describe the NEAR wall the array stands on; this describes the FAR wall the tau exits, measured along the arrival azimuth at the point the ray strikes it. Without it the scan asks only that rock is present at the right range, which is true almost everywhere in the Andes. 25 deg is a deliberately permissive floor against Colca's ~40 deg walls -- ASSUMPTION, and the knob most worth checking.",
+    "min_target_slope_deg": 25.0,
+    "max_target_slope_deg": null,
+
     "_comment_physics": "Particle detection, not radio: no Fresnel clearance, no geomagnetic weighting, and grammage scored as a band because particle content dies after shower maximum whereas radio simply propagates.",
     "_comment_shower_band": "= physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.1), i.e. TAMBO's 3 PeV - 1 EeV reach, taken as the depth range where the charged-particle content stays above a tenth of its own maximum. Stated explicitly rather than via energy_min/max_pev only because those also override the distance window. The default (700, 2800) is a GRAND-scale band and rejects every canyon.",
     "use_geomagnetic": false,

@@ -97,7 +97,7 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
                         cell_size_y, cell_size_x, rows, cols,
                         tan_edges, n_bins,
                         step_m, max_range_m, inv_2R, bilinear,
-                        first_dist, angle_hist):
+                        first_dist, angle_hist, first_rise):
     """
     Walks one azimuth and fills, for every elevation bin:
 
@@ -112,11 +112,19 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
     roughly 15 ns per sample was about half the cost of the whole scan. The per-axis
     pixel steps are hoisted out of the loop for the same reason.
 
-    ``tan_edges`` holds tan of the n_bins+1 bin edges. Both output arrays are
+    ``first_rise`` records, for each bin, how fast the terrain was climbing along the
+    ray where it was first met: dz/dd between the previous sample and the intersection.
+    That is the target's slope measured along the arrival azimuth, and it is what
+    separates a wall from a hillside -- the scan otherwise only asks whether rock is
+    there, not whether it stands up. Reported as an observable and optionally required,
+    per experiment.
+
+    ``tan_edges`` holds tan of the n_bins+1 bin edges. All three output arrays are
     caller-supplied and overwritten. Returns the horizon angle in degrees.
     """
     for b in range(n_bins):
         first_dist[b] = -1.0
+        first_rise[b] = 0.0
         angle_hist[b] = 0.0
     angle_hist[n_bins] = 0.0            # overflow bin: terrain above the window
 
@@ -128,6 +136,9 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
     running_max = -1.0e30               # in slope, not angle
     fill_bin = 0                        # lowest bin not yet assigned a distance
     horizon_slope = -1.0e30
+    # Previous valid sample, for the along-ray rise at an intersection. NaN until the
+    # first one, so a ray starting in nodata does not invent a gradient.
+    z_prev = np.nan
 
     d = step_m
     while d <= max_range_m:
@@ -187,9 +198,16 @@ def _scan_one_direction(elevation, r0, c0, z0, azimuth_deg,
             # Each new running maximum claims the elevation bins it has just risen past
             if slope > running_max:
                 running_max = slope
+                # How steep the target is, along this azimuth, right where the ray
+                # meets it. Zero when there is no previous sample to difference.
+                rise = 0.0
+                if not np.isnan(z_prev):
+                    rise = (z - z_prev) / step_m
                 while fill_bin < n_bins and tan_edges[fill_bin] <= slope:
                     first_dist[fill_bin] = d
+                    first_rise[fill_bin] = rise
                     fill_bin += 1
+            z_prev = z
         d += step_m
 
     if horizon_slope < -1.0e29:
@@ -279,13 +297,15 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     step_m, max_range_m,
                     min_dist_m, max_dist_m,
                     min_depth_gcm2, require_terrain,
+                    min_target_tan, max_target_tan,
                     rock_density, earth_radius_m, wavelength_m, shower_offset_m,
                     antenna_height_m, near_field_m, radio_earth_radius_m,
                     bx, by, bz, use_geomag,
                     sea_level_density, scale_height_m, crust_density, bilinear,
                     out_cells, out_solid_angle, out_mean_dist,
                     out_max_depth, out_mean_depth, out_horizon, out_clearance,
-                    out_geomag_omega, out_grammage, out_earth_chord):
+                    out_geomag_omega, out_grammage, out_earth_chord,
+                    out_target_slope):
     """
     Scans arrival directions for every candidate and reports what each one sees.
 
@@ -332,6 +352,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         z0 = elevation[r0, c0]
 
         first_dist = np.empty(n_bins, dtype=np.float64)
+        first_rise = np.empty(n_bins, dtype=np.float64)
         angle_hist = np.empty(n_bins + 1, dtype=np.float64)
 
         cells = 0
@@ -344,6 +365,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         geomag_omega = 0.0
         grammage_sum = 0.0
         chord_sum = 0.0
+        target_slope_sum = 0.0
 
         if np.isnan(z0):
             out_cells[i] = 0
@@ -356,6 +378,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
             out_geomag_omega[i] = 0.0
             out_grammage[i] = 0.0
             out_earth_chord[i] = 0.0
+            out_target_slope[i] = 0.0
             continue
 
         for a in range(n_az):
@@ -368,7 +391,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                 cell_size_y, cell_size_x, rows, cols,
                 tan_edges, n_bins,
                 step_m, max_range_m, inv_2R, bilinear,
-                first_dist, angle_hist)
+                first_dist, angle_hist, first_rise)
             if horizon > horizon_max:
                 horizon_max = horizon
 
@@ -382,6 +405,16 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                 if require_terrain:
                     d_hit = first_dist[b]
                     if d_hit < 0.0 or d_hit < min_dist_m or d_hit > max_dist_m:
+                        continue
+                    # Is the target a wall or merely ground? The scan finds rock at the
+                    # right range and bearing, which on real terrain is nearly always
+                    # true somewhere; requiring it to stand up is what distinguishes a
+                    # canyon from a hillside. Measured along this azimuth, so an
+                    # obliquely-viewed wall counts as the tau would cross it.
+                    # Named distinctly: `rise` further down is the grammage integral's
+                    # vertical rise, and reusing it here silently reported that instead
+                    target_rise = first_rise[b]
+                    if target_rise < min_target_tan or target_rise > max_target_tan:
                         continue
                     # Slant path through rock, beyond the exit point
                     depth = (running / cos_theta) * depth_scale
@@ -436,6 +469,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
                     solid_angle += cell_omega
                     dist_sum += d_hit
                     depth_sum += depth
+                    target_slope_sum += np.degrees(np.arctan(target_rise))
                     if depth > depth_max:
                         depth_max = depth
                 else:
@@ -456,6 +490,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         out_geomag_omega[i] = geomag_omega
         out_grammage[i] = grammage_sum / cells if cells > 0 else 0.0
         out_earth_chord[i] = chord_sum / cells if cells > 0 else 0.0
+        out_target_slope[i] = target_slope_sum / cells if cells > 0 else 0.0
 
 
 def tau_decay_length_m(energy_pev):
@@ -555,6 +590,7 @@ def scan(candidates, elevation, map_grid, *,
          step_m=None, max_range_m=80000.0,
          min_dist_km=0.0, max_dist_km=80.0,
          min_depth_gcm2=0.0, require_terrain=True,
+         min_target_slope_deg=None, max_target_slope_deg=None,
          rock_density=STANDARD_ROCK_DENSITY,
          earth_radius_m=TRUE_EARTH_RADIUS_M,
          radio_earth_radius_m=RADIO_EARTH_RADIUS_M,
@@ -598,7 +634,15 @@ def scan(candidates, elevation, map_grid, *,
         "geomag_solid_angle_sr": np.zeros(n, dtype=np.float64),
         "path_grammage_gcm2": np.zeros(n, dtype=np.float64),
         "earth_chord_gcm2": np.zeros(n, dtype=np.float64),
+        "target_slope_deg": np.zeros(n, dtype=np.float64),
     }
+    # A target-slope band, when requested. Tangents, because the walk works in slope;
+    # None means unbounded, and the vertical is a limit tan cannot represent.
+    min_target_tan = (-1.0e30 if not min_target_slope_deg
+                      else math.tan(math.radians(min_target_slope_deg)))
+    max_target_tan = (1.0e30 if (max_target_slope_deg is None
+                                 or max_target_slope_deg >= 90.0)
+                      else math.tan(math.radians(max_target_slope_deg)))
     if n == 0:
         return out
 
@@ -621,6 +665,7 @@ def scan(candidates, elevation, map_grid, *,
         float(step_m), float(max_range_m),
         min_dist_km * 1000.0, max_dist_km * 1000.0,
         float(min_depth_gcm2), bool(require_terrain),
+        float(min_target_tan), float(max_target_tan),
         float(rock_density), float(earth_radius_m), wavelength_m, float(shower_offset_m),
         float(antenna_height_m), float(near_field_m), float(radio_earth_radius_m),
         float(bx), float(by), float(bz), bool(use_geomag),
@@ -630,6 +675,7 @@ def scan(candidates, elevation, map_grid, *,
         out["max_depth_gcm2"], out["mean_depth_gcm2"], out["horizon_deg"],
         out["best_clearance_ratio"],
         out["geomag_solid_angle_sr"], out["path_grammage_gcm2"], out["earth_chord_gcm2"],
+        out["target_slope_deg"],
     )
 
     if order is not None:

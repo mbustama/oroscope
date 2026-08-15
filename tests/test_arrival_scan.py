@@ -721,3 +721,99 @@ class TestProfileSampling(unittest.TestCase):
                             max_range_m=10000.0, min_dist_km=1.0, max_dist_km=10.0,
                             bilinear=True)
         self.assertEqual(int(out["cells"][0]), 0)     # no crash, nothing spurious
+
+
+class TestTargetSlopeCriterion(unittest.TestCase):
+    """
+    Is the target a wall, or merely ground?
+
+    The scan asks whether rock lies at the right range and bearing, which on real
+    terrain is nearly always true somewhere -- 92% of Andean candidates passed a
+    canyon-shaped criterion before this existed. TAMBO's geometry needs more than the
+    presence of rock: the tau exits a *wall*, and a gentle rise at the same distance is
+    not the same target. The slope is measured along the arrival azimuth, so an
+    obliquely-viewed wall counts as the tau would actually cross it.
+
+    The canyon fixture has walls of known slope, so the recovered value is checkable
+    against arithmetic rather than against a previous run.
+
+    Note the un-filtered mean is deliberately *not* the wall slope: rays aimed lower
+    strike the flat canyon floor, whose slope really is zero, so the mean over all
+    accepted directions is a mixture. Filtering is what isolates the wall.
+    """
+
+    FLOOR_W, DEPTH = 1000.0, 1500.0
+
+    def setUp(self):
+        self.n = 400
+        self.cell_y, self.cell_x = synthetic.cell_sizes(-15.6)
+        self.grid = grid_at()
+
+    def scan_across(self, wall_slope_deg, **kw):
+        """One candidate part-way down the west wall, looking east across the canyon."""
+        z = synthetic.canyon(self.n, self.cell_x, floor_width_m=self.FLOOR_W,
+                             depth_m=self.DEPTH, wall_slope_deg=wall_slope_deg)
+        col = int((self.n * self.cell_x / 2.0 - 1200.0) / self.cell_x)
+        cands = np.array([[self.n // 2, col, 90.0]], dtype=np.float64)
+        params = dict(elev_min_deg=-25.0, elev_max_deg=25.0, n_elev_bins=25,
+                      # use_aspect, so the single azimuth is the candidate's own 90 deg
+                      # -- due east, across the canyon. With use_aspect off the fan
+                      # returns 0 deg and looks north, along a canyon that is uniform
+                      # north-south and so has no wall to find.
+                      n_azimuths=1, half_width_deg=0.0, use_aspect=True,
+                      min_dist_km=0.3, max_dist_km=8.0, max_range_m=8000.0)
+        params.update(kw)
+        return scan_mod.scan(cands, z, self.grid, **params)
+
+    def test_recovers_the_wall_slope_it_was_built_with(self):
+        """Filtered to wall hits, the measured slope is the fixture's own parameter."""
+        for wall in (15.0, 25.0, 35.0, 45.0):
+            out = self.scan_across(wall, min_target_slope_deg=wall - 5.0)
+            self.assertGreater(int(out["cells"][0]), 0, f"{wall} deg wall: nothing accepted")
+            got = float(out["target_slope_deg"][0])
+            self.assertAlmostEqual(got, wall, delta=0.5,
+                                   msg=f"built a {wall} deg wall, measured {got:.1f}")
+
+    def test_unfiltered_mean_sits_between_the_floor_and_the_wall(self):
+        wall = 35.0
+        out = self.scan_across(wall)
+        got = float(out["target_slope_deg"][0])
+        self.assertGreater(got, 0.0)
+        self.assertLess(got, wall, "rays reaching the flat floor must pull the mean down")
+
+    def test_a_steep_requirement_rejects_a_shallow_wall(self):
+        self.assertEqual(int(self.scan_across(15.0, min_target_slope_deg=30.0)["cells"][0]), 0)
+
+    def test_the_same_requirement_accepts_a_steep_wall(self):
+        self.assertGreater(int(self.scan_across(45.0, min_target_slope_deg=30.0)["cells"][0]), 0)
+
+    def test_the_criterion_only_ever_removes_directions(self):
+        base = self.scan_across(45.0)
+        cut = self.scan_across(45.0, min_target_slope_deg=30.0)
+        self.assertLessEqual(int(cut["cells"][0]), int(base["cells"][0]))
+        self.assertLessEqual(float(cut["solid_angle_sr"][0]),
+                             float(base["solid_angle_sr"][0]) + 1e-12)
+
+    def test_unset_by_default_so_grand_is_unaffected(self):
+        implicit = self.scan_across(35.0)
+        explicit = self.scan_across(35.0, min_target_slope_deg=None, max_target_slope_deg=None)
+        self.assertEqual(int(implicit["cells"][0]), int(explicit["cells"][0]))
+        self.assertAlmostEqual(float(implicit["target_slope_deg"][0]),
+                               float(explicit["target_slope_deg"][0]), places=9)
+
+    def test_an_upper_bound_excludes_the_wall_but_keeps_the_floor(self):
+        """
+        A ceiling does not empty the result: the canyon floor is flatter than any
+        ceiling worth setting, so what it removes is the wall itself.
+        """
+        base = self.scan_across(45.0)
+        capped = self.scan_across(45.0, max_target_slope_deg=30.0)
+        self.assertGreater(int(capped["cells"][0]), 0)
+        self.assertLess(int(capped["cells"][0]), int(base["cells"][0]))
+        self.assertLessEqual(float(capped["target_slope_deg"][0]), 30.0)
+
+    def test_the_flat_floor_is_reported_as_flat(self):
+        """A direction that strikes the canyon floor must measure ~0, not the wall."""
+        out = self.scan_across(35.0, max_target_slope_deg=5.0)
+        self.assertGreater(int(out["cells"][0]), 0, "floor hits should still be accepted")
+        self.assertLess(abs(float(out["target_slope_deg"][0])), 6.0)
