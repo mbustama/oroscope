@@ -19,14 +19,13 @@ The script is built for **Python 3.8+**. Due to the heavy reliance on C-compiled
 * `numba` (JIT compiler for parallelized physics kernels)
 * `tifffile` (Reading/Writing large geospatial TIFFs)
 * `matplotlib` (Generating visualization maps and extracting KML contours)
-* `joblib` (CPU multi-processing orchestration)
 * `tqdm` (Progress bars)
 * `psutil` (Optional, used for printing system RAM diagnostics)
 
 **Installation via pip:**
 
 ```bash
-pip install numpy scipy numba tifffile matplotlib joblib tqdm psutil
+pip install numpy scipy numba tifffile matplotlib tqdm psutil
 
 ```
 

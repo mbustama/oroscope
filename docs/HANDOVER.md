@@ -6,12 +6,16 @@ Written to be fed into a fresh session. It assumes no memory of the previous one
 **Head at handover:** `a7b4ec1`.
 **Tests:** 250, `unittest`, ~25 s, no dependencies beyond what the tool already needs.
 
-**The immediate task is to continue Phase 3 (performance).** The list I left was
-"empty", but that was a failure of imagination rather than a real conclusion — see
-§6, which contains concrete untried leads with file and line numbers. Look for
-opportunities everywhere: redundant recomputation, work that should be under Numba,
-work that should be vectorised, algorithmic complexity, and multiprocessing where it
-genuinely helps.
+**Phase 3 has since been taken a second pass** — see §6.4 for which leads are done,
+which were measured and closed, and which remain. The headline conclusion is that the
+arrival scan is **not compute-bound**: four separate arithmetic optimisations of the
+inner loop have now failed to help, because the profile walk outweighs everything else
+in the kernel by 225:1. Further scan work has to reduce samples or memory traffic.
+
+**Before trusting any timing on this machine, read ROADMAP §6.12.** It is a hybrid
+CPU (2 P-cores + 8 E-cores) that runs at about a third of its rated clock under load,
+and the same unchanged code measured 43.6 s and 39.8 s in consecutive runs. A/B
+alternating inside one process, single-threaded, on a subsample.
 
 ---
 
@@ -120,6 +124,14 @@ is disabled). The full Arequipa DEM is ~20× the pixels, so roughly 15 minutes.
 | Hoisting the per-sample division | **Slower**, 24.5 s → 26.1 s. The division was already pipelined; the replacement needed two multiplies per sample for the horizon. |
 | Solving the ray's exit distance up front to drop the bounds test | ~5%, but broke 405 of 40,000 candidates. The bound is `(cols − c0)/dc_per_m`, not `(cols − 1 − c0)/dc_per_m`; reproducing `int()` truncation at every edge is error-prone. Not worth it. |
 | Shuffling candidates for load balance | Works (scaling 3.3× → 5.0×) but destroys locality; net ~10%. Superseded by block-dealing, which is what is in the code. |
+| Tabulating the scan's per-bin transcendentals (was lead (f), and more) | Bit-identical, measured **0.975×**. Reverted. |
+| Short-circuiting the histogram's bin search | Bit-identical, measured **0.992×**. Reverted. |
+| Tuning `numba.set_parallel_chunksize` | ~3% at 8 threads (8.44 s → 8.17 s). Block-dealing already handles the imbalance. |
+
+**The lesson from the last two is the important one:** per (candidate, azimuth) the bin
+loop runs 12 times and the profile walk runs ~2700 samples, a ratio of 225:1. Anything
+outside the walk is under 1% of the kernel. **The scan is not compute-bound** — do not
+spend more effort on flops per sample. See ROADMAP §6.11–6.12.
 
 ### 6.3 Already delivered in Phase 3
 
@@ -134,10 +146,33 @@ is disabled). The full Arequipa DEM is ~20× the pixels, so roughly 15 minutes.
   +13.4%. `--nearest_sampling` opts out.
 - **Streaming DEM cache** — non-evictable memory 623 → 132 MiB, and now bounded by
   block size rather than DEM size.
+- **Topographic screen in gradient space** — slope band tested as `tan²(min) ≤ dx²+dy²
+  ≤ tan²(max)`, and every filter after slope/altitude works on the surviving subset, so
+  `arctan2` is evaluated only where the aspect is read. Byte-identical candidates across
+  six filter configurations; 1.25× to 4.47× depending on how much the filters reject.
+- **Per-site passes made O(N)** — one `ndimage.mean`, one lookup-table recolouring and
+  one stable `argsort` grouping replace three O(sites × pixels) loops. Flat in the site
+  count: 0.78 s → 0.22 s at 100 sites, and 900 sites now costs the same as 16.
+- **A crash fixed on the way**: `labeled_viz` was `uint8`, so selecting a 256th site
+  raised `OverflowError` after the physics had already been paid for. Relevant to
+  TAMBO, whose layout is many small sub-arrays. Pinned by `TestManySites`.
 
-### 6.4 Concrete untried leads
+### 6.4 Leads — status
 
-These are real and specific. Verify each with a measurement before and after.
+**Done:** (a) screening transcendentals, (b) per-site `labeled == site_id`,
+(c) `summarize_observables_by_site`, (d) the unused `joblib` import, (f) azimuth
+sin/cos, (g) RFI zone masking — (f) measured neutral and was reverted; the rest are in.
+
+**Measured and closed without a change:** (e) the Fresnel pass is 6.5% of the scan
+(43.55 s → 46.57 s), not the large share suspected, so fusing it has a 6.5% ceiling.
+(i) multiprocessing — screening and morphology together are now ~3% of runtime.
+
+**Still open:** (h) fusing `uniform_filter` with `np.gradient` — note this only bites
+when `slope_baseline_m` is set, which the shipped configs do not set. (j) the two-pass
+DEM cache build, which is first-run latency rather than throughput. (k) an early exit
+in the walk, which is the one lead with real headroom left and is described below.
+
+The original text of the remaining leads follows.
 
 **(a) The screening stage computes `arctan`, `sqrt` and `arctan2` over every pixel.**
 `src/site_searcher.py:382-383`:

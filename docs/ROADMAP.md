@@ -1102,23 +1102,164 @@ without a sentinel test in every kernel. That costs twice the disk of an int16 c
 and buys correctness that would otherwise have to be re-established in half a dozen
 places.
 
-### 6.9 Where phase 3 stands
+### 6.9 Topographic screen in gradient space ✅ delivered
 
-End-to-end on the 2500² Arequipa crop, 8 cores:
+The screen computed `arctan`, `sqrt` and `arctan2` over **every** pixel of every tile,
+then used the slope only for a band comparison and read the aspect only at the pixels
+that survived.
 
-| | before phase 3 | now |
+Both are avoidable. Slope rises monotonically with gradient magnitude, so
+
+    min ≤ atan(√g) ≤ max   ⇔   tan²(min) ≤ g ≤ tan²(max)
+
+which needs neither `sqrt` nor `arctan` (`slope_band_gradient_sq`, with bounds at or
+beyond the vertical returned as "unbounded" since `tan` is singular there). And once
+slope and altitude have reduced the tile to a subset, every remaining filter — aspect,
+road distance, RFI circles and polygons — can work on that subset instead of on the
+full tile. `arctan2` is then evaluated only where the aspect is actually read.
+
+Measured on a 2500² Arequipa crop, against six filter configurations, all producing
+**byte-identical candidate arrays**:
+
+| configuration | before | after | |
+| --- | --- | --- | --- |
+| slope band only | 0.261 s | 0.209 s | 1.25× |
+| aspect bounds | 0.218 s | 0.184 s | 1.18× |
+| aspect bounds, wrapped | 0.218 s | 0.184 s | 1.19× |
+| RFI circle + polygon | 0.334 s | 0.248 s | 1.35× |
+| altitude band | 0.231 s | 0.119 s | 1.94× |
+| narrow slope band | 0.201 s | 0.045 s | **4.47×** |
+
+The gain scales with how much the filters reject, because the work now follows the
+survivors rather than the tile. This also removed a redundant full-array pass in the
+RFI branch, which computed `np.where(mask.ravel())` only to test whether it was empty.
+
+### 6.10 Per-site passes made O(N) ✅ delivered, and a crash fixed
+
+`analyze_sites_and_capacity` scanned the whole downsampled map once per site
+(`labeled == site_id` for the mean aspect, then `labeled == original_id` per selected
+site for the colouring, then `np.isin` for the mask), and
+`summarize_observables_by_site` masked the whole accepted array once per site. All are
+O(sites × pixels).
+
+Replaced by one labelled pass (`scipy.ndimage.mean` over all candidate regions), one
+lookup-table recolouring, and one stable `argsort` grouping. The sort is stable, so
+each site's values keep the order a boolean mask would have produced and the
+statistics are unchanged to the last bit.
+
+On a 2000² map, `analyze_sites_and_capacity` / `summarize_observables_by_site`:
+
+| sites | before | after | |
+| --- | --- | --- | --- |
+| 16 | 0.280 s | 0.226 s | 1.24× |
+| 100 | 0.776 s | 0.223 s | 3.48× |
+| 256 | *crashed* | 0.245 s | — |
+| 900 | *crashed* | 0.232 s | — |
+
+The new cost is flat in the site count, as it should be.
+
+**The crash was real and pre-existing.** `labeled_viz` was `uint8`, so assigning the
+256th site's colour raised `OverflowError` and took the run down *after* the physics
+had been paid for. It is now sized from the label count via `np.min_scalar_type`.
+This matters for phase 2: TAMBO needs a long strip of many small sub-arrays rather
+than one blob (§5.2), which reaches 255 sites routinely. Pinned by
+`tests/test_capacity.py::TestManySites`, which fails on the old code.
+
+### 6.11 The scan is not compute-bound — two more arithmetic optimisations, both neutral
+
+Recorded at length because the conclusion redirects any future work on the scan.
+
+**Per-bin transcendentals hoisted out of the inner loop.** `cos(θ)`, `sin(θ)`,
+`tan(θ)`, the solid-angle element and the Earth-chord term depend only on the
+elevation bin, yet were recomputed for every (candidate × azimuth × bin); `cos(θ)` was
+computed *before* the acceptance guards, so even rejected bins paid for it.
+`exp(−z₀/H)` depends only on the candidate. `sin`/`cos` of the azimuth were recomputed
+once per bin inside the geomagnetic term. Tabulating all of them is bit-identical and
+measured **0.975×, i.e. 2.6% slower** — nothing, within noise.
+
+**The histogram's bin search short-circuited.** A sample above the top bin edge fell
+through the full linear scan over all 13 edges without ever breaking — the most common
+case was the most expensive. Adding one comparison to catch it is bit-identical and
+measured **0.992×**. Also nothing.
+
+**Why.** The estimate that motivated both was wrong by more than two orders of
+magnitude. Per (candidate, azimuth) the bin loop runs `n_bins` = 12 times, but the
+profile *walk* runs `max_range/step` ≈ 2700 samples — a ratio of 225:1. Everything
+outside the walk is under 1% of the kernel, so no amount of arithmetic saved there is
+visible. Both changes were reverted: they are bit-identical and slightly slower, and
+neutral complexity in the most delicate loop in the project is a net loss.
+
+**What this means.** Arithmetic micro-optimisation of the scan is exhausted. Four
+attempts have now failed for the same underlying reason: the two in §6.4 and the two
+here. Anything further has to reduce the *number of samples* or the *memory traffic
+per sample*, not the flops per sample.
+
+### 6.12 What the machine contributes, and why timings here are noisy
+
+Worth writing down, because two days of measurement were nearly wasted on it.
+
+The workstation is a 13th-gen i5-1334U: a **hybrid** CPU with 2 P-cores (HT, 4.6 GHz
+nominal, CPUs 0–3) and 8 E-cores (3.4 GHz, CPUs 4–11), 12 MiB of L3, and in practice
+running at about 1.5 GHz under sustained load. Consequences:
+
+- **Scaling saturates on the hardware, not the code.** Measured on 151k candidates:
+  1.85× at 2 threads (92% efficient, both P-cores), 2.51× at 4 (the P-cores' HT
+  ceiling), **3.70× at 8** (46%). The four E-cores added at the end contribute about
+  0.3 of a P-core each.
+- **Scheduling is not the problem.** `numba.set_parallel_chunksize` from the default
+  static split down to 16 moved the 8-thread time only from 8.44 s to 8.17 s (~3%),
+  so the existing block-dealt ordering (§6.3) is already doing its job.
+- **Wall-clock A/B across processes is untrustworthy here.** The same unchanged code
+  measured 43.6 s and 39.8 s in consecutive runs. An early cross-process comparison
+  showed the §6.11 hoist at 1.15× — it is actually 0.975×. Measure A and B
+  *alternating inside one process*, and prefer **single-threaded** runs on a
+  subsample: one thread on a 12-thread box is essentially never descheduled.
+- The 2500² crop is 25 MB of float32 against 12 MiB of L3, so it does not fit; the
+  full DEM is ~20× larger again.
+
+`bench/baseline.json` records `host.load_average_1min` for exactly this reason.
+
+### 6.13 The Fresnel pass costs less than assumed
+
+Suspected to be "a plausible chunk of the 1.44× bilinear cost". Measured on the 2500²
+crop with the real Arequipa configuration: **43.55 s without it, 46.57 s with it** —
+6.5% of the scan, not a chunk of it. Acceptance averages 14.7 accepted (azimuth,
+elevation) cells per accepted candidate, and the second walk starts at the near-field
+cut-off and stops at the shower offset, so it is much shorter than the main walk.
+Fusing it into the main walk was therefore not attempted: the ceiling is 6.5% and the
+change would entangle two passes with different termination conditions.
+
+### 6.14 Where phase 3 stands
+
+End-to-end on the 2500² Arequipa crop, 8 cores, default benchmark configuration:
+
+| stage | before phase 3 | now |
 | --- | --- | --- |
-| arrival scan | 69.8 s | 43.6 s |
-| morphology | 10.5 s | **1.6 s** |
-| whole run | 82.0 s | **47.9 s** |
+| arrival scan | 69.8 s | 15.3 s |
+| topographic screen | 1.4 s | **0.25 s** |
+| morphology | 10.5 s | **0.62 s** |
+| capacity analysis | 0.6 s | **0.22 s** |
 
-The scan figure now includes bilinear sampling, which is 1.44× dearer than the
-nearest-neighbour it replaces; against like-for-like nearest sampling the run is
-30.3 s. Both are worth quoting: 47.9 s is the honest current cost, and the extra buys
-a 13% correction to acceptance.
+With the full physics configuration the scan is the whole story: 43.6 s of a 47.9 s
+run, and §6.11 says that number is now bounded by memory traffic and by this machine's
+cores rather than by arithmetic.
 
-Remaining ideas are small: none of the three items originally listed here is now
-worth doing, since the sweep is not justified (§6.6) and the other two are done.
+**Remaining ideas, in the order they are worth trying:**
+
+1. **Fewer samples per walk.** The only lever with real headroom left. An early exit
+   is not free — the depth histogram accumulates over the whole path and `horizon_deg`
+   is a reported observable — so it needs an explicit decision about what those two
+   mean when the walk stops early. See lead (k) in the handover.
+2. **Memory traffic per sample.** Bilinear sampling touches two rows per sample rather
+   than one; the DEM does not fit in L3. A tiled traversal that walks all azimuths of a
+   block of candidates together is the shape of the idea, but note §6.6 measured the
+   azimuth locality penalty at only 1.14×, which caps this.
+3. `build_elevation_cache` still writes a raw file and then converts it (lead (j)). It
+   is one-off per DEM and `load_dem` is 0.05 s on the crop, so this is about first-run
+   latency on the full DEM, not throughput.
+
+Not worth doing: multiprocessing (lead (i)) — screening and morphology are now 3% of
+runtime combined, and the scan already uses every core the owner allows.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

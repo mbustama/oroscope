@@ -7,11 +7,11 @@ from matplotlib.patches import Ellipse, Polygon as MplPolygon
 from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
 import matplotlib.patheffects as path_effects
-from joblib import Parallel, delayed
 from tqdm import tqdm
 import multiprocessing
 from scipy.ndimage import (binary_dilation, binary_erosion, label,
-                           sum as ndi_sum, find_objects, uniform_filter)
+                           sum as ndi_sum, mean as ndi_mean, find_objects,
+                           uniform_filter)
 import os
 import shutil
 import math
@@ -273,7 +273,7 @@ def _package_versions():
     """Best-effort version lookup for the third-party stack, for provenance."""
     import importlib
     versions = {}
-    for name in ("numpy", "scipy", "numba", "tifffile", "matplotlib", "joblib", "tqdm", "psutil", "imagecodecs"):
+    for name in ("numpy", "scipy", "numba", "tifffile", "matplotlib", "tqdm", "psutil", "imagecodecs"):
         try:
             mod = importlib.import_module(name)
             versions[name] = getattr(mod, "__version__", "unknown")
@@ -363,22 +363,64 @@ def slope_baseline_pixels(map_grid, slope_baseline_m):
     return ny, nx
 
 
-def terrain_derivatives(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
+def terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
     """
-    Slope and aspect over a stated measurement baseline.
+    Smoothed partial derivatives of the surface, the raw material for slope and aspect.
 
     Smoothing before differentiating gives the average gradient over the window,
     which is what "slope at 1 km scale" means physically. Callers must supply a
     block with a halo of at least max(smooth)//2 + 1 and crop the result, otherwise
     the window reaches past the block edge.
 
+    Kept separate from :func:`terrain_derivatives` because the screening stage wants
+    the gradients themselves: a slope *band* can be tested without ever forming the
+    angle (see :func:`slope_band_gradient_sq`), and aspect is needed only at the few
+    pixels that survive.
+
     Returns:
-    - tuple(ndarray, ndarray): slope in degrees, aspect in degrees clockwise from north.
+    - tuple(ndarray, ndarray): d/dy and d/dx, in metres per metre.
     """
     block = elevation_block
     if smooth_y > 1 or smooth_x > 1:
         block = uniform_filter(block, size=(max(1, smooth_y), max(1, smooth_x)), mode="nearest")
-    dy, dx = np.gradient(block, cell_size_y, cell_size_x)
+    return np.gradient(block, cell_size_y, cell_size_x)
+
+
+def slope_band_gradient_sq(min_slope_deg, max_slope_deg):
+    """
+    The slope band restated as bounds on the squared gradient magnitude.
+
+    slope = atan(|grad|) rises monotonically with |grad|, so
+
+        min <= atan(sqrt(g)) <= max   <=>   tan(min)^2 <= g <= tan(max)^2
+
+    which tests the same pixels without a sqrt or an arctan. Bounds at or beyond the
+    vertical, and non-positive lower bounds, are returned as None meaning "unbounded":
+    tan is singular at 90 degrees and every real gradient satisfies them anyway.
+
+    Returns:
+    - tuple(float or None, float or None): lower and upper bounds on dx^2 + dy^2.
+    """
+    lo = None
+    if min_slope_deg is not None and min_slope_deg > 0.0:
+        if min_slope_deg >= 90.0:
+            lo = np.inf                      # nothing on a real surface qualifies
+        else:
+            lo = math.tan(math.radians(min_slope_deg)) ** 2
+    hi = None
+    if max_slope_deg is not None and max_slope_deg < 90.0:
+        hi = math.tan(math.radians(max_slope_deg)) ** 2
+    return lo, hi
+
+
+def terrain_derivatives(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
+    """
+    Slope and aspect over a stated measurement baseline.
+
+    Returns:
+    - tuple(ndarray, ndarray): slope in degrees, aspect in degrees clockwise from north.
+    """
+    dy, dx = terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y, smooth_x)
     slope = np.degrees(np.arctan(np.sqrt(dx ** 2 + dy ** 2)))
     aspect = np.degrees(np.arctan2(-dx, dy)) % 360
     return slope, aspect
@@ -595,6 +637,9 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     halo_y = max(1, smooth_y // 2 + 1)
     halo_x = max(1, smooth_x // 2 + 1)
 
+    # The slope band, once, as bounds on the squared gradient
+    grad_lo, grad_hi = slope_band_gradient_sq(min_slope_deg, max_slope_deg)
+
     # Load Logistics Road map if provided
     road_dist_map = None
     if road_map_path and max_road_dist_km:
@@ -649,15 +694,26 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                 c_lo, c_hi = max(0, c - halo_x), min(cols, c_end + halo_x)
                 block = elevation[r_lo:r_hi, c_lo:c_hi]
 
-                slope_block, aspect_block = terrain_derivatives(
+                dy_block, dx_block = terrain_gradients(
                     block, cell_size_y, cell_size_x, smooth_y, smooth_x)
 
                 core = (slice(r - r_lo, r - r_lo + (r_end - r)),
                         slice(c - c_lo, c - c_lo + (c_end - c)))
-                slope, aspect = slope_block[core], aspect_block[core]
+                dy, dx = dy_block[core], dx_block[core]
 
-                # Filter 1: Fundamental detector slope requirement
-                mask = (slope >= min_slope_deg) & (slope <= max_slope_deg)
+                # Filter 1: Fundamental detector slope requirement, tested on the
+                # squared gradient so the whole tile needs neither sqrt nor arctan.
+                # NaN elevations propagate into the gradient and compare False, which
+                # is how they were excluded before.
+                grad_sq = dx * dx + dy * dy
+                if grad_lo is None and grad_hi is None:
+                    mask = np.ones(grad_sq.shape, dtype=bool)
+                elif grad_lo is None:
+                    mask = grad_sq <= grad_hi
+                elif grad_hi is None:
+                    mask = grad_sq >= grad_lo
+                else:
+                    mask = (grad_sq >= grad_lo) & (grad_sq <= grad_hi)
                 if funnel is not None:
                     funnel.add(f"slope {min_slope_deg}-{max_slope_deg} deg", np.count_nonzero(mask))
 
@@ -667,53 +723,58 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
                 if funnel is not None and (min_alt is not None or max_alt is not None):
                     funnel.add("altitude bounds", np.count_nonzero(mask))
 
+                # From here on the tile is represented by its survivors alone. The
+                # remaining filters each touched the whole tile before; on real terrain
+                # the subset is a fraction of it, and aspect -- the one transcendental
+                # left -- is now evaluated only where it is actually read.
+                #
+                # An empty tile is deliberately not short-circuited: every filter still
+                # reports its (zero) count, so a search that rejects everything still
+                # produces a complete funnel, which is the case the funnel is for.
+                cr, cc = np.where(mask)
+                aspect_vals = np.degrees(np.arctan2(-dx[cr, cc], dy[cr, cc])) % 360
+                keep = np.ones(len(cr), dtype=bool)
+
                 # Filter 3: Aspect bounds (handle wrapping around 360 degrees)
                 if min_aspect_deg is not None and max_aspect_deg is not None:
                     min_a, max_a = min_aspect_deg, max_aspect_deg
                     if min_a > max_a:
-                        mask &= (aspect >= min_a) | (aspect <= max_a)
+                        keep &= (aspect_vals >= min_a) | (aspect_vals <= max_a)
                     else:
-                        mask &= (aspect >= min_a) & (aspect <= max_a)
+                        keep &= (aspect_vals >= min_a) & (aspect_vals <= max_a)
                     if funnel is not None:
-                        funnel.add("aspect bounds", np.count_nonzero(mask))
+                        funnel.add("aspect bounds", int(np.count_nonzero(keep)))
 
                 # Filter 4: Road Logistics
                 if road_dist_map is not None:
                     road_chunk = road_dist_map[r:r_end, c:c_end]
-                    mask &= (road_chunk <= (max_road_dist_km * 1000))
+                    keep &= (road_chunk[cr, cc] <= (max_road_dist_km * 1000))
                     if funnel is not None:
-                        funnel.add("road distance", np.count_nonzero(mask))
+                        funnel.add("road distance", int(np.count_nonzero(keep)))
 
                 # Filter 5: Dynamic Exclusion Zones (RFI)
                 if rfi_zones:
-                    valid_y, valid_x = np.where(mask)
-                    if len(valid_y) > 0:
-                        abs_r = r + valid_y
-                        abs_c = c + valid_x
-                        
-                        # Process Circular exclusion zones, measured in metres on the ground
-                        for (zr, zc, zrad_m_sq) in rfi_circles:
-                            dist_sq = ((abs_r - zr) * cell_size_y)**2 + ((abs_c - zc) * cell_size_x)**2
-                            inside = np.where(dist_sq < zrad_m_sq)
-                            mask[valid_y[inside], valid_x[inside]] = False
+                    abs_r = (r + cr).astype(np.float64)
+                    abs_c = (c + cc).astype(np.float64)
 
-                        valid_idx = np.where(mask.ravel())[0]
-                        if len(valid_idx) > 0:
-                            subset_mask = np.ones(len(valid_y), dtype=bool)
-                            # Process Polygonal exclusion zones
-                            for poly in rfi_polys:
-                                apply_poly_mask_numba(abs_r.astype(np.float64), abs_c.astype(np.float64), poly, subset_mask)
-                            bad_idx = np.where(~subset_mask)[0]
-                            mask[valid_y[bad_idx], valid_x[bad_idx]] = False
+                    # Circular exclusion zones, measured in metres on the ground
+                    for (zr, zc, zrad_m_sq) in rfi_circles:
+                        dist_sq = ((abs_r - zr) * cell_size_y)**2 + ((abs_c - zc) * cell_size_x)**2
+                        keep &= dist_sq >= zrad_m_sq
+
+                    # Polygonal exclusion zones. apply_poly_mask_numba only ever clears
+                    # bits, so it can be handed `keep` directly and accumulate in place.
+                    for poly in rfi_polys:
+                        apply_poly_mask_numba(abs_r, abs_c, poly, keep)
                     if funnel is not None:
-                        funnel.add("outside RFI zones", np.count_nonzero(mask))
+                        funnel.add("outside RFI zones", int(np.count_nonzero(keep)))
 
                 # Extract surviving pixels for the physics simulation step
-                cr, cc = np.where(mask)
+                cr, cc, aspect_vals = cr[keep], cc[keep], aspect_vals[keep]
                 if funnel is not None:
                     funnel.add(f"kept by stride {candidate_stride}", len(cr[::candidate_stride]))
                 if len(cr) > 0:
-                    chunk_cands = np.column_stack((cr + r, cc + c, aspect[cr, cc]))
+                    chunk_cands = np.column_stack((cr + r, cc + c, aspect_vals))
                     # Thin the candidates to speed up ray tracing; assumption is terrain is continuous
                     kept = chunk_cands[::candidate_stride]
                     candidates_list.append(kept)
@@ -798,14 +859,22 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     fields = tuple(fields)
     values = {f: observables[f][accepted][inside] for f in fields}
 
+    # Group the candidates by site with one sort rather than one full-array comparison
+    # per site. The sort is stable, so each site's values stay in the order a boolean
+    # mask would have produced them and the statistics are unchanged to the last bit.
+    order = np.argsort(site_of, kind="stable")
+    sorted_ids = site_of[order]
+    starts = np.searchsorted(sorted_ids, site_ids, side="left")
+    stops = np.searchsorted(sorted_ids, site_ids, side="right")
+
     summary = {}
-    for site_id in site_ids:
-        sel = site_of == site_id
-        if not np.any(sel):
+    for site_id, start, stop in zip(site_ids, starts, stops):
+        if stop == start:
             continue
-        entry = {"scanned_pixels": int(np.count_nonzero(sel))}
+        idx = order[start:stop]
+        entry = {"scanned_pixels": int(stop - start)}
         for f in fields:
-            v = values[f][sel]
+            v = values[f][idx]
             entry[f"{f}_mean"] = float(np.mean(v))
             entry[f"{f}_p50"] = float(np.median(v))
             entry[f"{f}_p90"] = float(np.percentile(v, 90))
@@ -924,7 +993,12 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
         
     req_pixels = int((threshold_antennas * antenna_spacing_km**2) / px_area_km2)
     small_final = np.zeros_like(labeled, dtype=np.uint8)
-    labeled_viz = np.zeros_like(labeled, dtype=np.uint8)
+    # Wide enough for the labels actually present. This was uint8, which raised
+    # OverflowError as soon as a search selected a 256th site -- reachable in
+    # distributed mode with a small min_sub_array_size, and the normal case for a
+    # layout made of many small sub-arrays rather than one blob.
+    viz_dtype = np.min_scalar_type(max(1, num))
+    labeled_viz = np.zeros_like(labeled, dtype=viz_dtype)
     cumulative_capacity = 0
     site_details = []
     count = 0
@@ -942,7 +1016,14 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
             spacing_c = max(1, int((antenna_spacing_km * 1000) / cell_size_x))
             grid_code = 1 if grid_type == 'hex' else 0
             all_slices = find_objects(labeled)
-            
+
+            # Mean aspect for every candidate region in one labelled pass. Doing it as
+            # `aspect_ds[labeled == site_id]` inside the loop re-scanned the whole
+            # downsampled map once per site, which is O(sites x pixels).
+            mean_aspects = np.atleast_1d(ndi_mean(aspect_ds, labeled, index=potential_ids))
+            aspect_by_id = {int(sid): float(m)
+                            for sid, m in zip(potential_ids, mean_aspects)}
+
             # Iterate through found blobs to calculate physical internal placement of DUs
             for site_id in potential_ids:
                 loc = all_slices[site_id - 1]
@@ -959,8 +1040,7 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 
                 if antennas_fit >= threshold_antennas:
                     valid_ids_final.append(site_id)
-                    site_mask_ds = (labeled == site_id)
-                    mean_aspect = np.mean(aspect_ds[site_mask_ds])
+                    mean_aspect = aspect_by_id[int(site_id)]
                     dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
                     aspect_str = dirs[round(mean_aspect / 45) % 8]
                     area_km2 = sizes[site_id-1] * px_area_km2
@@ -985,11 +1065,14 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
             final_selection_ids = [s['site_id'] for s in site_details]
 
         if len(final_selection_ids) > 0:
-            current_viz_id = 1
-            for original_id in final_selection_ids:
-                labeled_viz[labeled == original_id] = current_viz_id
-                current_viz_id += 1
-            small_final = np.isin(labeled, final_selection_ids).astype(np.uint8)
+            # Recolour by table lookup: one pass over the labelled map instead of one
+            # pass per selected site (plus a second for np.isin). The table is indexed
+            # by original label, so `labeled` is read exactly once.
+            lut = np.zeros(num + 1, dtype=viz_dtype)
+            for current_viz_id, original_id in enumerate(final_selection_ids, start=1):
+                lut[original_id] = current_viz_id
+            labeled_viz = lut[labeled]
+            small_final = (labeled_viz > 0).astype(np.uint8)
             count = len(final_selection_ids)
 
             # Fold the scan observables of each site's candidates into its record

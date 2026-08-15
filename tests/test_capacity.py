@@ -128,5 +128,62 @@ class TestHexQuantizationBias(unittest.TestCase):
         self.assertEqual(ratios, sorted(ratios), "bias should increase at finer spacing")
 
 
+class TestManySites(unittest.TestCase):
+    """
+    A distributed search may select far more than 255 sites.
+
+    The visualisation labelling used a uint8 array, so assigning the 256th site's
+    colour raised OverflowError and took the whole run down after the physics had
+    already been paid for. A layout of many small sub-arrays -- which is what phase 2
+    needs for TAMBO's long strip -- reaches that ceiling routinely.
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="many_sites_")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def blob_grid(self, n, per_side):
+        """A grid of separated squares, each its own connected region."""
+        mask = np.zeros((n, n), dtype=bool)
+        pitch = n // per_side
+        size = max(1, int(pitch * 0.5))
+        for i in range(per_side):
+            for j in range(per_side):
+                mask[i * pitch:i * pitch + size, j * pitch:j * pitch + size] = True
+        return mask
+
+    def analyse(self, mask):
+        import os
+        path_A = os.path.join(self.tmp, "A.npy")
+        m = np.lib.format.open_memmap(path_A, mode="w+", shape=mask.shape, dtype=bool)
+        m[:] = mask
+        m.flush()
+        del m
+        elevation = np.full(mask.shape, 4000.0, dtype=np.float32)
+        rows, cols = mask.shape
+        return ss.analyze_sites_and_capacity(
+            path_A, elevation, rows, cols, 30.0, 30.0, 1, "distributed",
+            target_antennas=1, min_sub_array_size=1, antenna_spacing_km=0.06,
+            grid_type="hex")
+
+    def test_selects_more_than_255_sites_without_overflowing(self):
+        mask = self.blob_grid(600, 18)
+        small_final, labeled_viz, site_details, capacity, count, _ = self.analyse(mask)
+        self.assertGreater(count, 255, "test needs to cross the uint8 boundary to be meaningful")
+        self.assertEqual(len(site_details), count)
+        # Every selected site gets its own colour, and none of them wrapped to 0
+        self.assertEqual(int(labeled_viz.max()), count)
+        self.assertEqual(len(np.unique(labeled_viz)), count + 1)   # + background
+
+    def test_the_selection_mask_agrees_with_the_labelling(self):
+        mask = self.blob_grid(600, 18)
+        small_final, labeled_viz, _, _, count, _ = self.analyse(mask)
+        np.testing.assert_array_equal(small_final.astype(bool), labeled_viz > 0)
+
+
 if __name__ == "__main__":
     unittest.main()
