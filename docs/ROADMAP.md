@@ -1501,6 +1501,50 @@ option now wins and says so:
 Pinned by `test_screening.py::TestExplicitCommandLineDetection`, including the case
 that made the old merge unfixable — a typed value that equals the default.
 
+### 6.20 Sensitivity of the TAMBO result ⚠️ the result is not robust
+
+`src/sensitivity.py` varies one parameter at a time about the Colca baseline. The
+answer is that **2056 detector positions is not a number to quote.** Every criterion
+sits near a cliff:
+
+| parameter | value | capacity | vs baseline |
+| --- | --- | --- | --- |
+| `decay_energy_pev` | 3 | 10878 | 5.29× |
+| | 10 | 10857 | 5.28× |
+| | **55** | **2056** | 1.00× |
+| | 100 | **0** | 0.00× |
+| | 1000 | **0** | 0.00× |
+| `min_score` | 0.0 | 45928 | 22.3× |
+| | 0.2 | 15481 | 7.53× |
+| | **0.35** | **2056** | 1.00× |
+| | 0.5 | **0** | 0.00× |
+| `min_target_slope_deg` | 0 | 7442 | 3.62× |
+| | 15 | 5309 | 2.58× |
+| | **25** | **2056** | 1.00× |
+| | 35 | **0** | 0.00× |
+| `grammage_band_fraction` | 0.05 / 0.1 / 0.2 | 2056 | 1.00× (inert) |
+
+**The decay energy is the worst.** Across TAMBO's own 3 PeV – 1 EeV reach the answer
+runs from 10878 to zero. A single energy standing in for a spectrum is not an
+approximation here, it is the whole answer, and §6.18's number is an artefact of
+picking 55 PeV. **This has to be folded over the spectrum before any TAMBO capacity is
+quoted.**
+
+**`min_score` does most of the remaining work,** and for a structural reason: the score
+is a *product* of six components each in [0, 1], so it concentrates near zero and a
+threshold anywhere in the middle sits on a cliff. Ranking sites and taking the best N
+would be better behaved than thresholding a product; a weighted geometric mean would
+also spread the distribution.
+
+**`grammage_band_fraction` is inert** because the config sets `grammage_band_gcm2`
+explicitly, and an explicit band correctly wins over a derived one. Correct, but a trap
+worth a warning: setting the band silently disables the fraction.
+
+The honest summary is that the pipeline now expresses TAMBO's geometry correctly — the
+far-wall slopes it recovers are Colca's real ones — but the *capacity* it reports is
+dominated by two modelling choices rather than by terrain. Fixing the decay treatment
+is worth more than any further criterion.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
