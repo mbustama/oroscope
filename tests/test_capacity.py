@@ -1,8 +1,9 @@
 """
-Grid packing: does the antenna count match the geometry it claims to simulate?
+Grid packing: does the detector count match the geometry it claims to simulate?
 
-Row and column strides are separate because an equal ground spacing is a different
-number of pixels on each axis of a geographic grid.
+Positions are laid out in metres and then looked up in the pixel grid, so the count
+follows the requested ground spacing at any resolution. The pixel sizes are passed
+separately because they differ on each axis of a geographic grid.
 """
 
 import math
@@ -15,88 +16,111 @@ import synthetic
 
 SQUARE, HEX = 0, 1
 
+# A square metre-grid, so "spacing in metres" and "spacing in pixels" coincide and the
+# geometry under test is easy to read off
+UNIT = 1.0
+
 
 def full_mask(h, w):
     return np.ones((h, w), dtype=bool)
 
 
+def count(mask, spacing_m, code, cell_y=UNIT, cell_x=UNIT):
+    return ss.count_grid_capacity(mask, cell_y, cell_x, spacing_m, code)
+
+
 class TestSquareGrid(unittest.TestCase):
     def test_unit_spacing_fills_every_pixel(self):
-        self.assertEqual(ss.count_grid_capacity(full_mask(20, 30), 1, 1, SQUARE), 600)
+        self.assertEqual(count(full_mask(20, 30), 1.0, SQUARE), 600)
 
     def test_count_matches_the_number_of_grid_intersections(self):
-        for h, w, sr, sc in [(100, 100, 10, 10), (100, 100, 7, 13), (55, 41, 8, 8)]:
-            expected = math.ceil(h / sr) * math.ceil(w / sc)
-            self.assertEqual(ss.count_grid_capacity(full_mask(h, w), sr, sc, SQUARE), expected,
-                             msg=f"{h}x{w} stride {sr},{sc}")
+        for h, w, s in [(100, 100, 10.0), (100, 100, 7.0), (55, 41, 8.0)]:
+            expected = math.ceil(h / s) * math.ceil(w / s)
+            self.assertEqual(count(full_mask(h, w), s, SQUARE), expected,
+                             msg=f"{h}x{w} spacing {s}")
 
-    def test_separate_row_and_column_strides_are_honoured(self):
+    def test_pixel_sizes_are_honoured_separately(self):
+        """100 rows of 100 m by 100 columns of 200 m is 10 km by 20 km: 10 rows of 20."""
         mask = full_mask(100, 100)
-        self.assertEqual(ss.count_grid_capacity(mask, 10, 20, SQUARE), 10 * 5)
-        self.assertEqual(ss.count_grid_capacity(mask, 20, 10, SQUARE), 5 * 10)
+        self.assertEqual(count(mask, 1000.0, SQUARE, cell_y=100.0, cell_x=200.0), 10 * 20)
+
+    def test_the_row_pitch_uses_the_row_pixel_size(self):
+        """A count alone cannot catch a swapped axis, since it is symmetric; row
+        placement can. At 100 m rows a 1 km lattice lands on every tenth pixel."""
+        on_lattice = np.zeros((100, 1), dtype=bool)
+        on_lattice[::10, 0] = True
+        self.assertEqual(count(on_lattice, 1000.0, SQUARE, cell_y=100.0, cell_x=1000.0), 10)
+        off_lattice = np.zeros((100, 1), dtype=bool)
+        off_lattice[1::10, 0] = True
+        self.assertEqual(count(off_lattice, 1000.0, SQUARE, cell_y=100.0, cell_x=1000.0), 0)
 
     def test_empty_terrain_holds_nothing(self):
-        self.assertEqual(ss.count_grid_capacity(np.zeros((50, 50), dtype=bool), 5, 5, SQUARE), 0)
+        self.assertEqual(count(np.zeros((50, 50), dtype=bool), 5.0, SQUARE), 0)
 
     def test_only_valid_pixels_are_counted(self):
         mask = np.zeros((100, 100), dtype=bool)
         mask[:50, :] = True
-        self.assertEqual(ss.count_grid_capacity(mask, 10, 10, SQUARE), 5 * 10)
+        self.assertEqual(count(mask, 10.0, SQUARE), 5 * 10)
 
 
 class TestHexGrid(unittest.TestCase):
-    def test_only_rows_on_the_sin60_step_are_sampled(self):
-        """A single occupied row contributes only when it lands on int(0.866*spacing)."""
-        spacing = 16
-        v_step = int(spacing * 0.866025)          # 13
-        self.assertEqual(v_step, 13)
+    def test_rows_sit_on_the_sin60_pitch(self):
+        """A single occupied row contributes only where a lattice row lands on it."""
+        spacing = 16.0
+        pitch = spacing * math.sin(math.radians(60.0))       # 13.856, not int() 13
+        sampled = {int(k * pitch) for k in range(4)}
         for row in range(0, 40):
             mask = np.zeros((200, 200), dtype=bool)
             mask[row, :] = True
-            counted = ss.count_grid_capacity(mask, spacing, spacing, HEX) > 0
-            self.assertEqual(counted, row % v_step == 0, msg=f"row {row}")
+            self.assertEqual(count(mask, spacing, HEX) > 0, row in sampled,
+                             msg=f"row {row}")
 
-    def test_alternate_rows_are_staggered_by_half_the_column_spacing(self):
-        """Row 0 starts at column 0; the next sampled row starts at spacing_c // 2."""
-        spacing = 16
-        v_step = int(spacing * 0.866025)
+    def test_alternate_rows_are_staggered_by_half_the_spacing(self):
+        """Row 0 starts at x=0; the next lattice row starts half a spacing along."""
+        spacing = 16.0
+        pitch = spacing * math.sin(math.radians(60.0))
         unstaggered = np.zeros((200, 200), dtype=bool)
         unstaggered[0, :] = True
         staggered = np.zeros((200, 200), dtype=bool)
-        staggered[v_step, :] = True
-        # columns 0,16,...,192 -> 13 ;  columns 8,24,...,184 -> 12
-        self.assertEqual(ss.count_grid_capacity(unstaggered, spacing, spacing, HEX), 13)
-        self.assertEqual(ss.count_grid_capacity(staggered, spacing, spacing, HEX), 12)
+        staggered[int(pitch), :] = True
+        # x = 0,16,...,192 -> 13 ;  x = 8,24,...,184 -> 12
+        self.assertEqual(count(unstaggered, spacing, HEX), 13)
+        self.assertEqual(count(staggered, spacing, HEX), 12)
 
-    def test_hex_packs_more_densely_than_square(self):
-        mask = full_mask(200, 200)
-        square = ss.count_grid_capacity(mask, 10, 10, SQUARE)
-        hexagonal = ss.count_grid_capacity(mask, 10, 10, HEX)
+    def test_hex_packs_more_densely_than_square_by_the_analytic_ratio(self):
+        # Large enough that the partial row at the far edge does not skew the ratio
+        mask = full_mask(2000, 2000)
+        square = count(mask, 10.0, SQUARE)
+        hexagonal = count(mask, 10.0, HEX)
         self.assertGreater(hexagonal, square)
-        # The gain is spacing/int(0.866*spacing), not the analytic 1/0.866 —
-        # see TestHexQuantizationBias below.
-        self.assertAlmostEqual(hexagonal / square, 10 / int(10 * 0.866025), delta=1e-6)
+        # Now the true 1/sin(60) = 1.1547, not spacing/int(0.866*spacing)
+        self.assertAlmostEqual(hexagonal / square, 1.0 / math.sin(math.radians(60.0)),
+                               delta=0.01)
 
-    def test_degenerate_spacing_does_not_divide_by_zero(self):
-        self.assertGreater(ss.count_grid_capacity(full_mask(10, 10), 1, 1, HEX), 0)
+    def test_degenerate_spacing_returns_nothing_rather_than_dividing_by_zero(self):
+        self.assertEqual(count(full_mask(10, 10), 0.0, HEX), 0)
+        self.assertEqual(count(full_mask(10, 10), -5.0, HEX), 0)
+        self.assertGreater(count(full_mask(10, 10), 1.0, HEX), 0)
+
+    def test_spacing_finer_than_a_pixel_places_several_per_pixel(self):
+        """The continuum limit: capacity is area over area-per-detector."""
+        mask = full_mask(10, 10)
+        self.assertGreater(count(mask, 0.5, SQUARE), mask.size)
 
 
-class TestHexQuantizationBias(unittest.TestCase):
+class TestDensityMatchesTheRequestedSpacing(unittest.TestCase):
     """
-    Characterization tests for a known defect: reported capacity exceeds what the
-    requested ground spacing allows.
+    The count must follow the requested ground spacing, at any DEM resolution.
 
-    Three independent truncations each shrink the grid — spacing_r, spacing_c and
-    v_step are all produced with int() — so antennas end up closer together than
-    asked. The error grows as the spacing approaches the pixel size:
+    This replaces a set of characterization tests that pinned a defect: the layout used
+    to be stamped as an integer pixel stride, and the three separate int() truncations
+    (spacing_r, spacing_c and the hex pitch) each pulled the detectors closer together
+    than asked. Reported capacity came out at 1.074x the analytic density at GRAND's
+    1 km, and 1.581x at TAMBO's 100 m, where one separation spans only about three
+    pixels of a 30 m DEM.
 
-        1000 m spacing (GRAND)  ->  +7%
-         150 m spacing (TAMBO)  -> +42%
-         100 m spacing (TAMBO)  -> +58%
-
-    These tests pin the current behaviour so the fix (phase 1/2 layout models) shows
-    up as a deliberate change rather than a silent one. When capacity is computed
-    without integer stamping, they should be rewritten to assert the analytic density.
+    Placing positions in metres removes the strides, so the density is now correct on
+    both scales and the old numbers are what a regression would look like.
     """
 
     def setUp(self):
@@ -104,28 +128,37 @@ class TestHexQuantizationBias(unittest.TestCase):
                                              cell_size_deg=synthetic.CELL_DEG)
         self.h = self.w = 3000
 
-    def measured_vs_analytic(self, spacing_m):
-        spacing_r = max(1, int(spacing_m / self.grid.cell_size_y))
-        spacing_c = max(1, int(spacing_m / self.grid.cell_size_x))
-        count = ss.count_grid_capacity(full_mask(self.h, self.w), spacing_r, spacing_c, HEX)
+    def measured_vs_analytic(self, spacing_m, code=HEX):
+        n = ss.count_grid_capacity(full_mask(self.h, self.w), self.grid.cell_size_y,
+                                   self.grid.cell_size_x, spacing_m, code)
         area_km2 = ((self.h * self.grid.cell_size_y / 1000.0)
                     * (self.w * self.grid.cell_size_x / 1000.0))
-        analytic = area_km2 / (math.sqrt(3) / 2 * (spacing_m / 1000.0) ** 2)
-        return count / analytic
+        per_detector = (math.sqrt(3) / 2 if code == HEX else 1.0) * (spacing_m / 1000.0) ** 2
+        return n / (area_km2 / per_detector)
 
-    def test_overcounts_modestly_at_grand_spacing(self):
-        ratio = self.measured_vs_analytic(1000.0)
-        self.assertGreater(ratio, 1.0)
-        self.assertAlmostEqual(ratio, 1.074, delta=0.01)
+    def test_matches_analytic_density_at_grand_spacing(self):
+        self.assertAlmostEqual(self.measured_vs_analytic(1000.0), 1.0, delta=0.02)
 
-    def test_overcounts_severely_at_tambo_spacing(self):
-        """At ~3 pixels per spacing the integer grid cannot represent the layout."""
-        self.assertAlmostEqual(self.measured_vs_analytic(150.0), 1.423, delta=0.02)
-        self.assertAlmostEqual(self.measured_vs_analytic(100.0), 1.581, delta=0.02)
+    def test_matches_analytic_density_at_tambo_spacing(self):
+        """The case the old integer stamping got wrong by 58%."""
+        self.assertAlmostEqual(self.measured_vs_analytic(150.0), 1.0, delta=0.02)
+        self.assertAlmostEqual(self.measured_vs_analytic(100.0), 1.0, delta=0.02)
 
-    def test_bias_grows_as_spacing_approaches_the_pixel_size(self):
-        ratios = [self.measured_vs_analytic(d) for d in (1000.0, 500.0, 200.0, 100.0)]
-        self.assertEqual(ratios, sorted(ratios), "bias should increase at finer spacing")
+    def test_square_grid_matches_its_own_analytic_density(self):
+        for spacing in (1000.0, 150.0, 100.0):
+            self.assertAlmostEqual(self.measured_vs_analytic(spacing, SQUARE), 1.0,
+                                   delta=0.02, msg=f"{spacing} m")
+
+    def test_accuracy_no_longer_degrades_as_spacing_approaches_the_pixel_size(self):
+        for spacing in (1000.0, 500.0, 200.0, 100.0, 60.0):
+            self.assertAlmostEqual(self.measured_vs_analytic(spacing), 1.0, delta=0.03,
+                                   msg=f"{spacing} m")
+
+    def test_capacity_scales_with_area_not_with_pixel_count(self):
+        """Same ground area at half the DEM resolution must hold the same detectors."""
+        fine = ss.count_grid_capacity(full_mask(1000, 1000), 30.0, 30.0, 300.0, HEX)
+        coarse = ss.count_grid_capacity(full_mask(500, 500), 60.0, 60.0, 300.0, HEX)
+        self.assertAlmostEqual(fine / coarse, 1.0, delta=0.02)
 
 
 class TestManySites(unittest.TestCase):

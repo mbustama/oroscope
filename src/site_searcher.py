@@ -180,43 +180,78 @@ def apply_poly_mask_numba(valid_rows, valid_cols, poly_verts, mask_out):
         if is_point_in_poly(valid_cols[i], valid_rows[i], poly_verts):
             mask_out[i] = False
 
-@jit(nopython=True, fastmath=True)
-def count_grid_capacity(mask_chunk, spacing_r, spacing_c, grid_type_code):
-    """
-    Simulates the placement of physical antennas on the validated terrain map to count
-    total array capacity based on specific geometry.
+# sin(60 deg): the row pitch of a triangular lattice, as a fraction of the spacing
+_SIN_60 = 0.8660254037844386
 
-    The row and column strides are supplied separately: an equal ground spacing is a
-    different number of pixels along each axis on a geographic grid.
+
+@jit(nopython=True, fastmath=True)
+def count_grid_capacity(mask_chunk, cell_size_y, cell_size_x, spacing_m, grid_type_code):
+    """
+    Counts the detectors that fit on the validated terrain at a given ground spacing.
+
+    Detector positions are laid out in **metres on the ground** and only then looked up
+    in the pixel grid. The earlier version did the reverse: it converted the spacing to
+    an integer number of pixels and stepped the array by that stride, which truncated
+    three separate times --- ``int()`` on the row stride, on the column stride, and on
+    the hexagonal row pitch ``int(spacing_r * sin60)``. Every truncation shortens the
+    spacing, so detectors ended up closer together than asked for and the count came out
+    high: +7.4% at GRAND's 1 km, and **+58% at TAMBO's 100 m**, where only about three
+    pixels span one separation on a 30 m DEM and the hex pitch collapsed from 2.6 to 2
+    pixels. Placing points in continuous coordinates has no stride to truncate, so the
+    count follows the requested geometry at any spacing.
+
+    The layout is anchored at the chunk's own corner rather than fitted to it, so this
+    is a capacity estimate for an arbitrarily-placed array, not the best packing
+    achievable by sliding the grid around. That is the same convention as before.
+
+    A spacing finer than the DEM's own pixels is permitted and yields several detectors
+    per pixel. That is the honest continuum limit --- capacity is usable area divided by
+    area per detector --- but note the terrain mask cannot resolve whether those
+    sub-pixel positions really are usable.
 
     Parameters:
     - mask_chunk (ndarray): A 2D boolean array where True indicates valid terrain.
-    - spacing_r (int): The north-south distance between antennas in pixels.
-    - spacing_c (int): The east-west distance between antennas in pixels.
-    - grid_type_code (int): 0 for 'square' grid, 1 for 'hexagonal' grid.
+    - cell_size_y, cell_size_x (float): Ground size of one pixel, in metres. They differ
+      on a geographic grid, which is why an equal ground spacing is a different number
+      of pixels on each axis.
+    - spacing_m (float): Distance between neighbouring detectors, in metres.
+    - grid_type_code (int): 0 for 'square' grid, 1 for 'hexagonal' (triangular) grid.
 
     Returns:
-    - int: The total number of antennas that successfully fit inside the valid terrain.
+    - int: The total number of detectors that fit inside the valid terrain.
     """
     h, w = mask_chunk.shape
+    if spacing_m <= 0.0 or cell_size_y <= 0.0 or cell_size_x <= 0.0:
+        return 0
+
+    height_m = h * cell_size_y
+    width_m = w * cell_size_x
+    # A triangular lattice puts its rows sin(60) apart and offsets alternate rows by
+    # half a spacing; that is what makes every neighbour distance equal to spacing_m.
+    row_pitch = spacing_m * _SIN_60 if grid_type_code == 1 else spacing_m
+
     count = 0
-    if grid_type_code == 0: # Square Grid layout
-        for r in range(0, h, spacing_r):
-            for c in range(0, w, spacing_c):
-                if mask_chunk[r, c]:
-                    count += 1
-    elif grid_type_code == 1: # Hexagonal Grid layout
-        # Vertical spacing for hex is sin(60 deg) * spacing
-        v_step = int(spacing_r * 0.866025)
-        if v_step < 1: v_step = 1
-        row_idx = 0
-        for r in range(0, h, v_step):
-            # Stagger every other row by half the spacing distance
-            offset = (spacing_c // 2) if (row_idx % 2 == 1) else 0
-            for c in range(offset, w, spacing_c):
-                if mask_chunk[r, c]:
-                    count += 1
-            row_idx += 1
+    k = 0
+    while True:
+        # Indexed rather than accumulated, so the position of the thousandth row does
+        # not depend on rounding in the nine hundred and ninety-nine before it
+        y = k * row_pitch
+        if y >= height_m:
+            break
+        r = int(y / cell_size_y)
+        if r >= h:
+            break
+        x0 = 0.5 * spacing_m if (grid_type_code == 1 and k % 2 == 1) else 0.0
+        j = 0
+        while True:
+            x = x0 + j * spacing_m
+            if x >= width_m:
+                break
+            c = int(x / cell_size_x)
+            if c < w and mask_chunk[r, c]:
+                count += 1
+            j += 1
+        k += 1
     return count
 
 # ==========================================
@@ -1012,8 +1047,9 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
             dy_ds, dx_ds = np.gradient(elevation[::downsample_factor, ::downsample_factor], eff_cell_y, eff_cell_x)
             aspect_ds = np.degrees(np.arctan2(-dx_ds, dy_ds)) % 360
 
-            spacing_r = max(1, int((antenna_spacing_km * 1000) / cell_size_y))
-            spacing_c = max(1, int((antenna_spacing_km * 1000) / cell_size_x))
+            # Passed in metres: converting to a pixel stride here was one of the three
+            # truncations that inflated capacity (see count_grid_capacity)
+            spacing_m = antenna_spacing_km * 1000.0
             grid_code = 1 if grid_type == 'hex' else 0
             all_slices = find_objects(labeled)
 
@@ -1036,7 +1072,8 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 c_stop = min(c_stop, cols)
                 
                 mask_chunk = final_map_disk[r_start:r_stop, c_start:c_stop]
-                antennas_fit = count_grid_capacity(mask_chunk, spacing_r, spacing_c, grid_code)
+                antennas_fit = count_grid_capacity(mask_chunk, cell_size_y, cell_size_x,
+                                                   spacing_m, grid_code)
                 
                 if antennas_fit >= threshold_antennas:
                     valid_ids_final.append(site_id)

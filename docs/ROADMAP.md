@@ -106,6 +106,13 @@ The error grows as the spacing approaches the pixel size. At TAMBO spacings ther
 only ~3 pixels per detector spacing, so a 30 m DEM cannot represent the layout by
 integer stamping at all. This is a phase 2 blocker, not a rounding nicety — see §5.1.
 
+**✅ Fixed (§6.15).** Detector positions are now laid out in metres and only then
+looked up in the pixel grid, so there is no stride to truncate. Measured density is
+within 2% of analytic from 1000 m down to 60 m, on both square and triangular
+lattices. Reported capacity fell by 7.3% on the Arequipa golden crop and 8.5% on the
+synthetic ridge, both at 1 km; at TAMBO's 100 m the old count was 1.58× the analytic
+density, so anything previously quoted there was overstated by more than half.
+
 ### 2.2 Correctness
 
 **A. The line-of-sight test never tests line of sight.** `check_physics_chunk` walks
@@ -1260,6 +1267,39 @@ cores rather than by arithmetic.
 
 Not worth doing: multiprocessing (lead (i)) — screening and morphology are now 3% of
 runtime combined, and the scan already uses every core the owner allows.
+
+### 6.15 Capacity from metric grid placement ✅ delivered
+
+The phase 2 blocker of §2.1. `count_grid_capacity` used to convert the ground spacing
+into an integer pixel stride and step the array by it, truncating three times —
+`spacing_r`, `spacing_c`, and the hex row pitch `int(spacing_r · sin60)`. Every
+truncation shortens the spacing, so the count came out high, and worse as the spacing
+approached the pixel size.
+
+It now takes the pixel sizes and the spacing **in metres**, places positions in
+continuous ground coordinates, and looks each one up in the pixel grid. There is no
+stride left to truncate.
+
+| requested spacing | old / analytic | new / analytic |
+| --- | --- | --- |
+| 1000 m (GRAND) | 1.074 | 1.00 |
+| 150 m (TAMBO, published) | 1.423 | 1.00 |
+| 100 m (TAMBO, starting) | 1.581 | 1.00 |
+| 60 m | — | 1.00 |
+
+Effect on the golden files, both at 1 km spacing: Arequipa crop **806 → 747 DUs
+(−7.3%)**, synthetic ridge **611 → 559 (−8.5%)**. Site counts and areas are unchanged;
+only the packing density moved. Regenerated deliberately.
+
+The layout is still anchored at each site's bounding-box corner rather than fitted to
+it, so this remains a capacity estimate for an arbitrarily-placed array rather than
+the best achievable packing. A spacing finer than the DEM's pixels is now permitted
+and yields several detectors per pixel — the honest continuum limit, though the
+terrain mask cannot resolve whether those sub-pixel positions are usable.
+
+`tests/test_capacity.py::TestDensityMatchesTheRequestedSpacing` replaces the
+characterization tests that pinned the defect; the old ratios are now what a
+regression looks like.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

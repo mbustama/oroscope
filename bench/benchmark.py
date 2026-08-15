@@ -55,7 +55,7 @@ def warm_up_jit(tmp):
     arrival_scan.scan(np.array([[32.0, 32.0, 90.0]]), elevation, grid,
                       n_azimuths=1, half_width_deg=0.0, max_range_m=500.0,
                       min_dist_km=0.0, max_dist_km=1.0)
-    ss.count_grid_capacity(np.ones((8, 8), dtype=bool), 2, 2, 1)
+    ss.count_grid_capacity(np.ones((8, 8), dtype=bool), 30.0, 30.0, 60.0, 1)
     ss.apply_poly_mask_numba(np.zeros(1), np.zeros(1),
                              np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]),
                              np.ones(1, dtype=bool))

@@ -20,15 +20,15 @@
   "sites": [
     {
       "area_km2": 439.15,
-      "capacity_exact": 561,
+      "capacity_exact": 512,
       "facing_direction": "W"
     },
     {
       "area_km2": 36.6,
-      "capacity_exact": 50,
+      "capacity_exact": 47,
       "facing_direction": "E"
     }
   ],
-  "total_capacity": 611,
+  "total_capacity": 559,
   "total_sites": 2
 }
