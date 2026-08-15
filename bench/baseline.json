@@ -1,0 +1,100 @@
+{
+  "cases": {
+    "arequipa_2500": {
+      "funnel": {
+        "DEM pixels": 6250000,
+        "after gap closing": 5908551,
+        "after pruning (< 1.0 km wide)": 5904968,
+        "directions accepted": 617716,
+        "finite elevation": 6250000,
+        "kept by stride 5": 755339,
+        "pixels in selected sites (est.)": 5906720,
+        "slope 3.0-25.0 deg": 3776685
+      },
+      "peak_rss_mb": 642.7,
+      "timings_sec": {
+        "capacity_analysis": 0.2778,
+        "load_dem": 0.0399,
+        "morphology": 0.6524,
+        "ray_tracing": 15.5483,
+        "topographic_screen": 0.2543
+      },
+      "total_capacity": 6301,
+      "total_sites": 1
+    },
+    "arequipa_900": {
+      "funnel": {
+        "DEM pixels": 810000,
+        "after gap closing": 741635,
+        "after pruning (< 1.0 km wide)": 741588,
+        "directions accepted": 89835,
+        "finite elevation": 810000,
+        "kept by stride 5": 116033,
+        "pixels in selected sites (est.)": 742228,
+        "slope 3.0-25.0 deg": 580129
+      },
+      "peak_rss_mb": 599.0,
+      "timings_sec": {
+        "capacity_analysis": 0.0316,
+        "load_dem": 0.0129,
+        "morphology": 0.0921,
+        "ray_tracing": 1.2067,
+        "topographic_screen": 0.0362
+      },
+      "total_capacity": 794,
+      "total_sites": 1
+    },
+    "synthetic_1800": {
+      "funnel": {
+        "DEM pixels": 3240000,
+        "after gap closing": 1128622,
+        "after pruning (< 1.0 km wide)": 1128622,
+        "directions accepted": 229683,
+        "finite elevation": 3240000,
+        "kept by stride 5": 554767,
+        "pixels in selected sites (est.)": 1129260,
+        "slope 3.0-25.0 deg": 2773800
+      },
+      "peak_rss_mb": 476.0,
+      "timings_sec": {
+        "capacity_analysis": 0.0671,
+        "load_dem": 0.0352,
+        "morphology": 0.2868,
+        "ray_tracing": 5.8819,
+        "topographic_screen": 0.1148
+      },
+      "total_capacity": 1229,
+      "total_sites": 2
+    },
+    "synthetic_900": {
+      "funnel": {
+        "DEM pixels": 810000,
+        "after gap closing": 520531,
+        "after pruning (< 1.0 km wide)": 520531,
+        "directions accepted": 110707,
+        "finite elevation": 810000,
+        "kept by stride 5": 115390,
+        "pixels in selected sites (est.)": 520260,
+        "slope 3.0-25.0 deg": 576900
+      },
+      "peak_rss_mb": 347.9,
+      "timings_sec": {
+        "capacity_analysis": 0.0267,
+        "load_dem": 0.0143,
+        "morphology": 0.081,
+        "ray_tracing": 3.0163,
+        "topographic_screen": 0.0242
+      },
+      "total_capacity": 559,
+      "total_sites": 2
+    }
+  },
+  "host": {
+    "bench_cores": 8,
+    "cpu_count": 12,
+    "load_average_1min_at_start": 0.89,
+    "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
+    "python": "3.12.12"
+  },
+  "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update. Check host.load_average_1min_at_start: a baseline taken on a busy machine is inflated and will hide real regressions. Note this host is a hybrid CPU whose wall times vary by ~10% between identical runs; see docs/ROADMAP.md 6.12 before reading much into a single comparison."
+}

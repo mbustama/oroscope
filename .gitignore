@@ -5,3 +5,27 @@ obj/
 **/__pycache__
 *.pyc
 *.csv
+# ...except the hand-digitised published curves under data/. They are source, not
+# output: they cannot be regenerated without re-reading the figures by eye, the test
+# suite loads them, and the blanket rule above meant a clone had neither the files nor
+# any sign they were missing until eight tests errored.
+!data/*.csv
+
+# Input data and run products (large binaries, regenerable)
+input/
+output/
+# Superseded scripts and their outputs, kept locally for reference only
+old/
+*.npy
+environment.yml
+
+# Coverage output. `coverage run` leaves a binary database in the working directory;
+# it was committed once by a `git add -A` and is pure noise in a diff.
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging artefacts
+*.egg-info/
+build/
+dist/

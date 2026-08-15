@@ -1,0 +1,136 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Greek *oros*, mountain, and *skopein*, to look at.  The tool is not GRAND-specific:
+# it searches terrain against per-experiment criteria, and TAMBO is served by the same
+# engine, so the name deliberately privileges neither.
+name = "oroscope"
+version = "0.1.0"
+description = "Terrain site search for particle-astrophysics observatories, from digital elevation models"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [{name = "Mauricio Bustamante", email = "mbustamante@gmail.com"}]
+keywords = ["neutrino", "cosmic rays", "observatory", "site selection",
+            "digital elevation model", "terrain", "GRAND", "TAMBO"]
+classifiers = [
+    # 4 - Beta rather than 5 - Production/Stable: the engine and its tests are solid,
+    # but the per-experiment criteria are still being pinned against collaboration
+    # inputs, and several defaults are stated assumptions rather than settled physics.
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    # GPL-3.0, per the LICENSE file that ships with the source. Stated here because a
+    # classifier that disagrees with the licence text is worse than none at all.
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+# Every one of these is imported by a code path a plain search exercises, so none of
+# them is optional in practice.
+#
+#   numba      the arrival scan is a compiled parallel kernel; without it the walk
+#              falls back to interpreted Python and a real DEM becomes unusable
+#   tifffile   reads and writes the GeoTIFF DEMs and mask rasters
+#   imagecodecs  not imported by name anywhere here, and required anyway: the DEMs
+#              fetch_dem.py downloads are LZW-compressed, and tifffile delegates that
+#              codec to imagecodecs. Without it a real DEM fails to decode, which is
+#              exactly the kind of dependency that is easy to omit and hard to debug.
+#   scipy      morphology and connected-component labelling
+#   matplotlib the overview maps, and the KML contours are extracted from its paths
+dependencies = [
+    "numpy",
+    "scipy",
+    "numba",
+    "tifffile",
+    "imagecodecs",
+    "matplotlib",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# psutil only prints RAM diagnostics, and the code already guards its import, so it is
+# genuinely optional rather than a dependency someone forgot to declare.
+diagnostics = ["psutil"]
+test = ["pytest", "coverage", "pytest-cov"]
+# Must stay in step with docs/requirements.txt, which is what the documentation build
+# actually installs. jupyter-sphinx executes the narrative blocks at build time, so the
+# kernel and everything those blocks import belong here too, not only Sphinx itself.
+docs = ["sphinx", "sphinx-rtd-theme", "sphinx-copybutton",
+        "sphinxcontrib-bibtex", "numpydoc", "myst-parser",
+        "jupyter-sphinx", "ipykernel", "matplotlib", "scipy"]
+# Enough to *execute* notebooks/ unaided. Deliberately self-contained.
+notebooks = ["jupyter", "nbclient", "nbformat", "ipykernel", "matplotlib"]
+
+[project.urls]
+Homepage = "https://github.com/mbustama/oroscope"
+Documentation = "https://mbustama.github.io/oroscope/"
+Changelog = "https://github.com/mbustama/oroscope/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mbustama/oroscope/issues"
+
+# Console entry points, so a search can be run from anywhere rather than only from
+# inside src/. The pipeline currently resolves several paths relative to the working
+# directory, which is why the repository's own instructions say `cd src` first; these
+# entry points are the first half of removing that, and the second half is making those
+# paths relative to the configuration file instead.
+[project.scripts]
+oroscope = "site_searcher:main"
+oroscope-combine = "combine_experiments:main"
+oroscope-crop = "crop_dem:main"
+oroscope-sensitivity = "sensitivity:main"
+oroscope-fetch-dem = "fetch_dem:main"
+
+# A flat set of top-level modules under src/, matching how the tests, the benchmark
+# harness and every existing config refer to them (`import arrival_scan`). Keeping that
+# layout means an editable install puts exactly those names on the path and existing
+# code that does sys.path.insert(0, '../src') keeps working unchanged.
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["site_searcher", "arrival_scan", "physics", "scoring", "aperture",
+              "explain", "combine_experiments", "crop_dem", "sensitivity",
+              "fetch_dem", "generate_env"]
+
+[tool.pytest.ini_options]
+# The suite is stdlib unittest and is normally run as `python -m unittest discover`
+# from tests/; pytest collects the same files. rootdir-relative so both work.
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# Pinned rather than left to ruff's default, which is not stable across releases.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    # One-line guards. Used throughout the screening filters as `if min_alt is not
+    # None: mask &= ...`, where the one-line form keeps a column of parallel filters
+    # readable as the table it is.
+    "E701",
+]
+
+[tool.coverage.run]
+# No import package: flat py-modules under package-dir = {"" = "src"}, so coverage
+# measures the source files in src/ directly. `src/<package>` would match nothing.
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    # The Numba kernels. Not untested -- tests/test_arrival_scan.py drives every one of
+    # them against closed-form terrain -- but @jit compiles to machine code and
+    # coverage.py traces Python bytecode, so no line of a compiled body can ever be
+    # recorded as executed. Left in, they report permanently-missing lines that no test
+    # could close, which makes a real regression indistinguishable from the noise floor.
+    '^\s*@jit',
+]

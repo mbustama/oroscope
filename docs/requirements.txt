@@ -1,0 +1,15 @@
+# Documentation dependencies.
+#
+# One list, in pyproject.toml, so the `docs` extra and this file cannot drift apart.
+# Run from the repository root, since `-e .` resolves relative to the working
+# directory and not to this file:
+#
+#     pip install -r docs/requirements.txt
+#     cd docs && make html
+#
+# The install is editable, and that matters beyond convenience: jupyter-sphinx
+# executes the `.. jupyter-execute::` blocks in a real kernel, which is a separate
+# process. The sys.path.insert in docs/source/conf.py applies to Sphinx itself and
+# never reaches that kernel, so the modules have to be properly importable rather than
+# merely findable from the source tree.
+-e .[docs]

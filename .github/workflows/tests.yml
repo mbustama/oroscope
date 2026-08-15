@@ -1,0 +1,73 @@
+name: tests
+
+# Runs the suite on every supported Python. The names of these jobs are what the
+# repository ruleset requires as status checks before main can be merged into, so
+# renaming a job here means updating that ruleset too.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run the suite
+        # The suite is stdlib unittest, so it needs nothing beyond the package itself.
+        # Run from tests/ because the modules put ../src on sys.path themselves and
+        # discover the golden files relative to their own location.
+        working-directory: tests
+        run: python -m unittest discover -v
+
+      - name: Measure coverage
+        # One version only. Coverage is a property of the suite rather than of the
+        # interpreter, so running it five times would upload five near-identical
+        # reports and slow every job to gather them.
+        if: matrix.python-version == '3.12'
+        # From the repository root, not from tests/. `source = ["src"]` in
+        # pyproject.toml is resolved against the working directory, so running this
+        # from tests/ looks for tests/src, finds nothing, and reports "No data to
+        # collect" while exiting successfully -- a green job measuring nothing. The
+        # suite itself is location-independent: every module resolves src/ and the
+        # golden files from its own __file__.
+        run: |
+          pip install coverage
+          coverage run --rcfile=pyproject.toml -m unittest discover -s tests -t tests
+          coverage report
+          coverage xml -o coverage.xml
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          # Not fatal: a coverage upload failing is not a reason to call the code
+          # broken, and codecov is a third party that occasionally is.
+          fail_ci_if_error: false
+
+      - name: Confirm the modules import outside the source tree
+        # Guards the packaging rather than the physics: an editable install that only
+        # works from src/ would pass the suite above and fail for anyone who pip
+        # installs it.
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -c "import site_searcher, arrival_scan, physics, scoring, aperture"
+          python -c "import crop_dem, combine_experiments, sensitivity"

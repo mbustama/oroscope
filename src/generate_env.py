@@ -1,3 +1,18 @@
+"""
+Writes a conda ``environment.yml`` from what the code actually imports.
+
+Reads the sources with :mod:`ast` rather than importing or running them, subtracts the
+standard library, reports what the active environment is missing, and emits a
+``conda-forge``-first specification. Parsing rather than executing is the point: it
+cannot be fooled into running code, and it works on a machine where the dependencies
+are exactly what is not installed yet.
+
+An alternative to ``pip install -e .``, kept for conda users who would rather solve the
+whole environment at once. The authoritative dependency list is
+``pyproject.toml``.
+"""
+
+from __future__ import annotations
 import ast
 import sys
 import os
@@ -61,16 +76,26 @@ def get_stdlib_modules():
         }
 
 # ==========================================
+#             RUNTIME EXTRAS
+# ==========================================
+# Packages that are required to run but never appear as an import statement, so the
+# AST pass cannot discover them. 'tifffile' delegates LZW/Deflate GeoTIFF decoding to
+# 'imagecodecs', and the DEMs downloaded by fetch_dem.py are LZW-compressed: without it,
+# reading the elevation model fails with a COMPRESSION error.
+RUNTIME_EXTRAS = {'imagecodecs'}
+
+# ==========================================
 #               CORE LOGIC
 # ==========================================
 def extract_dependencies(filepath):
     """
     Parses a Python file using the Abstract Syntax Tree (AST) to identify
     all base module imports, ensuring no missed imports in try/except blocks.
-    
+    Known runtime-only extras (see RUNTIME_EXTRAS) are appended to the result.
+
     Parameters:
     - filepath (str): Path to the target Python script.
-    
+
     Returns:
     - list: A sorted list of identified third-party dependency strings.
     """
@@ -92,11 +117,11 @@ def extract_dependencies(filepath):
     
     # Filter out standard libraries and the script itself (if imported)
     third_party_deps = {
-        mod for mod in raw_imports 
+        mod for mod in raw_imports
         if mod not in stdlib_modules and mod != os.path.splitext(os.path.basename(filepath))[0]
     }
-    
-    return sorted(list(third_party_deps))
+
+    return sorted(list(third_party_deps | RUNTIME_EXTRAS))
 
 def check_installed_modules(dependencies):
     """
@@ -116,7 +141,7 @@ def check_installed_modules(dependencies):
             missing.append(dep)
     return satisfied, missing
 
-def generate_conda_yaml(dependencies, output_file="environment.yml", env_name="site_search"):
+def generate_conda_yaml(dependencies, output_file="environment.yml", env_name="oroscope"):
     """
     Generates a formatted YAML file compatible with Conda.
     Prioritizes the conda-forge channel for scientific packages.
@@ -144,14 +169,22 @@ def generate_conda_yaml(dependencies, output_file="environment.yml", env_name="s
 # ==========================================
 #                  MAIN
 # ==========================================
-if __name__ == "__main__":
+def main():
+    """
+    Command-line entry point.
+
+    Derives a conda environment file from the imports the code actually uses.
+
+    Kept as a function so the console script declared in pyproject.toml has something
+    to call.
+    """
     print(f"\n{C.HEADER}===================================================={C.RESET}")
-    print(f"{C.BOLD}   GRAND CONDA ENVIRONMENT GENERATOR{C.RESET}")
+    print(f"{C.BOLD}   OROSCOPE CONDA ENVIRONMENT GENERATOR{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
     
     target_script = "site_searcher.py"
     output_yml = "environment.yml"
-    env_name = "grand_site_search"
+    env_name = "oroscope"
     
     if not os.path.exists(target_script):
         print(f"   {C.FAIL}[!] Target script '{target_script}' not found in the current directory.{C.RESET}")
@@ -186,11 +219,15 @@ if __name__ == "__main__":
         print(f"\n{C.HEADER}===================================================={C.RESET}")
         print(f"   {C.BOLD}HOW TO DEPLOY YOUR ENVIRONMENT:{C.RESET}")
         print(f"{C.HEADER}===================================================={C.RESET}")
-        print(f"1. To create the environment, copy and run this command:")
+        print("1. To create the environment, copy and run this command:")
         print(f"   {C.MAGENTA}conda env create -f {output_yml}{C.RESET}\n")
-        print(f"2. To activate the environment, run:")
+        print("2. To activate the environment, run:")
         print(f"   {C.MAGENTA}conda activate {env_name}{C.RESET}\n")
         
     except Exception as e:
         print(f"\n   {C.FAIL}{Icon.CROSS}An error occurred during AST parsing/generation: {e}{C.RESET}")
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

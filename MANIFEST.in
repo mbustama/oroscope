@@ -1,0 +1,18 @@
+# What goes into the source distribution.
+#
+# setuptools' legacy default sweeps `tests/test*.py` in but not the scaffolding those
+# modules import -- `_support.py`, `synthetic.py`, and the golden files under
+# `tests/golden/`. An sdist carrying half a suite is worse than one carrying none: it
+# collects, fails on a missing import, and looks like a broken package.
+#
+# Pruning rather than completing, because much of this suite tests the *repository*
+# rather than the library: the regression tests read golden files, and several skip
+# unless `input/dem/` holds a real DEM, which no sdist can carry (the DEMs are ~250 MB
+# and are downloaded by `site-search-fetch-dem`). The suite stays where it works, in a
+# clone.
+prune tests
+
+# Configuration files are examples rather than package data, and two of them name DEM
+# paths that only exist in a checkout.
+prune config
+prune bench

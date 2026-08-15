@@ -1,0 +1,54 @@
+# TAMBO nu_tau aperture, digitized from ref. [2] Fig. 3.
+# TAMBO Collaboration, Nature Astronomy (2026), doi:10.1038/s41550-026-02916-4.
+# "Expected acceptance of TAMBO": 5,000 detection units at 150 m spacing, Colca Canyon.
+#
+# HAND-DIGITIZED from the published vector figure: the plot frame was located
+# programmatically and the curve traced by colour. Axes read from the tick labels,
+# x 1e5-1e10 GeV and y 1e0-1e5 m^2 sr, both logarithmic.
+#
+# Post-processing: resampled onto a log grid, then a 3-point rolling median and a
+# running maximum, since the published curve is monotonic and isolated dips are
+# tracing artefacts. Expect a few per cent error, more where the curve is steep.
+# This is a transcription of a figure, not the collaboration's tabulated values.
+#
+# energy_gev,aperture_m2sr
+3.508405e+05,1.022142e+01
+4.548982e+05,1.245779e+01
+5.898190e+05,2.007524e+01
+7.647567e+05,3.234677e+01
+9.915801e+05,5.032081e+01
+1.285678e+06,7.300338e+01
+1.667005e+06,1.064095e+02
+2.161431e+06,1.687005e+02
+2.802502e+06,2.520334e+02
+3.633711e+06,3.811358e+02
+4.711453e+06,5.524458e+02
+6.108849e+06,8.109338e+02
+7.920707e+06,1.250509e+03
+1.026995e+07,1.902783e+03
+1.331598e+07,2.475582e+03
+1.726543e+07,2.475582e+03
+2.238628e+07,2.475582e+03
+2.902596e+07,2.475582e+03
+3.763492e+07,8.123985e+03
+4.879727e+07,1.050283e+04
+6.327033e+07,1.276634e+04
+8.203602e+07,1.510975e+04
+1.063675e+08,1.809321e+04
+1.379157e+08,2.269424e+04
+1.788209e+08,2.564407e+04
+2.318583e+08,2.863067e+04
+3.006265e+08,3.233969e+04
+3.897909e+08,3.652968e+04
+5.054012e+08,3.749881e+04
+6.553009e+08,4.004870e+04
+8.496602e+08,4.523272e+04
+1.101666e+09,5.109314e+04
+1.428415e+09,5.573104e+04
+1.852076e+09,5.983088e+04
+2.401394e+09,6.221742e+04
+3.113636e+09,6.490297e+04
+4.037127e+09,6.722590e+04
+5.234520e+09,6.723358e+04
+6.787056e+09,6.723358e+04
+8.800066e+09,6.723358e+04

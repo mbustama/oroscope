@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+"""
+Runs the full Arequipa DEM locally and stores the small artefacts for the notebook.
+
+Notebook 8 reads results rather than producing them, for one reason: these searches
+take roughly half an hour each and CI executes every notebook on every push. A tutorial
+that costs ninety minutes of compute per commit is not a tutorial, it is a bill. So the
+expensive part runs here, on a machine that already has the DEM, and what it leaves
+behind is a few hundred kilobytes of JSON that the notebook opens instantly.
+
+**Run this when the configuration changes, not otherwise.** The stored results record
+which commit and which parameters produced them, so a stale store is detectable rather
+than merely suspected.
+
+    python tools/run_arequipa_full.py                 # all three
+    python tools/run_arequipa_full.py --only grand    # one of them
+    python tools/run_arequipa_full.py --dry-run       # what it would do, and the cost
+
+Three searches, all over the same DEM at the same ``downsample_factor`` so that their
+masks are pixel-aligned and can be overlaid:
+
+1. **GRAND alone** -- ``config/grand_arequipa_full.json``
+2. **TAMBO alone** -- ``config/tambo_arequipa_full.json``
+3. **The combination** -- ``combine_experiments`` over the two, giving joint, union and
+   co-location.
+
+What is stored, per run, in ``results/arequipa_full/``: the results JSON, the
+provenance record and the explanation. Not the rasters -- a GeoTIFF of a 129 Mpx mask
+is far too large for a repository, and the notebook does not need it. The full outputs
+stay in ``output/``, which is gitignored.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+SRC = os.path.join(REPO, "src")
+sys.path.insert(0, SRC)
+
+import combine_experiments as ce     # noqa: E402
+import site_searcher as ss           # noqa: E402
+
+DEM = os.path.join(REPO, "input", "dem", "arequipa_SRTMGL1.tif")
+STORE = os.path.join(REPO, "results", "arequipa_full")
+
+RUNS = {
+    "grand": os.path.join(REPO, "config", "grand_arequipa_full.json"),
+    "tambo": os.path.join(REPO, "config", "tambo_arequipa_full.json"),
+}
+
+
+def run_one(label, config_path, out_root):
+    """Runs one configuration over the full DEM and returns its results dictionary."""
+    config = ss.load_config(config_path)
+    params = {k: v for k, v in config.items() if not k.startswith("_")}
+
+    # Config-file spellings the pipeline does not take under those names.
+    params.pop("output_directory_base_with_given_json", None)
+    params.pop("print_info", None)
+    params["require_terrain"] = not params.pop("require_sky", False)
+    params["rfi_zones"] = resolve_rfi(params.get("rfi_zones"))
+    params["dem_path"] = DEM
+    params["origin_lat"] = params.get("origin_lat")
+    params["origin_lon"] = params.get("origin_lon")
+    if params.get("score_weights") is not None:
+        params["score_weights"] = ss.parse_score_weights(params["score_weights"])
+    for key in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
+        if params.get(key) is not None:
+            params[key] = tuple(params[key])
+
+    out_dir = os.path.join(out_root, f"arequipa_full_{label}")
+    print(f"\n=== {label.upper()} ===")
+    print(f"config: {os.path.relpath(config_path, REPO)}")
+    print(f"output: {os.path.relpath(out_dir, REPO)}")
+
+    started = time.time()
+    results = ss.find_grand_regions_interactive(run_output_dir=out_dir, **params)
+    print(f"\n{label}: finished in {(time.time() - started) / 60:.1f} minutes")
+    return results, out_dir
+
+
+def resolve_rfi(value):
+    """The preset names the CLI understands, since a config may carry one."""
+    if isinstance(value, str):
+        return {"lima": ss.LIMA_RFI_ZONES,
+                "arequipa": ss.AREQUIPA_RFI_ZONES}.get(value.lower())
+    return value
+
+
+def store(label, out_dir):
+    """Copies the small, readable artefacts into the committed results store."""
+    os.makedirs(STORE, exist_ok=True)
+    kept = []
+
+    found = ss.find_results_json(out_dir)
+    if found:
+        shutil.copy(found, os.path.join(STORE, f"{label}_results.json"))
+        kept.append(f"{label}_results.json")
+    for name, target in (("provenance.json", f"{label}_provenance.json"),
+                         ("explanation.txt", f"{label}_explanation.txt")):
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            shutil.copy(path, os.path.join(STORE, target))
+            kept.append(target)
+    return kept
+
+
+def combine(out_root):
+    """Overlays the two runs and stores the combined report."""
+    dirs = [os.path.join(out_root, f"arequipa_full_{label}") for label in RUNS]
+    missing = [d for d in dirs if not os.path.exists(d)]
+    if missing:
+        print(f"\ncannot combine: {missing} not present. Run both searches first.")
+        return None
+
+    out_dir = os.path.join(out_root, "arequipa_full_combined")
+    print("\n=== COMBINED ===")
+    argv = sys.argv
+    sys.argv = ["combine_experiments.py", *dirs,
+                "--labels", "GRAND", "TAMBO", "--out", out_dir]
+    try:
+        ce.main()
+    finally:
+        sys.argv = argv
+
+    os.makedirs(STORE, exist_ok=True)
+    report = os.path.join(out_dir, "combined_report.json")
+    if os.path.exists(report):
+        shutil.copy(report, os.path.join(STORE, "combined_report.json"))
+        return ["combined_report.json"]
+    return []
+
+
+def write_manifest(kept):
+    """
+    Records what the store holds and what produced it.
+
+    Without this a stale store is indistinguishable from a current one, and the whole
+    point of storing rather than recomputing is that nobody looks again.
+    """
+    manifest = {
+        "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "generated_by": "tools/run_arequipa_full.py",
+        "dem": os.path.relpath(DEM, REPO),
+        "configs": {k: os.path.relpath(v, REPO) for k, v in RUNS.items()},
+        "files": sorted(kept),
+        "note": ("Regenerate when a configuration changes. Notebook 8 reads these and "
+                 "does not run the searches itself: each takes about half an hour."),
+    }
+    path = os.path.join(STORE, "manifest.json")
+    with open(path, "w") as f:
+        json.dump(manifest, f, indent=4)
+    print(f"\nmanifest: {os.path.relpath(path, REPO)}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--only", choices=sorted(RUNS),
+                        help="run just one of the searches")
+    parser.add_argument("--out", default=os.path.join(REPO, "output"),
+                        help="where the full outputs go (default: output/)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="report what would run, and what it will cost")
+    args = parser.parse_args()
+
+    if not os.path.exists(DEM):
+        raise SystemExit(
+            f"the full Arequipa DEM is not here: {DEM}\n"
+            f"fetch it with: oroscope-fetch-dem --open_topography_api_key YOUR_KEY")
+
+    labels = [args.only] if args.only else list(RUNS)
+
+    report = ss.preflight_memory(DEM, downsample_factor=4, candidate_stride=5,
+                                 max_memory_gb=0, quiet=args.dry_run)
+    if args.dry_run:
+        print(f"DEM:       {os.path.relpath(DEM, REPO)}")
+        print(f"estimate:  {report['estimate_gb']:.2f} GiB at downsample_factor 4")
+        print(f"available: {report['available_gb']:.1f} GiB"
+              if report["available_gb"] else "available: unknown")
+        print(f"would run: {', '.join(labels)}, then combine")
+        print("expected:  ~25-30 minutes each")
+        print(f"store:     {os.path.relpath(STORE, REPO)}")
+        return
+
+    kept = []
+    for label in labels:
+        _, out_dir = run_one(label, RUNS[label], args.out)
+        kept += store(label, out_dir)
+
+    if not args.only:
+        kept += combine(args.out) or []
+
+    write_manifest(kept)
+    print(f"stored {len(kept)} files in {os.path.relpath(STORE, REPO)}")
+    print("Notebook 8 reads these. Re-execute it to refresh its outputs.")
+
+
+if __name__ == "__main__":
+    main()

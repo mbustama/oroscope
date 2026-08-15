@@ -1,3 +1,22 @@
+
+"""
+Downloads the elevation models a search needs, and writes configurations for them.
+
+Fetches the bundled regions -- Lima (AW3D30) and Arequipa (SRTMGL1) -- from
+OpenTopography into ``input/dem/``, and generates a ready-to-run JSON config for each
+in ``config/``. An API key is required and free: register at
+https://portal.opentopography.org/myopentopo and pass it as
+``--open_topography_api_key``.
+
+For any other region, download the tiles from the OpenTopography portal, merge them
+into one GeoTIFF if the area spans several, and cut the window you want with
+:mod:`crop_dem`.
+
+This was ``setup.py``, whose name made ``pip install`` run the downloader instead of
+building the package.
+"""
+
+from __future__ import annotations
 import argparse
 import sys
 import os
@@ -126,7 +145,7 @@ def generate_and_patch_config(region_name, preset, dem_filepath):
             "--generate_config", config_filename, 
             "--config_preset", preset
         ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print(f"      {Icon.CROSS}{C.FAIL}Failed to generate config. Ensure 'site_searcher.py' is in this directory.{C.RESET}")
         return
         
@@ -149,22 +168,30 @@ def generate_and_patch_config(region_name, preset, dem_filepath):
 # ==========================================
 #                  MAIN
 # ==========================================
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GRAND Site Search - Data Setup & Downloader")
+def main():
+    """
+    Command-line entry point.
+
+    Downloads the DEM tiles a search needs and writes matching config files.
+
+    Kept as a function so the console script declared in pyproject.toml has something
+    to call.
+    """
+    parser = argparse.ArgumentParser(description="Oroscope - DEM download and configuration setup")
     parser.add_argument("--open_topography_api_key", type=str, default=None, 
                         help="Your OpenTopography API key (Required to download DEMs).")
     
     args = parser.parse_args()
 
     print(f"\n{C.HEADER}===================================================={C.RESET}")
-    print(f"{C.BOLD}   GRAND OPENTOPOGRAPHY DEM SETUP{C.RESET}")
+    print(f"{C.BOLD}   OROSCOPE OPENTOPOGRAPHY DEM SETUP{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
 
     # Explicit enforcement of the API Key
     if not args.open_topography_api_key:
         print(f"\n{C.FAIL}{Icon.CROSS}ERROR: Missing Required Parameter.{C.RESET}")
         print(f"{C.WARN}The flag {C.BOLD}--open_topography_api_key{C.RESET}{C.WARN} must be provided.{C.RESET}")
-        print(f"If you do not have an API key, you cannot use this setup script and must download the TIF files manually from OpenTopography.")
+        print("If you do not have an API key, you cannot use this setup script and must download the TIF files manually from OpenTopography.")
         print(f"Register for a free key at: {C.MAGENTA}https://portal.opentopography.org/myopentopo{C.RESET}\n")
         sys.exit(1)
 
@@ -211,6 +238,10 @@ if __name__ == "__main__":
             
     print(f"\n{C.HEADER}===================================================={C.RESET}")
     print(f"{C.OK}{Icon.CHECK}{C.BOLD}Setup Complete.{C.RESET}")
-    print(f"You can now run the main script using your new configs:")
+    print("You can now run the main script using your new configs:")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/lima_config.json{C.RESET}")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/arequipa_config.json{C.RESET}\n")
+
+
+if __name__ == "__main__":
+    main()
