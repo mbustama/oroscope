@@ -3,11 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# PROVISIONAL NAME.  The tool is no longer GRAND-specific -- it searches terrain
-# against per-experiment criteria, and TAMBO is served by the same engine -- so the
-# distribution name is due to change.  This is the one line to edit when that is
-# settled, together with [project.urls] and the docs title.
-name = "sitesearch"
+# Greek *oros*, mountain, and *skopein*, to look at.  The tool is not GRAND-specific:
+# it searches terrain against per-experiment criteria, and TAMBO is served by the same
+# engine, so the name deliberately privileges neither.
+name = "oroscope"
 version = "0.1.0"
 description = "Terrain site search for particle-astrophysics observatories, from digital elevation models"
 readme = "README.md"
@@ -74,7 +73,7 @@ notebooks = ["jupyter", "nbclient", "nbformat", "ipykernel", "matplotlib"]
 
 [project.urls]
 Homepage = "https://github.com/mbustama/site-search"
-Documentation = "https://mbustama.github.io/site-search/"
+Documentation = "https://mbustama.github.io/site-search/"  # repo still named site-search
 Changelog = "https://github.com/mbustama/site-search/blob/main/CHANGELOG.md"
 Issues = "https://github.com/mbustama/site-search/issues"
 
@@ -84,11 +83,11 @@ Issues = "https://github.com/mbustama/site-search/issues"
 # entry points are the first half of removing that, and the second half is making those
 # paths relative to the configuration file instead.
 [project.scripts]
-site-search = "site_searcher:main"
-site-search-combine = "combine_experiments:main"
-site-search-crop = "crop_dem:main"
-site-search-sensitivity = "sensitivity:main"
-site-search-fetch-dem = "fetch_dem:main"
+oroscope = "site_searcher:main"
+oroscope-combine = "combine_experiments:main"
+oroscope-crop = "crop_dem:main"
+oroscope-sensitivity = "sensitivity:main"
+oroscope-fetch-dem = "fetch_dem:main"
 
 # A flat set of top-level modules under src/, matching how the tests, the benchmark
 # harness and every existing config refer to them (`import arrival_scan`). Keeping that

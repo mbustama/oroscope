@@ -210,6 +210,7 @@ def count_grid_capacity(mask_chunk, cell_size_y, cell_size_x, spacing_m, grid_ty
     sub-pixel positions really are usable.
 
     Parameters:
+
     - mask_chunk (ndarray): A 2D boolean array where True indicates valid terrain.
     - cell_size_y, cell_size_x (float): Ground size of one pixel, in metres. They differ
       on a geographic grid, which is why an equal ground spacing is a different number
@@ -638,6 +639,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
     and logistics constraints (RFI distance, road distance) prior to running ray-tracing.
     
     Parameters:
+
     - elevation (ndarray): Full DEM array (usually memory-mapped).
     - map_grid (MapGrid): Angular and metric pixel sizes of the DEM.
     - rfi_zones (list): List of configured exclusion zones (circles/polygons).

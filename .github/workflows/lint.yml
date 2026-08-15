@@ -1,0 +1,39 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      # Rule selection is pinned in pyproject.toml rather than left to ruff's default,
+      # which is not stable across releases.
+      - run: ruff check .
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      # Deliberately not -W yet. numpydoc_validation_checks is switched on in
+      # conf.py and currently reports every function whose parameters are not yet
+      # documented -- that is the check doing its job, and the docstring pass is
+      # what will silence it. Gating on -W today would mean a red build from the
+      # first commit and, with the main ruleset requiring this check, no mergeable
+      # pull requests at all. Turn -W on in the same commit that finishes the
+      # docstrings.
+      - run: sphinx-build -b html docs/source docs/build/html

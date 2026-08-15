@@ -166,6 +166,7 @@ def score_candidates(observables, config=None, distance_window_m=None):
     Scores candidates from their scan observables.
 
     Components:
+
     - ``depth``     band on column depth: enough rock to interact, not so much that
                     the tau cannot escape;
     - ``distance``  band on the exit-point distance, defaulting to the configured

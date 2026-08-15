@@ -1,4 +1,40 @@
-# GRAND Automated Site Search Tool
+[![tests](https://github.com/mbustama/site-search/actions/workflows/tests.yml/badge.svg)](https://github.com/mbustama/site-search/actions/workflows/tests.yml)
+[![Code Quality](https://github.com/mbustama/site-search/actions/workflows/lint.yml/badge.svg)](https://github.com/mbustama/site-search/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/mbustama/site-search/branch/main/graph/badge.svg)](https://codecov.io/gh/mbustama/site-search)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://mbustama.github.io/site-search/)
+[![PyPI](https://img.shields.io/pypi/v/oroscope.svg)](https://pypi.org/project/oroscope/)
+[![Downloads](https://pepy.tech/badge/oroscope)](https://pepy.tech/project/oroscope)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+# Oroscope
+
+**Terrain site search for particle-astrophysics observatories.** Greek *oros*, mountain,
+and *skopein*, to look at.
+
+> Several of these badges are not live yet: coverage is not uploaded, the package is not
+> on PyPI, and the documentation is not deployed to Pages. They are in place so that
+> turning each of those on needs no edit here.
+
+Oroscope searches digital elevation models for ground that can host an observatory. It
+answers one structural question — *from this patch of ground, is there a target surface
+at the right range, in the right direction, at the right relative orientation, with the
+right matter behind it?* — which is what lets a single engine serve experiments that
+look nothing alike. GRAND wants terrain a few degrees below the horizon, tens of
+kilometres away; TAMBO wants a canyon wall two to five kilometres across. They differ in
+their numbers, not their structure.
+
+**Documentation:** [the physics](https://mbustama.github.io/site-search/physics.html) ·
+[assumptions and limitations](https://mbustama.github.io/site-search/assumptions.html) ·
+[quickstart](https://mbustama.github.io/site-search/quickstart.html)
+
+```bash
+pip install oroscope
+oroscope --config_path config/grand_colca_config.json
+```
+
+---
 
 ## Overview
 
