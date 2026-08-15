@@ -11,15 +11,15 @@
         "pixels in selected sites (est.)": 5906720,
         "slope 3.0-25.0 deg": 3776685
       },
-      "peak_rss_mb": 650.3,
+      "peak_rss_mb": 642.7,
       "timings_sec": {
-        "capacity_analysis": 0.2201,
-        "load_dem": 0.0488,
-        "morphology": 0.6008,
-        "ray_tracing": 14.0754,
-        "topographic_screen": 0.2404
+        "capacity_analysis": 0.2778,
+        "load_dem": 0.0399,
+        "morphology": 0.6524,
+        "ray_tracing": 15.5483,
+        "topographic_screen": 0.2543
       },
-      "total_capacity": 6685,
+      "total_capacity": 6301,
       "total_sites": 1
     },
     "arequipa_900": {
@@ -33,15 +33,15 @@
         "pixels in selected sites (est.)": 742228,
         "slope 3.0-25.0 deg": 580129
       },
-      "peak_rss_mb": 643.3,
+      "peak_rss_mb": 599.0,
       "timings_sec": {
-        "capacity_analysis": 0.0281,
-        "load_dem": 0.0101,
-        "morphology": 0.0937,
-        "ray_tracing": 1.1993,
-        "topographic_screen": 0.0303
+        "capacity_analysis": 0.0316,
+        "load_dem": 0.0129,
+        "morphology": 0.0921,
+        "ray_tracing": 1.2067,
+        "topographic_screen": 0.0362
       },
-      "total_capacity": 859,
+      "total_capacity": 794,
       "total_sites": 1
     },
     "synthetic_1800": {
@@ -55,15 +55,15 @@
         "pixels in selected sites (est.)": 1129260,
         "slope 3.0-25.0 deg": 2773800
       },
-      "peak_rss_mb": 471.0,
+      "peak_rss_mb": 476.0,
       "timings_sec": {
-        "capacity_analysis": 0.0609,
-        "load_dem": 0.0407,
-        "morphology": 0.2834,
-        "ray_tracing": 5.6182,
-        "topographic_screen": 0.1067
+        "capacity_analysis": 0.0671,
+        "load_dem": 0.0352,
+        "morphology": 0.2868,
+        "ray_tracing": 5.8819,
+        "topographic_screen": 0.1148
       },
-      "total_capacity": 1287,
+      "total_capacity": 1229,
       "total_sites": 2
     },
     "synthetic_900": {
@@ -77,22 +77,22 @@
         "pixels in selected sites (est.)": 520260,
         "slope 3.0-25.0 deg": 576900
       },
-      "peak_rss_mb": 340.8,
+      "peak_rss_mb": 347.9,
       "timings_sec": {
-        "capacity_analysis": 0.1439,
-        "load_dem": 0.0126,
-        "morphology": 0.0822,
-        "ray_tracing": 2.6827,
-        "topographic_screen": 0.0256
+        "capacity_analysis": 0.0267,
+        "load_dem": 0.0143,
+        "morphology": 0.081,
+        "ray_tracing": 3.0163,
+        "topographic_screen": 0.0242
       },
-      "total_capacity": 611,
+      "total_capacity": 559,
       "total_sites": 2
     }
   },
   "host": {
     "bench_cores": 8,
     "cpu_count": 12,
-    "load_average_1min_at_start": 0.86,
+    "load_average_1min_at_start": 0.89,
     "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
     "python": "3.12.12"
   },
