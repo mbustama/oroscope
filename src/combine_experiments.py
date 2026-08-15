@@ -196,9 +196,17 @@ def pixel_area_km2(world: tuple[float, ...], reference_latitude_deg: float) -> f
 
 
 def capacity_of(results):
+    """
+    The capacity a run reported, or ``None`` when it did not report one.
+
+    ``search_mode: single`` writes the string ``'N/A'`` rather than a number, so
+    ``int()`` raises ``ValueError`` -- which was not caught, and took the whole
+    combination down with it. A run that does not report a capacity is an ordinary
+    case here, not an error: the overlay is about ground, not detectors.
+    """
     try:
         return int(results["results"]["total_capacity"])
-    except (TypeError, KeyError):
+    except (TypeError, KeyError, ValueError):
         return None
 
 
@@ -345,10 +353,18 @@ def main():
           f" {'in joint':>10}")
     print("   " + "-" * (width + 43))
     for entry in report["runs"]:
+        # Formatted before the f-string, not inside it. Thousands grouping is invalid
+        # for a string, so `{cap if cap is not None else '-':>10,}` raised ValueError
+        # the moment a run had no capacity to report -- which is every search_mode
+        # 'single' run, since those write 'N/A', and any directory missing its results
+        # JSON. Combining crashed rather than printing a dash.
         cap = entry["reported_capacity"]
+        cap_s = f"{cap:,}" if cap is not None else "-"
+        sites = entry["reported_sites"]
+        sites_s = f"{sites:,}" if sites is not None else "-"
         print(f"   {entry['label'].ljust(width)} {entry['area_km2']:>12,.1f}"
-              f" {entry['reported_sites'] if entry['reported_sites'] is not None else '-':>7}"
-              f" {cap if cap is not None else '-':>10,}"
+              f" {sites_s:>7}"
+              f" {cap_s:>10}"
               f" {entry['fraction_of_own_area_in_joint']*100:>9.1f}%")
     print("   " + "-" * (width + 43))
     print(f"   {('joint (' + ' & '.join(required) + ')').ljust(width)} "

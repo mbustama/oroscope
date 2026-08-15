@@ -3708,9 +3708,31 @@ def main():
     # 4. Apply Custom Standard-Out / Standard-Error interceptors for the log file
     log_path = os.path.join(run_output_dir, "log.txt")
     log_file = open(log_path, "a", encoding="utf-8")
-    
+
+    saved_stdout, saved_stderr = sys.stdout, sys.stderr
     sys.stdout = TeeLogger(sys.stdout, log_file)
     sys.stderr = TeeLogger(sys.stderr, log_file)
+    try:
+        return _run_from_arguments(parser, args, explicit_cli, config_params,
+                                   fallback_params, fallback_path, run_output_dir)
+    finally:
+        # Both the stream swap and the open log used to outlive the call. A process
+        # that ran main() twice -- a test, a sweep, anything driving the CLI in a loop
+        # -- stacked a TeeLogger on the previous one and leaked a file handle each
+        # time, and the streams never came back.
+        sys.stdout, sys.stderr = saved_stdout, saved_stderr
+        log_file.close()
+
+
+def _run_from_arguments(parser, args, explicit_cli, config_params, fallback_params,
+                        fallback_path, run_output_dir):
+    """
+    The body of :func:`main`, once its logging is installed.
+
+    Split out only so that the log file and the redirected streams can be restored in
+    a ``finally`` without indenting two hundred lines. Not part of the public surface:
+    call :func:`main`, or the pipeline directly.
+    """
 
     # Ensure log captures initiation context
     print(f"\n{C.HEADER}================================================================================{C.RESET}")

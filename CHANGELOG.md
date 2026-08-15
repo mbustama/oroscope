@@ -49,6 +49,15 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   changes. Configurations for both experiments over the full DEM are in `config/`.
 
 ### Fixed
+- **`oroscope-combine` crashed on any single-mode run.** Two faults in the same path,
+  both found by new tests: `capacity_of` did not catch the `ValueError` from
+  `int('N/A')` — which is what `search_mode: single` writes — and the console summary
+  applied thousands-grouping to a string when a run had no capacity to report. Either
+  one took the whole combination down.
+- **`main()` leaked its log file and never restored `sys.stdout`.** It tees both
+  streams into the run's log; the swap and the open handle outlived the call, so a
+  process running it twice stacked a `TeeLogger` on the previous one and leaked a
+  handle each time.
 - **Documentation had drifted from the code.** The README documented 34 of 83 CLI
   options and one, `--fresnel_buffer`, that no longer existed; it described the old
   precedence rule, config-over-command-line, which was fixed long ago; the startup

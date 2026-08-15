@@ -1810,6 +1810,36 @@ merge loop and so kept the old precedence — a config file silently beat an exp
 typed command line, for that one flag only, while every other flag on the same command
 line was honoured.
 
+### 6.28 Coverage, and the three bugs raising it found
+
+Coverage was **65%**, and the gaps were not evenly distributed: `combine_experiments`
+was at 30% and `crop_dem` at 18% — the two modules that turn a search into a *place*,
+and the two whose failures are silent by nature. `main()`'s configuration merge was
+untested entirely, including the precedence rule fixed in §6.27.
+
+Now **74%**: `combine_experiments` 88%, `crop_dem` 90%, `site_searcher` 79%,
+`explain` 94%. 497 tests, up from 370 at the start of this work.
+
+Writing them found three faults, which is the argument for having written them:
+
+1. **`oroscope-combine` crashed on any `search_mode: single` run.** `capacity_of` did
+   not catch the `ValueError` from `int('N/A')` — the string single mode writes — and
+   the console summary asked for thousands-grouping on a string when a run reported no
+   capacity. Either one ended the combination.
+2. **`main()` leaked its log file and left its `TeeLogger` installed.** Running it
+   twice in one process stacked interceptors and leaked a handle each time. Restored in
+   a `finally` now, which also made the CLI testable at all.
+3. A test of `crop_dem` asserting exact pixel boundaries was **the test's** fault, not
+   the code's: `crop` floors the start and ceils the stop, so it returns the smallest
+   pixel-aligned box *containing* the request, and asking exactly on a boundary leaves
+   floating point to decide whether the neighbouring pixel comes too. The tests now
+   assert that containment property, which is the actual contract.
+
+**Left low deliberately:** `figures` (14%), `fetch_dem` (30%), `generate_env` (27%),
+`sensitivity` (14%). Those draw pictures, download over the network, generate an
+environment file and drive subprocesses; testing them buys little against what it
+costs, and the first is exercised by the docs build and the notebooks on every push.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
