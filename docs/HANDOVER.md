@@ -284,5 +284,6 @@ traffic*, not flops.
    effective arrival window should narrow with energy, its lower edge climbing from
    −4.4° at 100 PeV to −0.9° at 10 EeV. If their simulated window does not narrow that
    way, one of the two treatments has the absorption wrong.
-5. **A logo.** A design brief was written for it; `docs/source/_static/` is where it goes,
-   and `conf.py` has `html_logo` commented out ready for it.
+5. **A logo.** The design brief is `docs/LOGO.md` -- feed its paragraph to an
+   image-generation session. It lands in `docs/source/_static/`, and `conf.py` has the
+   `html_logo` line commented out ready to enable.
