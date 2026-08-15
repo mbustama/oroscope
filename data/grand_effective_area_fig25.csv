@@ -1,0 +1,57 @@
+# GRAND10k HotSpot1 direction-averaged effective area, from ref. [1] Fig. 25.
+# GRAND Collaboration (Alvarez-Muniz et al.), arXiv:1810.09994; Sci. China Phys. Mech.
+# Astron. (2020). Aggressive antenna detection threshold.
+#
+# HAND-DIGITIZED as above. Axes from the major ticks: x 1e8-1e11 GeV, y logarithmic
+# with 1e12 cm^2 at the top of the frame and 354.5 px per decade.
+#
+# Calibration check: the caption states the GRAND200k curve is exactly 20x this one.
+# Tracing both independently gives ratios of 19.9-20.1 across the well-resolved range,
+# validating the axis calibration and tracing to about 0.5%.
+#
+# Post-processing: resampled, 3-point rolling median, running maximum.
+#
+# NOTE this is an effective AREA in cm^2, not an aperture in m^2 sr, so it is not
+# directly comparable with the TAMBO file without a solid angle.
+#
+# energy_gev,effective_area_cm2
+1.012709e+08,4.622352e+08
+1.208165e+08,5.666278e+08
+1.441346e+08,8.166052e+08
+1.719531e+08,1.108318e+09
+2.051407e+08,1.460908e+09
+2.447336e+08,1.876751e+09
+2.919681e+08,2.345871e+09
+3.483190e+08,2.857052e+09
+4.155459e+08,3.412773e+09
+4.957478e+08,4.036357e+09
+5.914290e+08,4.036357e+09
+7.055770e+08,4.671938e+09
+8.417560e+08,6.091584e+09
+1.004218e+09,6.877179e+09
+1.198036e+09,7.688808e+09
+1.429261e+09,8.568353e+09
+1.705114e+09,9.425272e+09
+2.034208e+09,1.036370e+10
+2.426817e+09,1.120380e+10
+2.895202e+09,1.210511e+10
+3.453987e+09,1.300905e+10
+4.120619e+09,1.395100e+10
+4.915914e+09,1.481368e+10
+5.864704e+09,1.580781e+10
+6.996614e+09,1.697858e+10
+8.346987e+09,1.800069e+10
+9.957986e+09,1.883802e+10
+1.187991e+10,1.971430e+10
+1.417278e+10,2.083173e+10
+1.690818e+10,2.145126e+10
+2.017153e+10,2.173174e+10
+2.406470e+10,2.201589e+10
+2.870928e+10,2.233107e+10
+3.425028e+10,2.259539e+10
+4.086071e+10,2.266889e+10
+4.874699e+10,2.314704e+10
+5.815534e+10,2.364645e+10
+6.937953e+10,2.426886e+10
+8.277004e+10,2.490766e+10
+9.874497e+10,2.515152e+10
