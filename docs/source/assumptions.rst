@@ -126,6 +126,12 @@ the reported area *understates* the accepted set instead of inflating it. Until 
 stride-1 control is run at TAMBO's settings, treat TAMBO areas as a lower bound. The
 run summary reports whichever case applies.
 
+**Not every site in the file is in the result.** ``sites`` lists everything that cleared
+the area and capacity thresholds. With ``stop_at_target`` the selection stops once the
+target is met, and only the selection is in ``total_sites``, ``total_capacity`` and the
+exported raster. Each record carries ``selected``; filter on it before totalling
+anything, or the area and the site count will both be too large.
+
 **Area and capacity are measured on different grids.** Per-site ``area_km2`` comes from
 the downsampled map, capacity from the full-resolution mask. At ``downsample_factor``
 greater than 1 a feature only a few pixels wide loses area it keeps detectors on — for

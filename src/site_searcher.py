@@ -1566,7 +1566,11 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
         Site labels for colour coding, sized from the label count so that selecting
         more than 255 sites does not overflow.
     site_details : list of dict
-        Per-site metadata, sorted by capacity.
+        Per-site metadata for every site that cleared the thresholds, sorted by
+        capacity, each carrying a ``selected`` flag. With ``stop_at_target`` the list
+        is longer than the selection: ``cumulative_capacity``, ``count`` and the
+        exported mask cover the selected sites only, so anything totalling this list
+        must filter on ``selected`` or it will over-report both area and site count.
     cumulative_capacity : int
         Total capacity across the selected sites.
     count : int
@@ -1664,7 +1668,13 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                         "capacity_exact": int(antennas_fit),
                         "grid_type": grid_type,
                         "mean_aspect_deg": float(f"{mean_aspect:.1f}"),
-                        "facing_direction": aspect_str
+                        "facing_direction": aspect_str,
+                        # Set below, once selection has run. Every site that clears the
+                        # thresholds is listed, because the ones just below the cut are
+                        # worth seeing -- but only the selected ones are in the exported
+                        # mask, in total_sites and in total_capacity, so the record has
+                        # to say which it is rather than leaving a reader to infer it.
+                        "selected": False,
                     })
 
         site_details.sort(key=lambda x: x['capacity_exact'], reverse=True)
@@ -1683,6 +1693,10 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                 cumulative_capacity += site['capacity_exact']
         else:
             final_selection_ids = [s['site_id'] for s in site_details]
+
+        chosen = set(final_selection_ids)
+        for site in site_details:
+            site['selected'] = site['site_id'] in chosen
 
         if len(final_selection_ids) > 0:
             # Recolour by table lookup: one pass over the labelled map instead of one

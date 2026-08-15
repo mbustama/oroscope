@@ -20,7 +20,8 @@ ANSI colour does not survive a paste into an email.
 from __future__ import annotations
 
 __all__ = ["explain_results", "binding_constraint", "weakest_component",
-           "closing_inflation", "STAGE_KNOBS", "AREA_INFLATION_AT_COLCA"]
+           "closing_inflation", "selected_sites", "STAGE_KNOBS",
+           "AREA_INFLATION_AT_COLCA"]
 
 # Measured with a stride-1 control run at Colca: closing a mask with a 1 km element
 # more than doubles the area it reports. Quoted rather than recomputed because it is a
@@ -125,6 +126,56 @@ def binding_constraint(funnel):
         if fatal:
             break
     return worst
+
+
+def selected_sites(results):
+    """
+    The sites actually in the result, separated from the ones that merely qualified.
+
+    ``results["results"]["sites"]`` lists every site that cleared the area and capacity
+    thresholds, which with ``stop_at_target`` is more than were selected: selection
+    walks the capacity-sorted list until the target is met and stops. ``total_sites``,
+    ``total_capacity`` and the exported mask all cover the selection only, so summing
+    the list over-reports area and site count against every other number in the file.
+
+    Parameters
+    ----------
+    results : dict
+        A results dictionary.
+
+    Returns
+    -------
+    selected : list of dict
+        Sites in the result.
+    rejected : list of dict
+        Sites that qualified but were not selected. Usually empty.
+
+    Notes
+    -----
+    Prefers each record's ``selected`` flag. Files written before that flag existed
+    fall back to the first ``total_sites`` entries, which is exact: the list is sorted
+    by capacity and selection takes it in order.
+
+    Examples
+    --------
+    >>> import explain
+    >>> r = {"results": {"total_sites": 1, "sites": [
+    ...     {"site_id": 2, "capacity_exact": 252, "selected": True},
+    ...     {"site_id": 1, "capacity_exact": 36, "selected": False}]}}
+    >>> chosen, rest = explain.selected_sites(r)
+    >>> [s["site_id"] for s in chosen], [s["site_id"] for s in rest]
+    ([2], [1])
+    """
+    block = results.get("results", {}) or {}
+    sites = block.get("sites", []) or []
+    if any("selected" in s for s in sites):
+        chosen = [s for s in sites if s.get("selected")]
+        return chosen, [s for s in sites if not s.get("selected")]
+
+    total = block.get("total_sites")
+    if isinstance(total, int) and 0 <= total < len(sites):
+        return sites[:total], sites[total:]
+    return list(sites), []
 
 
 def closing_inflation(funnel, candidate_stride=1):
@@ -314,7 +365,9 @@ def _section_run(results, provenance):
 
 def _section_headline(results):
     res = results.get("results", {}) or {}
-    sites = res.get("sites", []) or []
+    # The selection, not everything that qualified: total_capacity and the exported
+    # mask cover the selection, so summing the full list disagrees with both.
+    sites, rejected = selected_sites(results)
     params = results.get("parameters", {}) or {}
     total_area = sum(float(s.get("area_km2", 0.0)) for s in sites)
     capacity = res.get("total_capacity")
@@ -327,8 +380,8 @@ def _section_headline(results):
                      "candidates ran out.")
         return out
 
-    line = (f"{len(sites)} site{'s' if len(sites) != 1 else ''}, "
-            f"{total_area:,.1f} km² of mapped area summed over them")
+    line = (f"{len(sites)} site{'s' if len(sites) != 1 else ''} covering "
+            f"{total_area:,.1f} km²{' between them' if len(sites) != 1 else ''}")
     if isinstance(capacity, (int, float)):
         line += f", {_num(int(capacity))} detectors"
         if target:
@@ -341,6 +394,18 @@ def _section_headline(results):
                  f"{float(best.get('area_km2', 0)):,.2f} km², "
                  f"{_num(int(best.get('capacity_exact', 0)))} detectors, "
                  f"facing {best.get('facing_direction', '?')}.")
+
+    if rejected:
+        spare = sum(float(s.get("area_km2", 0.0)) for s in rejected)
+        out.append("")
+        out += _wrap(f"A further {len(rejected)} site"
+                     f"{'s' if len(rejected) != 1 else ''} cleared the thresholds but "
+                     f"{'were' if len(rejected) != 1 else 'was'} not selected, holding "
+                     f"{spare:,.1f} km² more. Selection stopped at the target "
+                     f"(stop_at_target), so those are the next best ground rather than "
+                     f"ground that failed. They are in the results file, flagged "
+                     f"selected: false, and they are not in the exported mask, the "
+                     f"totals above, or this area.")
     if isinstance(capacity, (int, float)) and target and capacity < target:
         out.append("")
         out += _wrap(f"The target of {_num(int(target))} was not reached. The funnel "
@@ -424,7 +489,7 @@ def _section_regions(results):
 
 
 def _section_sites(results, max_rows=25):
-    sites = (results.get("results", {}) or {}).get("sites", []) or []
+    sites, _ = selected_sites(results)
     if not sites:
         return []
     out = _heading("THE SITES")

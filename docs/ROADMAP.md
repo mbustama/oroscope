@@ -1683,6 +1683,38 @@ to hold an identical mask, which is why the fault stayed hidden. The conclusion 
 unchanged too: co-location is still decided by slope, and the shared sliver is still a
 percent of GRAND's area. But the shared area is nearly double what was reported.
 
+### 6.23c The site list was longer than the result ⚠️ same check, second fault
+
+The area check of §6.23b, repeated once `oroscope-combine` was fixed, found a second
+disagreement — this one in the results file itself.
+
+`analyze_sites_and_capacity` returns **every** site that cleared the area and capacity
+thresholds, and `stop_at_target` then selects a prefix of that capacity-sorted list.
+Only the selection reaches `total_sites`, `total_capacity` and the exported raster; the
+full list is what goes into the JSON, with nothing marking the difference. So anything
+totalling `sites` over-reported. Measured on a synthetic run at `target_antennas: 50`:
+
+| | listed | selected |
+| --- | --- | --- |
+| sites | 2 | **1** |
+| area | 243.9 km² | **215.7 km²** |
+| capacity | 288 | **252** |
+
+The first summary written in §6.23 said "2 sites, 243.9 km²" against a raster holding
+one site of 215.7 — which is exactly the class of error the summary exists to prevent,
+so it is worth being blunt about having made it.
+
+Each record now carries **`selected`**, and `explain.selected_sites()` splits the list
+(falling back, for files written before the flag, to the first `total_sites` entries —
+exact, since selection walks the sorted list in order). The summary counts and sums the
+selection, and reports the rest as what they are: the next best ground, not ground that
+failed.
+
+**The invariant, now tested:** the area the summary adds up equals the area of the
+raster the run wrote, to 0.001% — checked in plain, `stop_at_target`, downsampled and
+single modes. Both halves are pinned: removing the flag fails four subtests, and making
+the summary total the raw list fails a fifth.
+
 ### 6.24 CLI/library parity ✅ delivered
 
 Measured, then closed. The pipeline function is now what the command line calls, not a

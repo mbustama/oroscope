@@ -41,6 +41,13 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   figures in `src/figures.py`.
 
 ### Fixed
+- **The results file listed more sites than were selected, with nothing saying which.**
+  With `--stop_at_target`, `sites` holds everything that cleared the thresholds while
+  `total_sites`, `total_capacity` and the exported raster cover only the selection — so
+  anything totalling the list over-reported. Measured on a synthetic run: 2 sites and
+  243.9 km² against a mask holding 1 site and 215.7 km². Each record now carries
+  `selected`, and the run summary counts and sums the selection. Its area now equals
+  the exported mask's exactly, in plain, truncated, downsampled and single modes.
 - **`oroscope-combine` read a stale mask.** It took the alphabetically first `.tif` in
   a run directory, and the pre-rename `grand_search_results_*` prefix sorts before
   `oroscope_results_*` — so a re-run directory was overlaid using its superseded mask,

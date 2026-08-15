@@ -91,6 +91,57 @@ class TestBindingConstraint(unittest.TestCase):
         self.assertIsNone(explain.binding_constraint(funnel)["knob"])
 
 
+class TestSelectedSites(unittest.TestCase):
+    """
+    The results file lists every site that cleared the thresholds. With
+    ``stop_at_target`` that is more than were selected, and only the selection is in
+    ``total_sites``, ``total_capacity`` and the exported mask — so a summary that
+    totals the raw list disagrees with every other number in the file. It did:
+    measured on a synthetic run, 2 sites and 243.9 km² reported against a mask holding
+    1 site and 215.7.
+    """
+
+    def test_the_flag_decides(self):
+        results = {"results": {"total_sites": 1, "sites": [
+            {"site_id": 2, "selected": True}, {"site_id": 1, "selected": False}]}}
+        chosen, rejected = explain.selected_sites(results)
+        self.assertEqual([s["site_id"] for s in chosen], [2])
+        self.assertEqual([s["site_id"] for s in rejected], [1])
+
+    def test_a_file_without_the_flag_falls_back_to_the_count(self):
+        """
+        Exact for an older file: the list is capacity-sorted and selection walks it in
+        order, so the first ``total_sites`` entries are the selected ones.
+        """
+        results = {"results": {"total_sites": 2, "sites": [
+            {"site_id": 5}, {"site_id": 4}, {"site_id": 3}]}}
+        chosen, rejected = explain.selected_sites(results)
+        self.assertEqual([s["site_id"] for s in chosen], [5, 4])
+        self.assertEqual([s["site_id"] for s in rejected], [3])
+
+    def test_nothing_is_discarded_when_the_file_says_nothing(self):
+        results = {"results": {"sites": [{"site_id": 1}, {"site_id": 2}]}}
+        chosen, rejected = explain.selected_sites(results)
+        self.assertEqual(len(chosen), 2)
+        self.assertEqual(rejected, [])
+
+    def test_a_count_larger_than_the_list_does_not_truncate(self):
+        results = {"results": {"total_sites": 9, "sites": [{"site_id": 1}]}}
+        self.assertEqual(len(explain.selected_sites(results)[0]), 1)
+
+    def test_the_headline_counts_the_selection_not_the_shortlist(self):
+        results = {"results": {"total_sites": 1, "total_capacity": 252, "sites": [
+            {"site_id": 2, "area_km2": 215.69, "capacity_exact": 252,
+             "facing_direction": "W", "selected": True},
+            {"site_id": 1, "area_km2": 28.19, "capacity_exact": 36,
+             "facing_direction": "E", "selected": False}]}}
+        text = explain.explain_results(results)
+        self.assertIn("1 site covering 215.7 km²", text)
+        self.assertNotIn("243.9", text)
+        # The shortlist is still worth knowing about, just not counted in.
+        self.assertIn("not selected", text)
+
+
 class TestClosingInflation(unittest.TestCase):
     """
     The gap between accepted pixels and reported area, measured from the run rather
@@ -311,6 +362,37 @@ class TestExplainIsWiredIntoThePipeline(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(out, "explanation.txt")))
         # Still composed, so a caller that wants the text has it without re-running.
         self.assertIn("explanation", results)
+
+    def test_the_summarised_area_is_the_area_of_the_exported_mask(self):
+        """
+        The invariant that was violated. Whatever the mode, the area the summary adds
+        up must be the area of the raster the run actually wrote -- that raster is
+        what `oroscope-combine` measures and what anyone opens in a GIS.
+        """
+        import combine_experiments as ce
+        for label, kw in (("plain", {}),
+                          ("stop_at_target", dict(stop_at_target=True,
+                                                  target_antennas=50,
+                                                  min_sub_array_size=5)),
+                          ("downsampled", dict(downsample_factor=3)),
+                          ("single", dict(search_mode="single"))):
+            with self.subTest(mode=label):
+                out = os.path.join(self.tmp, "area_" + label)
+                results = run_pipeline(self.dem, out, ORIGIN_LAT, ORIGIN_LON, **kw)
+                run = ce.load_run(out)
+                top = run["world"][5]
+                centre = top + 0.5 * run["mask"].shape[0] * run["world"][3]
+                mask_km2 = run["mask"].sum() * ce.pixel_area_km2(run["world"], centre)
+                listed = results["results"]["sites"]
+                self.assertTrue(all("selected" in s for s in listed),
+                                "every site record must say whether it was selected; "
+                                "without it a reader can only guess")
+                chosen, _ = explain.selected_sites(results)
+                summary_km2 = sum(s["area_km2"] for s in chosen)
+                self.assertEqual(len(chosen), results["results"]["total_sites"],
+                                 "summary counted a different number of sites")
+                self.assertAlmostEqual(summary_km2, mask_km2, delta=0.01 * mask_km2,
+                                       msg="summary area disagrees with the mask")
 
     def test_an_old_results_file_can_be_explained_without_a_dem(self):
         """The point of keeping it a pure function of the results dictionary."""
