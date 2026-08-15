@@ -30,6 +30,12 @@ OUT = HERE / "notebooks"
 # Put src/ on the path, so the notebooks work in a clone whether or not the package has
 # been installed. Repeated verbatim at the top of every notebook so each one stands
 # alone, which is how people actually open them.
+#
+# This goes at the release. The layout underneath is flat -- ten top-level py-modules
+# rather than a package -- so there is no `import oroscope` to write yet, and an
+# unconditional path insert also shadows an installed copy with whatever is in the
+# source tree. Both are fixed by the same change: src/oroscope/ as a real package, and
+# `import oroscope` here with this deleted rather than made conditional. Roadmap 6.33.
 PREAMBLE = """import os
 import sys
 
@@ -97,7 +103,13 @@ import arrival_scan
 import site_searcher as ss
 
 print("modules loaded")"""),
-("md", """## A piece of terrain
+("md", """> **A note on the import above.** The notebooks put `../src` on the path rather than
+> importing an installed package. That is so they run in a fresh clone, but it is
+> temporary: at the release this becomes `import oroscope`, and the path insert goes.
+> Don't copy the pattern into your own code — `pip install oroscope` and import the
+> modules directly.
+
+## A piece of terrain
 
 A DEM is just a 2-D array of elevations plus a statement of how big a pixel is on the
 ground. Here is a plain west-facing slope with a ridge to its east — the geometry a
@@ -1145,9 +1157,29 @@ a machine that has the DEM; the notebook opens a few hundred kilobytes of JSON.
 To produce or refresh the store:
 
 ```bash
-python tools/run_arequipa_full.py --dry-run   # what it will do, and what it will cost
+python tools/run_arequipa_full.py --dry-run   # report the cost, then stop
 python tools/run_arequipa_full.py             # GRAND, TAMBO, then the combination
 ```
+
+**Start with `--dry-run`.** It begins nothing — no search, no file, no change to the
+store — and prints the five things worth knowing before committing an hour of a
+machine:
+
+```text
+DEM:       input/dem/arequipa_SRTMGL1.tif
+estimate:  2.32 GiB at downsample_factor 4
+available: 5.4 GiB
+would run: grand, tambo, then combine
+expected:  ~25-30 minutes each
+store:     results/arequipa_full
+```
+
+`DEM` says whether the file is even present, so a missing DEM is reported before the
+first search starts rather than after. `estimate` against `available` is what decides
+`downsample_factor` — the same DEM needs 4.5 GiB at 1 and 2.3 GiB at 4, since the
+labelling arrays scale as its inverse square. `would run` honours `--only`, so
+`--only grand` runs one search and skips the combination. And no memory cap is applied
+during a dry run, because nothing is allocated.
 
 **Regenerate it when a configuration changes, and not otherwise.** The store carries a
 manifest naming the configs and the time, so a stale one is detectable rather than

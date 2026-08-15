@@ -12,9 +12,15 @@ behind is a few hundred kilobytes of JSON that the notebook opens instantly.
 which commit and which parameters produced them, so a stale store is detectable rather
 than merely suspected.
 
-    python tools/run_arequipa_full.py                 # all three
+    python tools/run_arequipa_full.py --dry-run       # what it would cost, then stop
+    python tools/run_arequipa_full.py                 # all three, for real
     python tools/run_arequipa_full.py --only grand    # one of them
-    python tools/run_arequipa_full.py --dry-run       # what it would do, and the cost
+
+``--dry-run`` starts nothing, writes nothing and touches no store. It reports the DEM
+it would search, the pre-flight memory estimate against what the system reports free,
+which searches would run, the wall time to expect for each, and where the artefacts
+would land -- the five things worth knowing before committing an hour of a machine.
+No memory cap is applied in a dry run, because nothing is allocated.
 
 Three searches, all over the same DEM at the same ``downsample_factor`` so that their
 masks are pixel-aligned and can be overlaid:
@@ -167,7 +173,13 @@ def main():
     parser.add_argument("--out", default=os.path.join(REPO, "output"),
                         help="where the full outputs go (default: output/)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="report what would run, and what it will cost")
+                        help="Report what the real run would cost, then stop without "
+                             "starting a search, writing a file or touching the store. "
+                             "Prints the DEM it would search, the pre-flight memory "
+                             "estimate against what is free, which searches would run "
+                             "(honouring --only), the wall time to expect per search, "
+                             "and where the artefacts would land. No memory cap is "
+                             "applied, since nothing is allocated.")
     args = parser.parse_args()
 
     if not os.path.exists(DEM):

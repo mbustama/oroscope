@@ -1932,6 +1932,42 @@ or to give the signature no defaults at all for these five and require them expl
 Until then the safe habit, and the one notebook 7 teaches, is to start from
 `ss.default_config()` and override.
 
+### 6.33 ⚠️ Open, for the release: a package, not a path insert
+
+Every notebook opens with
+
+```python
+sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
+```
+
+and then `import site_searcher`, `import physics`, `import explain`. That works, and it
+is deliberate — the notebooks run in a clone that has never been installed — but it is
+the wrong thing to teach once the package is on PyPI, and worse, an unconditional path
+insert *shadows* an installed copy with whatever happens to be in the source tree.
+
+The layout underneath it is flat: `pyproject.toml` declares ten top-level `py-modules`
+rather than a package, so there is no `import oroscope` and no namespace. That was the
+right call while the module names were still moving; it is the wrong one to publish.
+
+**What the release should look like:**
+
+- `src/oroscope/` as a real package, with `__init__.py` re-exporting the surface people
+  actually use — `find_grand_regions_interactive`, `load_config`, `default_config`,
+  `explain_results`, `crop`, and the physics helpers.
+- `import oroscope` in every notebook and every documentation example, with the
+  `sys.path` insert deleted rather than made conditional.
+- The internal imports updated (`import physics` → `from . import physics`), which is
+  mechanical but touches every module and both test suites.
+
+**Not done now**, because it is a rename across the whole tree and this branch has
+already changed a great deal; doing it in its own commit, against a green suite, is how
+it should happen. Until then the path insert stays, and the notebooks say why.
+
+Two smaller things belong in the same release pass: the README is also the PyPI
+`long_description`, so its logo uses an absolute raw URL rather than a relative path —
+and **PyPI does not render SVG at all**, so a PNG of the logo will be needed for the
+project page even though GitHub and Sphinx are happy with the vector.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
