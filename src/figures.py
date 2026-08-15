@@ -18,6 +18,8 @@ Examples
 >>> fig.savefig("walk.pdf", bbox_inches="tight")   # doctest: +SKIP
 """
 
+from __future__ import annotations
+
 import contextlib
 
 import matplotlib as mpl

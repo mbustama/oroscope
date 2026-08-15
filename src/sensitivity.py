@@ -19,6 +19,8 @@ interaction will not show up -- for that, sweep the pair explicitly.
         --sweep min_score 0.0 0.2 0.35 0.5
 """
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import glob

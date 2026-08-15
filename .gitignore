@@ -5,6 +5,11 @@ obj/
 **/__pycache__
 *.pyc
 *.csv
+# ...except the hand-digitised published curves under data/. They are source, not
+# output: they cannot be regenerated without re-reading the figures by eye, the test
+# suite loads them, and the blanket rule above meant a clone had neither the files nor
+# any sign they were missing until eight tests errored.
+!data/*.csv
 
 # Input data and run products (large binaries, regenerable)
 input/

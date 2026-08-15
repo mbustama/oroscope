@@ -15,6 +15,8 @@ crop's own corner, so the output is georeferenced in its own right.
         --north -15.30 --south -15.80 --west -72.40 --east -71.60
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 

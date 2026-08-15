@@ -5,6 +5,7 @@ and the funnel accounting.
 
 import contextlib
 import io
+import os
 import unittest
 
 import numpy as np
@@ -320,3 +321,46 @@ class TestExplicitCommandLineDetection(unittest.TestCase):
         self.assertEqual(args.alpha, 3.0)
         self.assertEqual(args.beta, 7)
         self.assertFalse(args.flag)
+
+
+class TestPythonFloorCompatibility(unittest.TestCase):
+    """
+    Guards the declared 3.9 floor against syntax only newer Pythons accept.
+
+    ``X | None`` in an annotation is evaluated at runtime before 3.10 unless
+    ``from __future__ import annotations`` is in force. Every module here uses that
+    syntax, and three of them shipped without the import: the suite passed on 3.12 and
+    every 3.9 job failed with ``unsupported operand type(s) for |``. Local green said
+    nothing, because local is not 3.9.
+    """
+
+    def source_modules(self):
+        import glob
+        import os
+        src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+        return sorted(glob.glob(os.path.join(src, "*.py")))
+
+    def test_every_module_postpones_annotation_evaluation(self):
+        import ast
+        for path in self.source_modules():
+            with open(path) as f:
+                tree = ast.parse(f.read())
+            has = any(isinstance(node, ast.ImportFrom) and node.module == "__future__"
+                      and any(a.name == "annotations" for a in node.names)
+                      for node in tree.body)
+            self.assertTrue(has, f"{os.path.basename(path)} needs "
+                                 f"`from __future__ import annotations`")
+
+    def test_the_future_import_comes_first(self):
+        """Python requires it before any other statement, so a misplaced one is fatal."""
+        import ast
+        for path in self.source_modules():
+            with open(path) as f:
+                tree = ast.parse(f.read())
+            body = [n for n in tree.body
+                    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+            self.assertTrue(body, os.path.basename(path))
+            first = body[0]
+            self.assertTrue(isinstance(first, ast.ImportFrom) and first.module == "__future__",
+                            f"{os.path.basename(path)}: the __future__ import must be the "
+                            f"first statement, found {type(first).__name__}")

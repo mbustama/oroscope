@@ -25,6 +25,8 @@ overlay the wrong ground -- so it is checked and refused rather than resampled.
         --labels GRAND TAMBO --out ../output/combined_colca
 """
 
+from __future__ import annotations
+
 import argparse
 import glob
 import json
