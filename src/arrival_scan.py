@@ -40,6 +40,8 @@ This costs one profile walk per (candidate, azimuth) regardless of how finely th
 elevation window is sampled.
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np
@@ -80,7 +82,7 @@ KGM2_TO_GCM2 = 0.1
 SPEED_OF_LIGHT = 2.99792458e8            # m/s, for the Fresnel wavelength
 
 
-def earth_radius_for_k(k_factor):
+def earth_radius_for_k(k_factor: float) -> float:
     """
     Effective Earth radius for a refraction k-factor.
 
@@ -88,6 +90,22 @@ def earth_radius_for_k(k_factor):
     8500 km the searcher has always used. The choice is not negligible: over an 80 km
     path the apparent drop is 376 m at k = 4/3 against 502 m at k = 1, a difference
     comparable to the Fresnel clearance itself.
+
+    Parameters
+    ----------
+    k_factor : float
+        Refraction factor. 1 is true geometry; 4/3 is the standard radio convention.
+
+    Returns
+    -------
+    float
+        Effective Earth radius, in metres.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> f"{arrival_scan.earth_radius_for_k(4/3) / 1e3:.0f} km"
+    '8495 km'
     """
     return 6371000.0 * float(k_factor)
 
@@ -493,7 +511,7 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
         out_target_slope[i] = target_slope_sum / cells if cells > 0 else 0.0
 
 
-def tau_decay_length_m(energy_pev):
+def tau_decay_length_m(energy_pev: float) -> float:
     """
     Lorentz-boosted tau decay length, ``(E/m) * c*tau``.
 
@@ -506,17 +524,56 @@ def tau_decay_length_m(energy_pev):
     return (energy_pev * 1.0e6 / TAU_MASS_GEV) * TAU_CTAU_M
 
 
-def energy_pev_for_decay_length(distance_m):
-    """Inverse of :func:`tau_decay_length_m`, for reporting what a distance implies."""
+def energy_pev_for_decay_length(distance_m: float) -> float:
+    """
+    Inverse of :func:`tau_decay_length_m`, for reporting what a distance implies.
+
+    Parameters
+    ----------
+    distance_m : float
+        A decay length, in metres.
+
+    Returns
+    -------
+    float
+        The tau energy having that decay length, in PeV.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> round(arrival_scan.energy_pev_for_decay_length(49000.0))
+    1000
+    """
     return distance_m / TAU_CTAU_M * TAU_MASS_GEV / 1.0e6
 
 
-def decay_probability(min_dist_m, max_dist_m, energy_pev):
+def decay_probability(min_dist_m: float, max_dist_m: float,
+                      energy_pev: float) -> float:
     """
     Probability the tau decays inside the accepted baseline window.
 
     ``exp(-d_min/L) - exp(-d_max/L)``. One of the few factors that needs no acceptance
     table, and the one that couples most strongly to site geometry.
+
+    Parameters
+    ----------
+    min_dist_m, max_dist_m : float
+        Ends of the accepted baseline window, in metres.
+    energy_pev : float
+        Tau energy, in PeV.
+
+    Returns
+    -------
+    float
+        Probability of decaying inside the window, in [0, 1].
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> round(arrival_scan.decay_probability(0.0, 3000.0, 3.0), 3)
+    1.0
+    >>> round(arrival_scan.decay_probability(0.0, 3000.0, 1000.0), 3)
+    0.059
     """
     length = tau_decay_length_m(energy_pev)
     if length <= 0:
@@ -524,7 +581,9 @@ def decay_probability(min_dist_m, max_dist_m, energy_pev):
     return math.exp(-min_dist_m / length) - math.exp(-max_dist_m / length)
 
 
-def distance_window_from_energy(energy_min_pev, energy_max_pev, shower_development_m=3000.0):
+def distance_window_from_energy(energy_min_pev: float, energy_max_pev: float,
+                                shower_development_m: float = 3000.0
+                                ) -> tuple[float, float]:
     """
     A decay-baseline window implied by an energy range.
 
@@ -542,13 +601,35 @@ def distance_window_from_energy(energy_min_pev, energy_max_pev, shower_developme
             tau_decay_length_m(energy_max_pev) + shower_development_m)
 
 
-def azimuth_fan(n_azimuths, half_width_deg=None):
+def azimuth_fan(n_azimuths: int, half_width_deg: float | None = None) -> np.ndarray:
     """
     Azimuths to scan, as offsets from each candidate's aspect.
 
     ``half_width_deg`` restricts the fan to a forward arc, which is what a slope-mounted
     array sees; leave it None for a full 360 degree sweep, appropriate when the array
     orientation does not constrain the acceptance.
+
+    Parameters
+    ----------
+    n_azimuths : int
+        Number of azimuths to scan. This is what sets the cost of a search: one profile
+        walk per (candidate, azimuth), with the elevation binning nearly free.
+    half_width_deg : float, optional
+        Half-width of a forward arc about the aspect, in degrees. ``None`` gives a full
+        sweep.
+
+    Returns
+    -------
+    ndarray
+        Azimuth offsets, in degrees.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> arrival_scan.azimuth_fan(4, None)
+    array([  0.,  90., 180., 270.])
+    >>> arrival_scan.azimuth_fan(3, 60.0)
+    array([-60.,   0.,  60.])
     """
     if half_width_deg is None:
         return np.linspace(0.0, 360.0, n_azimuths, endpoint=False)
@@ -557,7 +638,8 @@ def azimuth_fan(n_azimuths, half_width_deg=None):
     return np.linspace(-half_width_deg, half_width_deg, n_azimuths)
 
 
-def balanced_order(n_candidates, n_threads, block=256):
+def balanced_order(n_candidates: int, n_threads: int,
+                   block: int = 256) -> np.ndarray | None:
     """
     Candidate ordering that balances thread load without destroying locality.
 
@@ -572,7 +654,30 @@ def balanced_order(n_candidates, n_threads, block=256):
     overall. Dealing *blocks* of neighbouring candidates round-robin keeps locality
     inside a block while spreading each thread's slice across the whole map.
 
-    Returns an index array, or None when reordering cannot help.
+    Parameters
+    ----------
+    n_candidates : int
+        Number of candidates to be scanned.
+    n_threads : int
+        Threads the scan will run on.
+    block : int, optional
+        Candidates per block. Large enough to keep locality inside a block, small
+        enough that dealing them spreads each thread across the map.
+
+    Returns
+    -------
+    ndarray or None
+        An index array, or ``None`` when reordering cannot help -- one thread, or too
+        few candidates for the deal to be worth its own cost.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> arrival_scan.balanced_order(100, 1) is None       # nothing to balance
+    True
+    >>> order = arrival_scan.balanced_order(20000, 8)
+    >>> sorted(order.tolist()) == list(range(20000))      # a permutation, nothing lost
+    True
     """
     if n_threads <= 1 or n_candidates < block * n_threads * 2:
         return None

@@ -1,7 +1,7 @@
-[![tests](https://github.com/mbustama/site-search/actions/workflows/tests.yml/badge.svg)](https://github.com/mbustama/site-search/actions/workflows/tests.yml)
-[![Code Quality](https://github.com/mbustama/site-search/actions/workflows/lint.yml/badge.svg)](https://github.com/mbustama/site-search/actions/workflows/lint.yml)
-[![codecov](https://codecov.io/gh/mbustama/site-search/branch/main/graph/badge.svg)](https://codecov.io/gh/mbustama/site-search)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://mbustama.github.io/site-search/)
+[![tests](https://github.com/mbustama/oroscope/actions/workflows/tests.yml/badge.svg)](https://github.com/mbustama/oroscope/actions/workflows/tests.yml)
+[![Code Quality](https://github.com/mbustama/oroscope/actions/workflows/lint.yml/badge.svg)](https://github.com/mbustama/oroscope/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/mbustama/oroscope/branch/main/graph/badge.svg)](https://codecov.io/gh/mbustama/oroscope)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://mbustama.github.io/oroscope/)
 [![PyPI](https://img.shields.io/pypi/v/oroscope.svg)](https://pypi.org/project/oroscope/)
 [![Downloads](https://pepy.tech/badge/oroscope)](https://pepy.tech/project/oroscope)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -25,9 +25,9 @@ look nothing alike. GRAND wants terrain a few degrees below the horizon, tens of
 kilometres away; TAMBO wants a canyon wall two to five kilometres across. They differ in
 their numbers, not their structure.
 
-**Documentation:** [the physics](https://mbustama.github.io/site-search/physics.html) ·
-[assumptions and limitations](https://mbustama.github.io/site-search/assumptions.html) ·
-[quickstart](https://mbustama.github.io/site-search/quickstart.html)
+**Documentation:** [the physics](https://mbustama.github.io/oroscope/physics.html) ·
+[assumptions and limitations](https://mbustama.github.io/oroscope/assumptions.html) ·
+[quickstart](https://mbustama.github.io/oroscope/quickstart.html)
 
 ```bash
 pip install oroscope

@@ -23,12 +23,14 @@ What *is* validated here are the physical invariants the estimate must satisfy
 regardless of normalisation.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 import arrival_scan
 
 
-def unit_response(energy_pev):
+def unit_response(energy_pev: float | np.ndarray) -> np.ndarray:
     """Default detection response: energy-independent and equal to one."""
     return np.ones_like(np.asarray(energy_pev, dtype=np.float64))
 
@@ -65,7 +67,8 @@ class TabulatedResponse:
         return np.where((e < self.energy[0]) | (e > self.energy[-1]), 0.0, out)
 
 
-def geometric_aperture_m2sr(area_km2, solid_angle_sr):
+def geometric_aperture_m2sr(area_km2: float | np.ndarray,
+                            solid_angle_sr: float | np.ndarray) -> np.ndarray:
     """
     Area times accepted solid angle, in m^2 sr.
 
@@ -75,7 +78,8 @@ def geometric_aperture_m2sr(area_km2, solid_angle_sr):
                                                                        dtype=np.float64)
 
 
-def aperture_vs_energy(area_km2, solid_angle_sr, min_dist_m, max_dist_m,
+def aperture_vs_energy(area_km2: float, solid_angle_sr: float, min_dist_m: float,
+                       max_dist_m: float,
                        energies_pev, response=None):
     """
     Aperture as a function of energy for one site.
@@ -98,7 +102,8 @@ def aperture_vs_energy(area_km2, solid_angle_sr, min_dist_m, max_dist_m,
     return geom * decay * np.asarray(response(energies), dtype=np.float64)
 
 
-def peak_energy_pev(min_dist_m, max_dist_m, energies_pev=None):
+def peak_energy_pev(min_dist_m: float, max_dist_m: float,
+                    energies_pev: np.ndarray | None = None) -> float:
     """
     Energy at which the decay factor peaks for a given baseline window.
 
@@ -113,7 +118,8 @@ def peak_energy_pev(min_dist_m, max_dist_m, energies_pev=None):
     return float(energies[int(np.argmax(decay))])
 
 
-def infer_response(published_energy_pev, published_value, area_km2, solid_angle_sr,
+def infer_response(published_energy_pev: np.ndarray, published_value: np.ndarray,
+                   area_km2: float, solid_angle_sr: float,
                    min_dist_m, max_dist_m, min_model_fraction=1e-3):
     """
     Response function implied by a published curve, given our geometric model.
@@ -158,7 +164,7 @@ def infer_response(published_energy_pev, published_value, area_km2, solid_angle_
     return energies, (response / peak if peak > 0 else response)
 
 
-def load_curve_csv(path):
+def load_curve_csv(path: str) -> tuple[np.ndarray, np.ndarray]:
     """
     Loads a two-column digitized curve, returning (energy_pev, value).
 
@@ -168,7 +174,9 @@ def load_curve_csv(path):
     return table[:, 0] / 1.0e6, table[:, 1]
 
 
-def summarize_sites(site_details, min_dist_m, max_dist_m, energies_pev, response=None):
+def summarize_sites(site_details: list[dict], min_dist_m: float, max_dist_m: float,
+                    energies_pev: np.ndarray,
+                    response: np.ndarray | None = None) -> dict:
     """
     Aperture-versus-energy for every site that carries scan observables, plus the total.
 

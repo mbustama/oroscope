@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import sys
 import numpy as np
@@ -209,17 +211,31 @@ def count_grid_capacity(mask_chunk, cell_size_y, cell_size_x, spacing_m, grid_ty
     area per detector --- but note the terrain mask cannot resolve whether those
     sub-pixel positions really are usable.
 
-    Parameters:
+    Parameters
+    ----------
+    mask_chunk : ndarray
+        2D boolean array; ``True`` marks valid terrain.
+    cell_size_y, cell_size_x : float
+        Ground size of one pixel, in metres. They differ on a geographic grid, which is
+        why an equal ground spacing is a different number of pixels on each axis.
+    spacing_m : float
+        Distance between neighbouring detectors, in metres. Zero or less returns 0.
+    grid_type_code : int
+        0 for a square grid, 1 for a hexagonal (triangular) one.
 
-    - mask_chunk (ndarray): A 2D boolean array where True indicates valid terrain.
-    - cell_size_y, cell_size_x (float): Ground size of one pixel, in metres. They differ
-      on a geographic grid, which is why an equal ground spacing is a different number
-      of pixels on each axis.
-    - spacing_m (float): Distance between neighbouring detectors, in metres.
-    - grid_type_code (int): 0 for 'square' grid, 1 for 'hexagonal' (triangular) grid.
+    Returns
+    -------
+    int
+        Detectors fitting inside the valid terrain.
 
-    Returns:
-    - int: The total number of detectors that fit inside the valid terrain.
+    Examples
+    --------
+    >>> import numpy as np, site_searcher as ss
+    >>> mask = np.ones((100, 100), dtype=bool)          # 3 km square of 30 m pixels
+    >>> ss.count_grid_capacity(mask, 30.0, 30.0, 1000.0, 1)
+    12
+    >>> ss.count_grid_capacity(mask, 30.0, 30.0, 0.0, 1)   # degenerate spacing
+    0
     """
     h, w = mask_chunk.shape
     if spacing_m <= 0.0 or cell_size_y <= 0.0 or cell_size_x <= 0.0:
@@ -380,7 +396,7 @@ def collect_provenance(dem_path, map_grid):
 #           CORE PIPELINE HELPERS
 # ==========================================
 
-def slope_baseline_pixels(map_grid, slope_baseline_m):
+def slope_baseline_pixels(map_grid, slope_baseline_m: float | None) -> tuple[int, int]:
     """
     Converts a slope measurement baseline in metres to a per-axis window in pixels.
 
@@ -390,7 +406,19 @@ def slope_baseline_pixels(map_grid, slope_baseline_m):
     "the" slope depends on the footprint being deployed, so the baseline is an
     explicit parameter rather than an accident of the DEM's resolution.
 
-    Returns (0, 0) when no baseline is requested, meaning the native gradient.
+    Parameters
+    ----------
+    map_grid : MapGrid
+        Angular and metric pixel sizes of the DEM.
+    slope_baseline_m : float or None
+        Ground distance over which slope is measured, in metres. ``None`` or 0 uses the
+        DEM's native resolution, which on 30 m data is dominated by DEM noise.
+
+    Returns
+    -------
+    tuple of int
+        Smoothing window as ``(rows, columns)`` in pixels. ``(0, 0)`` when no baseline
+        is requested, meaning the native gradient.
     """
     if not slope_baseline_m:
         return 0, 0
@@ -399,7 +427,9 @@ def slope_baseline_pixels(map_grid, slope_baseline_m):
     return ny, nx
 
 
-def terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
+def terrain_gradients(elevation_block: np.ndarray, cell_size_y: float,
+                      cell_size_x: float, smooth_y: int = 0,
+                      smooth_x: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """
     Smoothed partial derivatives of the surface, the raw material for slope and aspect.
 
@@ -413,8 +443,20 @@ def terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smo
     angle (see :func:`slope_band_gradient_sq`), and aspect is needed only at the few
     pixels that survive.
 
-    Returns:
-    - tuple(ndarray, ndarray): d/dy and d/dx, in metres per metre.
+    Parameters
+    ----------
+    elevation_block : ndarray
+        Elevation tile, including a halo of at least ``max(smooth)//2 + 1``.
+    cell_size_y, cell_size_x : float
+        Ground size of one pixel on each axis, in metres. They differ on a geographic
+        grid, which is why they are separate.
+    smooth_y, smooth_x : int, optional
+        Smoothing window in pixels, from :func:`slope_baseline_pixels`.
+
+    Returns
+    -------
+    tuple of ndarray
+        ``(d/dy, d/dx)``, in metres per metre.
     """
     block = elevation_block
     if smooth_y > 1 or smooth_x > 1:
@@ -422,7 +464,9 @@ def terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smo
     return np.gradient(block, cell_size_y, cell_size_x)
 
 
-def slope_band_gradient_sq(min_slope_deg, max_slope_deg):
+def slope_band_gradient_sq(min_slope_deg: float | None,
+                           max_slope_deg: float | None
+                           ) -> tuple[float | None, float | None]:
     """
     The slope band restated as bounds on the squared gradient magnitude.
 
@@ -434,8 +478,25 @@ def slope_band_gradient_sq(min_slope_deg, max_slope_deg):
     vertical, and non-positive lower bounds, are returned as None meaning "unbounded":
     tan is singular at 90 degrees and every real gradient satisfies them anyway.
 
-    Returns:
-    - tuple(float or None, float or None): lower and upper bounds on dx^2 + dy^2.
+    Parameters
+    ----------
+    min_slope_deg, max_slope_deg : float or None
+        Edges of the accepted slope band, in degrees.
+
+    Returns
+    -------
+    tuple
+        Lower and upper bounds on ``dx^2 + dy^2``. Either may be ``None``, meaning
+        unbounded on that side.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> lo, hi = ss.slope_band_gradient_sq(3.0, 25.0)
+    >>> f"{lo:.4f} {hi:.4f}"
+    '0.0027 0.2174'
+    >>> ss.slope_band_gradient_sq(0.0, 90.0)      # both edges degenerate
+    (None, None)
     """
     lo = None
     if min_slope_deg is not None and min_slope_deg > 0.0:
@@ -449,12 +510,30 @@ def slope_band_gradient_sq(min_slope_deg, max_slope_deg):
     return lo, hi
 
 
-def terrain_derivatives(elevation_block, cell_size_y, cell_size_x, smooth_y=0, smooth_x=0):
+def terrain_derivatives(elevation_block: np.ndarray, cell_size_y: float,
+                        cell_size_x: float, smooth_y: int = 0,
+                        smooth_x: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """
     Slope and aspect over a stated measurement baseline.
 
-    Returns:
-    - tuple(ndarray, ndarray): slope in degrees, aspect in degrees clockwise from north.
+    Parameters
+    ----------
+    elevation_block : ndarray
+        Elevation tile, including a halo. See :func:`terrain_gradients`.
+    cell_size_y, cell_size_x : float
+        Ground size of one pixel on each axis, in metres.
+    smooth_y, smooth_x : int, optional
+        Smoothing window in pixels.
+
+    Returns
+    -------
+    tuple of ndarray
+        Slope in degrees, and aspect in degrees clockwise from north.
+
+    See Also
+    --------
+    slope_band_gradient_sq : tests a slope band without forming the angle at all,
+        which is what the screening stage uses.
     """
     dy, dx = terrain_gradients(elevation_block, cell_size_y, cell_size_x, smooth_y, smooth_x)
     slope = np.degrees(np.arctan(np.sqrt(dx ** 2 + dy ** 2)))

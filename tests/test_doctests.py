@@ -17,9 +17,13 @@ import unittest
 import _support  # noqa: F401  (path setup)
 
 # Modules whose docstring examples are meant to run. Deliberately a list rather than a
-# directory walk: site_searcher and the CLI tools take a DEM and write files, so their
-# examples are illustrative rather than executable, and figures builds plots.
-DOCTESTED = ("physics", "scoring", "arrival_scan", "aperture")
+# directory walk: the CLI tools take a DEM and write files, so their examples are
+# illustrative rather than executable, and figures builds plots.
+#
+# site_searcher is included for the routines that take plain arrays -- the terrain
+# derivatives, the slope band, the capacity lattice. Its pipeline stages need a DEM on
+# disk and are exercised by the regression tests instead.
+DOCTESTED = ("physics", "scoring", "arrival_scan", "aperture", "site_searcher")
 
 OPTIONS = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
 

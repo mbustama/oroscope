@@ -46,8 +46,8 @@ or the test suite, none of which ship in the wheel:
 
 .. code-block:: shell
 
-   git clone https://github.com/mbustama/site-search.git
-   cd site-search
+   git clone https://github.com/mbustama/oroscope.git
+   cd oroscope
    pip install -e .
 
 Optional extras

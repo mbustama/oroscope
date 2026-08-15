@@ -1,16 +1,16 @@
 Oroscope: terrain site search for particle-astrophysics observatories
 =====================================================================
 
-.. image:: https://github.com/mbustama/site-search/actions/workflows/tests.yml/badge.svg
-   :target: https://github.com/mbustama/site-search/actions/workflows/tests.yml
+.. image:: https://github.com/mbustama/oroscope/actions/workflows/tests.yml/badge.svg
+   :target: https://github.com/mbustama/oroscope/actions/workflows/tests.yml
    :alt: tests
 
-.. image:: https://github.com/mbustama/site-search/actions/workflows/lint.yml/badge.svg
-   :target: https://github.com/mbustama/site-search/actions/workflows/lint.yml
+.. image:: https://github.com/mbustama/oroscope/actions/workflows/lint.yml/badge.svg
+   :target: https://github.com/mbustama/oroscope/actions/workflows/lint.yml
    :alt: Code Quality
 
 .. image:: https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg
-   :target: https://mbustama.github.io/site-search/
+   :target: https://mbustama.github.io/oroscope/
    :alt: Documentation
 
 .. image:: https://img.shields.io/pypi/v/oroscope.svg
@@ -87,8 +87,8 @@ or, for a clone with the notebooks, the configurations and the test suite:
 
 .. code-block:: shell
 
-   git clone https://github.com/mbustama/site-search.git
-   cd site-search
+   git clone https://github.com/mbustama/oroscope.git
+   cd oroscope
    pip install -e .
 
 .. code-block:: shell
@@ -113,7 +113,7 @@ Author
 ------
 
 Written by Mauricio Bustamante (mbustamante@gmail.com). Bug reports and questions are
-best raised as `GitHub issues <https://github.com/mbustama/site-search/issues>`_.
+best raised as `GitHub issues <https://github.com/mbustama/oroscope/issues>`_.
 
 License
 -------

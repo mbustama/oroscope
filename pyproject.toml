@@ -72,10 +72,10 @@ docs = ["sphinx", "sphinx-rtd-theme", "sphinx-copybutton",
 notebooks = ["jupyter", "nbclient", "nbformat", "ipykernel", "matplotlib"]
 
 [project.urls]
-Homepage = "https://github.com/mbustama/site-search"
-Documentation = "https://mbustama.github.io/site-search/"  # repo still named site-search
-Changelog = "https://github.com/mbustama/site-search/blob/main/CHANGELOG.md"
-Issues = "https://github.com/mbustama/site-search/issues"
+Homepage = "https://github.com/mbustama/oroscope"
+Documentation = "https://mbustama.github.io/oroscope/"
+Changelog = "https://github.com/mbustama/oroscope/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mbustama/oroscope/issues"
 
 # Console entry points, so a search can be run from anywhere rather than only from
 # inside src/. The pipeline currently resolves several paths relative to the working
