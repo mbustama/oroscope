@@ -247,6 +247,9 @@ traffic*, not flops.
 3. **Negative results go in `docs/ROADMAP.md`** so they are not retried.
 4. **Fixtures are verified before the code that uses them** (`tests/test_fixtures.py`).
 5. Regenerate goldens deliberately: `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
+5b. **Lint the way CI does: `ruff check .`, from the repository root.** It lints the
+   notebooks too, and `ruff check src/ tests/` does not — an unused `plt` import in a
+   notebook that draws nothing failed CI after a local check had passed.
 6. Commit messages explain *why* and state measured deltas.
 7. The roadmap is updated in the same commit as the code.
 8. **A failing test is more often a wrong test than wrong code** — it has been, six times

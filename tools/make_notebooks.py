@@ -39,6 +39,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 """
 
+# Notebook 7 draws nothing -- it is tables and prose -- so it must not import pyplot.
+# `ruff check .` lints notebooks, and an unused import there fails CI like any other.
+PREAMBLE_NO_PLOT = """import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
+
+import numpy as np
+"""
+
 FOOTER = """---
 
 *Part of the [Oroscope](https://github.com/mbustama/oroscope) tutorials. \
@@ -793,7 +803,7 @@ Three things are worth knowing before the first call:
   find and re-read the JSON it had just written.
 - **It explains itself.** A plain-language account of what was found and why, printed
   and saved as `explanation.txt`, on by default."""),
-("code", PREAMBLE + """
+("code", PREAMBLE_NO_PLOT + """
 import contextlib
 import io
 import json
