@@ -2622,8 +2622,12 @@ def default_config(preset="default"):
 
     config = {
         "dem_path": "path_to_your_dem.tif",
-        "origin_lat": 0.0,
-        "origin_lon": 0.0,
+        # Deliberately null rather than 0.0. Zero is a *valid* coordinate -- it is in
+        # the Gulf of Guinea -- so a placeholder someone forgets to edit produces a
+        # run georeferenced to the wrong continent rather than an error. Null means
+        # "read the DEM's own ModelTiepointTag", which is the recommended use.
+        "origin_lat": None,
+        "origin_lon": None,
         "target_antennas": 10000,
         "min_width_km": 2.0,
         "min_altitude": None,
@@ -2695,7 +2699,7 @@ def default_config(preset="default"):
         "min_aspect_deg": None,
         "max_aspect_deg": None,
         "region_name": "Custom Region",
-        "generate_kml": True,
+        "generate_kml": False,
         "print_info": True,
         "explain": True,
         "output_directory_base_with_given_json": "../output/",
@@ -2832,13 +2836,13 @@ def emit_explanation(results, run_output_dir=None, print_it=True):
 # ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
-def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=1000,
+def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=10000,
                             rfi_zones=None, origin_lat=None, origin_lon=None,
                             min_width_km=2.0, min_altitude=None, max_altitude=None,
-                            antenna_spacing_km=1.0, min_dist_km=30.0, max_dist_km=80.0,
-                            road_map_path=None, max_road_dist_km=None,
-                            grid_type='square', generate_kml=False,
-                            search_mode='single', min_sub_array_size=100,
+                            antenna_spacing_km=1.0, min_dist_km=10.0, max_dist_km=80.0,
+                            road_map_path=None, max_road_dist_km=20.0,
+                            grid_type='hex', generate_kml=False,
+                            search_mode='distributed', min_sub_array_size=500,
                             min_aspect_deg=None, max_aspect_deg=None,
                             min_slope_deg=3.0, max_slope_deg=25.0,
                             region_name=None,

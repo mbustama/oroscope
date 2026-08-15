@@ -69,13 +69,12 @@ re-read the JSON it has just written:
    print(results["results"]["total_capacity"])
    print(results["explanation"])
 
-.. warning::
+.. note::
 
-   The function's defaults are **not** the configuration template's defaults. Five
-   parameters differ — ``search_mode``, ``grid_type``, ``target_antennas``,
-   ``min_dist_km`` and ``min_sub_array_size`` — so omitting one means different things
-   depending on which entry point you used. Start from ``ss.default_config()`` and
-   override, rather than relying on the signature's defaults.
+   **A parameter's default is the same wherever you read it** — off the function
+   signature, off ``oroscope --help``, or out of ``oroscope.default_config()``. They
+   disagreed on ten parameters once, so omitting one meant different things depending
+   on which door you came in by; a test now pins all three together.
 
 
 ``oroscope`` — run a search

@@ -68,6 +68,16 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   the full DEM are in `config/`.
 
 ### Fixed
+- **A parameter's default depended on which door you came in by.** The pipeline's
+  signature, the argparse parser and `default_config()` disagreed on **ten**
+  parameters — `search_mode` was `single` from Python and `distributed` from a shell,
+  `min_dist_km` was 30 km against 10. The signature was the odd one out in every case
+  and now matches the documented values; a test compares all three pairwise. Two were
+  in the template, and one of those was a hazard: `origin_lat`/`origin_lon` defaulted
+  to `0.0`, a *valid* coordinate in the Gulf of Guinea, so a forgotten placeholder
+  georeferenced a run to the wrong continent instead of failing. They are `null` now,
+  meaning "read the DEM's own tiepoint". The bundled configurations set every
+  parameter explicitly and are unaffected: Colca is still 15 sites and 9717 detectors.
 - **`import oroscope` forced the matplotlib backend.** `combine_experiments` called
   `matplotlib.use("Agg")` at module level — harmless for a standalone module, not for a
   package front door: it reached into every caller's session and overrode the inline

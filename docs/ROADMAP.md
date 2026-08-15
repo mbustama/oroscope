@@ -1907,30 +1907,45 @@ capacity is unchanged at 9717 and GRAND keeps its real component at 0.742. Wrong
 `mean` or `min`, and misleading in any summary. Judged on candidates with accepted sky
 only, now.
 
-### 6.32 ⚠️ Open: the library's defaults are not the CLI's
+### 6.32 The three sources of defaults now agree ✅ delivered
 
-Found by writing notebook 7, which omitted `search_mode` and quietly ran a *single*
-search with a 30 km minimum distance, finding nothing. Five parameters disagree between
-`find_grand_regions_interactive`'s signature and `default_config()`:
+A parameter could state its default in three places — the pipeline's signature, the
+argparse parser, and `default_config()` — and they disagreed on **ten** of them. So
+omitting a parameter meant different things depending on which door you came in by:
+`search_mode` was `single` from Python and `distributed` from a shell, and
+`min_dist_km` was 30 km against 10.
 
-| parameter | function | config template |
+§6.24 closed the parity gaps in *capability*. This is parity of **meaning**, and it is
+the one a user actually trips over — it was found by writing notebook 7, which omitted
+`search_mode`, quietly ran a single search at 30 km, and found nothing.
+
+| parameter | was (signature) | now |
 | --- | --- | --- |
 | `search_mode` | `single` | `distributed` |
 | `grid_type` | `square` | `hex` |
 | `target_antennas` | 1000 | 10 000 |
 | `min_dist_km` | 30.0 | 10.0 |
 | `min_sub_array_size` | 100 | 500 |
+| `max_road_dist_km` | `None` | 20.0 |
 
-§6.24 closed the parity gaps in *capability* — everything the CLI can do, the library
-can. This is parity of *meaning*: the same omitted parameter should not signify
-different things depending on which entry point was used, and right now it does.
+In every case the signature was the odd one out, so the CLI and the template — the
+documented values, and the ones the bundled configurations use — were taken as correct
+and the signature aligned to them.
 
-**Not changed, because it is a behaviour change and the owner's call.** Aligning them
-would alter results for any existing library caller that relies on a signature default
-— `min_dist_km` 30 → 10 is physics, not cosmetics. The alternatives are to align them,
-or to give the signature no defaults at all for these five and require them explicitly.
-Until then the safe habit, and the one notebook 7 teaches, is to start from
-`ss.default_config()` and override.
+Two of the ten were in the template rather than the signature, and one of those was a
+real hazard:
+
+- **`origin_lat`/`origin_lon` were `0.0`.** Zero is a *valid* coordinate — it is in the
+  Gulf of Guinea — so a placeholder someone forgot to edit would georeference a run to
+  the wrong continent rather than fail. They are `null` now, which means "read the DEM's
+  own tiepoint" and is the recommended use anyway.
+- **`generate_kml` was `true`** in the template against `False` everywhere else.
+
+`dem_path` and `region_name` remain deliberate placeholders — a generated template is
+meant to be edited, and those two say so by being obviously unreal.
+
+Pinned by `tests/test_cli.py`, which compares the three sources pairwise over every
+parameter, so this cannot drift back.
 
 ### 6.33 A package, not a path insert ✅ delivered
 

@@ -208,10 +208,11 @@ results = ss.find_grand_regions_interactive(
        and k not in ("print_info", "output_directory_base_with_given_json")})
 ```
 
-> **Prefer this to relying on the function's defaults.** Five parameters differ between
-> the signature and the template — `search_mode`, `grid_type`, `target_antennas`,
-> `min_dist_km`, `min_sub_array_size` — so omitting one means different things depending
-> on which entry point you used.
+> **The three sources of defaults agree.** A parameter's default is the same whether you
+> read it off the function signature, off `oroscope --help`, or out of
+> `default_config()` — they disagreed on ten of them once, and a test now pins all three
+> together. Starting from `default_config()` is still the clearer habit, because it puts
+> every knob in front of you.
 
 ### Read what came back
 

@@ -63,11 +63,25 @@ jobs:
           # broken, and codecov is a third party that occasionally is.
           fail_ci_if_error: false
 
-      - name: Confirm the modules import outside the source tree
-        # Guards the packaging rather than the physics: an editable install that only
-        # works from src/ would pass the suite above and fail for anyone who pip
-        # installs it.
+      - name: Confirm the package imports outside the source tree
+        # Guards the packaging rather than the physics: an install that only works from
+        # src/ would pass the suite above and fail for anyone who pip installs it.
+        # Checks the package front door, the submodules, and that the console scripts
+        # were actually installed -- three separate ways for packaging to go wrong.
         working-directory: ${{ runner.temp }}
         run: |
-          python -c "import site_searcher, arrival_scan, physics, scoring, aperture"
-          python -c "import crop_dem, combine_experiments, sensitivity"
+          python -c "import oroscope; print(oroscope.__version__, len(oroscope.__all__), 'names')"
+          python -c "import oroscope; oroscope.tau_decay_length_m(100.0); oroscope.default_config()"
+          python -c "from oroscope import site_searcher, arrival_scan, physics, scoring, aperture"
+          python -c "from oroscope import crop_dem, combine_experiments, sensitivity, explain"
+          # A library must not choose its user's matplotlib backend.
+          python -c "
+          import matplotlib; before = matplotlib.get_backend()
+          import oroscope
+          assert matplotlib.get_backend() == before, 'importing oroscope changed the backend'
+          "
+          oroscope --help > /dev/null
+          oroscope-crop --help > /dev/null
+          oroscope-combine --help > /dev/null
+          oroscope-sensitivity --help > /dev/null
+          oroscope-fetch-dem --help > /dev/null

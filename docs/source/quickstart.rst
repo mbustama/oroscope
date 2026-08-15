@@ -56,9 +56,10 @@ It **returns its results**, so nothing has to find and re-read the file it just 
    for site in oroscope.selected_sites(results)[0]:
        print(site["site_id"], site["area_km2"], site["center_lat"], site["center_lon"])
 
-Prefer starting from ``oroscope.default_config()`` and overriding, rather than relying
-on the function signature's own defaults: five parameters differ between the two, so
-omitting one means different things depending on which you started from.
+Starting from ``oroscope.default_config()`` and overriding is the clearer habit — it
+puts every knob in front of you — but it is no longer a correctness matter: the
+function signature, ``oroscope --help`` and the template state the same default for
+every parameter, and a test keeps all three in step.
 
 The same search from a shell is ``oroscope --config_path config/grand_colca_config.json``
 — see :doc:`cli` for every option, and for the other four console scripts.

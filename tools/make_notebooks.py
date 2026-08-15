@@ -804,6 +804,7 @@ import io
 import os
 import tempfile
 
+import oroscope
 from oroscope import explain, site_searcher as ss
 
 WORK = tempfile.mkdtemp(prefix="oroscope_nb07_")
@@ -898,32 +899,32 @@ with contextlib.redirect_stdout(log), contextlib.redirect_stderr(io.StringIO()):
 
 print(f"{len(log.getvalue().splitlines())} lines of output captured\\n")
 print("returned:", ", ".join(sorted(results)))"""),
-("md", """### One trap worth knowing
+("md", """### Where a default comes from
 
-**The function's defaults are not the config template's defaults.** Five parameters
-differ, and omitting one means different things depending on which door you came in by:
+A parameter can state its default in three places — the function's signature,
+`oroscope --help`, and `default_config()` — and **all three agree**. They did not
+always: ten parameters disagreed, so omitting one meant different things depending on
+which door you came in by. An earlier draft of this notebook omitted `search_mode`,
+quietly ran a *single* search with a 30 km minimum distance, and found nothing at all
+on this small ridge. The funnel said so plainly, which is the system working, but the
+trap should not have existed.
 
-| parameter | `find_grand_regions_interactive` | `default_config()` |
-|---|---|---|
-| `search_mode` | `single` | `distributed` |
-| `grid_type` | `square` | `hex` |
-| `target_antennas` | 1000 | 10000 |
-| `min_dist_km` | 30.0 | 10.0 |
-| `min_sub_array_size` | 100 | 500 |
+It cannot come back: a test compares the three sources pairwise, for every parameter.
 
-An earlier draft of this notebook omitted `search_mode` and quietly ran a *single*
-search with a 30 km minimum distance, which on this small ridge found nothing at all.
-The funnel said so plainly, which is the system working — but the safe habit when
-driving the library is to start from `ss.default_config()` and override, rather than to
-rely on the signature's defaults."""),
-("code", """template = ss.default_config()
-signature_defaults = {
-    "search_mode": "single", "grid_type": "square",
-    "target_antennas": 1000, "min_dist_km": 30.0, "min_sub_array_size": 100,
-}
-print(f"{'parameter':22} {'function':>12} {'config template':>18}")
-for key, value in signature_defaults.items():
-    print(f"{key:22} {str(value):>12} {str(template[key]):>18}")"""),
+Starting from `default_config()` and overriding is still the clearer habit, because it
+puts every knob in front of you rather than leaving them implicit."""),
+("code", """import inspect
+
+template = oroscope.default_config()
+signature = {k: v.default for k, v in
+             inspect.signature(oroscope.find_grand_regions_interactive).parameters.items()
+             if v.default is not inspect.Parameter.empty}
+
+print(f"{'parameter':22} {'signature':>12} {'template':>12}")
+for key in ("search_mode", "grid_type", "target_antennas", "min_dist_km",
+            "min_sub_array_size", "max_road_dist_km"):
+    mark = "ok" if signature[key] == template[key] else "DIFFERS"
+    print(f"{key:22} {str(signature[key]):>12} {str(template[key]):>12}   {mark}")"""),
 ("md", """That dictionary is the same content the results JSON holds, plus the explanation and
 the paths written. No re-reading the file it just wrote."""),
 ("code", """print(f"sites:    {results['results']['total_sites']}")

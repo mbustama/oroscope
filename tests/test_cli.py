@@ -301,6 +301,85 @@ class TestMainCleansUpAfterItself(CliCase):
         self.assertIs(after, before)
 
 
+class TestTheThreeSourcesOfDefaultsAgree(unittest.TestCase):
+    """
+    A parameter has three places it can state a default: the pipeline's signature, the
+    argparse parser, and ``default_config()``. They disagreed on **ten** of them, so
+    omitting a parameter meant different things depending on which door you came in by
+    — ``search_mode`` was ``single`` from Python and ``distributed`` from a shell, and
+    ``min_dist_km`` was 30 km against 10.
+
+    That is not the parity §6.24 closed, which was about capability. This is parity of
+    *meaning*, and it is the one a user actually trips over.
+    """
+
+    # Placeholders, not defaults: a generated template is meant to be edited, and these
+    # two say so by being obviously unreal. Everything else must agree.
+    PLACEHOLDERS = {"dem_path", "region_name"}
+
+    # Resolved by main() rather than passed through, or not a pipeline parameter.
+    CLI_ONLY = {"config_path", "generate_config", "config_preset", "print_info",
+                "output_directory_base_with_given_json", "require_sky", "resume_dir",
+                "rfi_zones", "run_output_dir", "help"}
+
+    @classmethod
+    def setUpClass(cls):
+        import argparse
+        import inspect
+        captured = {}
+        real = argparse.ArgumentParser.parse_args
+
+        def intercept(self, *args, **kwargs):
+            captured["parser"] = self
+            raise SystemExit(0)
+
+        argparse.ArgumentParser.parse_args = intercept
+        argv = sys.argv
+        sys.argv = ["oroscope"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                ss.main()
+        except SystemExit:
+            pass
+        finally:
+            argparse.ArgumentParser.parse_args = real
+            sys.argv = argv
+
+        cls.signature = {k: v.default for k, v in inspect.signature(
+            ss.find_grand_regions_interactive).parameters.items()
+            if v.default is not inspect.Parameter.empty}
+        cls.cli = {a.dest: a.default for a in captured["parser"]._actions}
+        cls.template = ss.default_config()
+
+    def disagreements(self, a, b, name_a, name_b):
+        out = []
+        for key in sorted(set(a) & set(b) - self.PLACEHOLDERS - self.CLI_ONLY):
+            if a[key] != b[key]:
+                out.append(f"{key}: {name_a}={a[key]!r} but {name_b}={b[key]!r}")
+        return out
+
+    def test_the_signature_agrees_with_the_command_line(self):
+        bad = self.disagreements(self.signature, self.cli, "signature", "CLI")
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_the_signature_agrees_with_the_config_template(self):
+        bad = self.disagreements(self.signature, self.template, "signature", "template")
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_the_command_line_agrees_with_the_config_template(self):
+        bad = self.disagreements(self.cli, self.template, "CLI", "template")
+        self.assertEqual(bad, [], "\n".join(bad))
+
+    def test_the_template_does_not_offer_zero_as_an_origin(self):
+        """
+        Zero is a *valid* coordinate, in the Gulf of Guinea. A placeholder someone
+        forgets to edit must not produce a run georeferenced to the wrong continent;
+        null means "read the DEM's own tiepoint", which is the recommended use anyway.
+        """
+        self.assertIsNone(self.template["origin_lat"])
+        self.assertIsNone(self.template["origin_lon"])
+
+
 class TestGenerateConfig(CliCase):
     def test_it_writes_a_template_and_exits_without_searching(self):
         path = os.path.join(self.tmp, "new", "template.json")
