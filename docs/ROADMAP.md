@@ -1763,7 +1763,7 @@ Every number published so far comes from crops. The full-DEM run now has everyth
 needs except the half hour: two configurations (`config/grand_arequipa_full.json`,
 `config/tambo_arequipa_full.json`, identical to the Colca ones except for the DEM, the
 origin and `downsample_factor: 4`), a runner (`tools/run_arequipa_full.py`), and
-notebook 7, which explains the result.
+notebook 8, which explains the result.
 
 **The notebook reads the results; it does not produce them.** Three searches at roughly
 half an hour each, against CI that executes every notebook on every push, is ninety
@@ -1773,7 +1773,7 @@ a few hundred KB — into `results/arequipa_full/`, which is committed, and the 
 opens those. This is only possible because `explain.explain_results()` is a pure
 function of the results dictionary: no DEM, no re-run, no pipeline.
 
-Notebook 7 is therefore **excluded from the CI execution job**, which is a real loss of
+Notebooks 7 and 8 are therefore **excluded from the CI execution job**, which is a real loss of
 coverage and is replaced deliberately: `tests/test_docs.py` asserts that every
 `ss.<name>` and `explain.<name>` the generator writes still exists, which is the drift
 an API rename produces and the one the execution would have caught.

@@ -58,15 +58,16 @@ jobs:
         # reproducible bit-for-bit across matplotlib versions -- so nothing is written
         # back and the working tree stays clean.
         #
-        # 07 is excluded. It drives the whole pipeline rather than the kernels, and its
-        # second half reads the stored full-DEM results, which take about half an hour
-        # each to produce and are not in a runner's filesystem anyway. Executing it on
-        # every push would cost more than it checks. It is run locally when a
-        # configuration changes, and its outputs are committed; test_docs.py checks
-        # that the API names it calls still exist, which is the drift that mattered.
+        # 07 and 08 are excluded. Both drive the whole pipeline rather than the
+        # kernels, and 08 reads stored full-DEM results that take about half an hour
+        # each to produce and are not in a runner's filesystem anyway. Executing them
+        # on every push would cost more than it checks. They are run locally when a
+        # configuration changes and their outputs are committed; test_docs.py checks
+        # that the API names they call still exist, which is the drift that mattered.
         run: |
           mkdir -p /tmp/nbcheck
           cp notebooks/*.ipynb /tmp/nbcheck/
-          rm -f /tmp/nbcheck/07_running_a_search.ipynb
+          rm -f /tmp/nbcheck/07_explaining_a_run.ipynb
+          rm -f /tmp/nbcheck/08_the_full_dem.ipynb
           cd /tmp/nbcheck
           jupyter nbconvert --to notebook --execute --inplace *.ipynb

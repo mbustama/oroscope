@@ -2,7 +2,7 @@
 """
 Runs the full Arequipa DEM locally and stores the small artefacts for the notebook.
 
-Notebook 7 reads results rather than producing them, for one reason: these searches
+Notebook 8 reads results rather than producing them, for one reason: these searches
 take roughly half an hour each and CI executes every notebook on every push. A tutorial
 that costs ninety minutes of compute per commit is not a tutorial, it is a bill. So the
 expensive part runs here, on a machine that already has the DEM, and what it leaves
@@ -151,7 +151,7 @@ def write_manifest(kept):
         "dem": os.path.relpath(DEM, REPO),
         "configs": {k: os.path.relpath(v, REPO) for k, v in RUNS.items()},
         "files": sorted(kept),
-        "note": ("Regenerate when a configuration changes. Notebook 7 reads these and "
+        "note": ("Regenerate when a configuration changes. Notebook 8 reads these and "
                  "does not run the searches itself: each takes about half an hour."),
     }
     path = os.path.join(STORE, "manifest.json")
@@ -199,7 +199,7 @@ def main():
 
     write_manifest(kept)
     print(f"stored {len(kept)} files in {os.path.relpath(STORE, REPO)}")
-    print("Notebook 7 reads these. Re-execute it to refresh its outputs.")
+    print("Notebook 8 reads these. Re-execute it to refresh its outputs.")
 
 
 if __name__ == "__main__":

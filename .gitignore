@@ -19,6 +19,12 @@ old/
 *.npy
 environment.yml
 
+# Coverage output. `coverage run` leaves a binary database in the working directory;
+# it was committed once by a `git add -A` and is pure noise in a diff.
+.coverage
+.coverage.*
+htmlcov/
+
 # Packaging artefacts
 *.egg-info/
 build/

@@ -113,10 +113,11 @@ class TestEveryModuleIntroducesItself(unittest.TestCase):
 class TestTheNotebooksCallRealNames(unittest.TestCase):
     """
     Notebooks are executed in CI, which is what makes their claim to work checkable —
-    except notebook 7, which drives whole searches and reads stored full-DEM results,
-    and is excluded because executing it on every push costs more than it checks.
+    except notebooks 7 and 8, which drive whole searches and read stored full-DEM
+    results, and are excluded because executing them on every push costs far more than
+    it checks.
 
-    So the drift it is exposed to is checked here instead, statically: every
+    So the drift they are exposed to is checked here instead, statically: every
     ``ss.<name>`` and ``explain.<name>`` the generator writes must still exist. That is
     the failure mode a rename produces, and it is the one the excluded execution would
     otherwise have caught.
@@ -148,15 +149,16 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
             path = os.path.join(REPO_ROOT, "notebooks", name)
             self.assertTrue(os.path.exists(path), f"{name} is generated but not committed")
 
-    def test_the_excluded_notebook_is_still_excluded_for_a_reason(self):
+    def test_the_excluded_notebooks_are_still_excluded_on_purpose(self):
         """
-        If 07 ever becomes cheap enough to execute, this is the line to delete — but
-        silently dropping the exclusion while it is still expensive would slow every
-        push by an hour and a half.
+        If either ever becomes cheap enough to execute, these are the lines to delete —
+        but silently dropping the exclusion while they are still expensive would slow
+        every push by an hour and a half.
         """
         workflow = read(".github", "workflows", "lint.yml")
-        self.assertIn("07_running_a_search.ipynb", workflow,
-                      "notebook 07 must be named in the CI workflow, excluded or not")
+        for name in ("07_explaining_a_run.ipynb", "08_the_full_dem.ipynb"):
+            self.assertIn(name, workflow,
+                          f"{name} must be named in the CI workflow, excluded or not")
 
 
 class TestTheDocumentedPublicSurfaceIsReal(unittest.TestCase):

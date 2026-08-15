@@ -49,16 +49,16 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 - `oroscope-sensitivity`, which varies one parameter at a time and tabulates what moves.
 - Memory safeguards: a pre-flight estimate, an address-space cap, and subprocess
   isolation per sweep point.
-- Documentation: physics and assumptions pages, seven tutorial notebooks, and reproducible
-  figures in `src/figures.py`. The seventh drives the whole pipeline from Python and
-  carries the plan for the full Arequipa DEM run.
-
-- **A seventh notebook, and the full-DEM run scaffolded.** Notebook 7 drives the whole
-  pipeline from Python, then reads the stored full-Arequipa results rather than
-  producing them — three searches at half an hour each, against CI that executes every
-  notebook on every push, is not a tutorial. `tools/run_arequipa_full.py` produces the
-  store locally into `results/arequipa_full/`; regenerate it when a configuration
-  changes. Configurations for both experiments over the full DEM are in `config/`.
+- Documentation: physics and assumptions pages, eight tutorial notebooks, and
+  reproducible figures in `src/figures.py`.
+- **Two more notebooks.** **7** drives the pipeline from Python and reads what it
+  says, about a run that finds ground and one that finds none — the empty result being
+  the case a bare results file serves worst. **8** is the full Arequipa DEM: it *reads*
+  stored results rather than producing them, since three searches at half an hour each,
+  against CI that executes every notebook on every push, is not a tutorial.
+  `tools/run_arequipa_full.py` produces that store locally into `results/arequipa_full/`;
+  regenerate it when a configuration changes. Configurations for both experiments over
+  the full DEM are in `config/`.
 
 ### Fixed
 - **A `geomagnetic` score component appeared in runs that had switched the weighting

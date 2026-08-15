@@ -1,7 +1,7 @@
 Tutorial notebooks
 ==================
 
-Seven worked notebooks live in `notebooks/
+Eight worked notebooks live in `notebooks/
 <https://github.com/mbustama/oroscope/tree/main/notebooks>`_, numbered in reading
 order. Each carries its figures inline, so they can be read on GitHub without being
 run, and each ends with links to the previous and next.
@@ -62,9 +62,23 @@ Two experiments
 Running one
 -----------
 
-`7. Running a whole search <https://github.com/mbustama/oroscope/blob/main/notebooks/07_running_a_search.ipynb>`_
-   The pipeline as an ordinary Python call: configuration as data, the memory
-   pre-flight, the results dictionary it hands back, the funnel and its binding
-   constraint, which sites are actually in the result, what held each one back, and
-   the run's own summary. Ends with the plan for the **full Arequipa DEM** — the run
-   that has never been done, with what to look at when it is.
+`7. Explaining a run <https://github.com/mbustama/oroscope/blob/main/notebooks/07_explaining_a_run.ipynb>`_
+   The pipeline as an ordinary Python call, and how to read what it says: configuration
+   as data, the memory pre-flight, the results dictionary it hands back, the funnel and
+   its binding constraint, which sites are actually in the result, why each one is good
+   and what held it back. Two searches — one that finds ground and one that finds none,
+   because the empty result is the case a bare results file serves worst.
+
+`8. The full Arequipa DEM <https://github.com/mbustama/oroscope/blob/main/notebooks/08_the_full_dem.ipynb>`_
+   The run that has never been done: GRAND alone, TAMBO alone, and the combination,
+   over the whole DEM rather than a crop. It **reads** results produced locally by
+   ``tools/run_arequipa_full.py`` rather than running the searches itself, and says
+   what to look at when they are run.
+
+.. note::
+
+   Notebooks 7 and 8 are not executed in CI. They drive whole searches, and 8 reads
+   stored full-DEM results that take about half an hour each to produce. They are run
+   locally when a configuration changes; ``tests/test_docs.py`` checks statically that
+   the API names they call still exist, which is the drift the execution would have
+   caught.

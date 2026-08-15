@@ -279,7 +279,7 @@ traffic*, not flops.
 8. **The full Arequipa DEM has never been run** — every number is from crops. Now
    **scaffolded and ready**: `config/{grand,tambo}_arequipa_full.json`,
    `python tools/run_arequipa_full.py` (GRAND, TAMBO, then the combination), and
-   notebook 7, which explains the result. `downsample_factor: 4`, ~25–30 min each,
+   notebook 8, which explains the result. `downsample_factor: 4`, ~25–30 min each,
    2.3 GiB estimated. The runner stores the small artefacts in `results/arequipa_full/`
    and the notebook reads them, so the searches are never re-run by CI. All that is
    missing is the hour. ROADMAP §6.26 lists what to look at when it happens.

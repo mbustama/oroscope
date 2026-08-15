@@ -39,7 +39,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 """
 
-# Notebook 7 draws nothing -- it is tables and prose -- so it must not import pyplot.
+# Notebooks 7 and 8 draw nothing -- tables and prose -- so they must not import pyplot.
 # `ruff check .` lints notebooks, and an unused import there fails CI like any other.
 PREAMBLE_NO_PLOT = """import os
 import sys
@@ -777,23 +777,26 @@ list, and it is deliberately blunt."""),
   derivation behind every criterion."""),
 ("md", """## Where to go next
 
-- **[7. Running a whole search](07_running_a_search.ipynb)** — driving the pipeline from
-  Python, reading what it hands back, and the plan for the full Arequipa DEM."""),
+- **[7. Explaining a run](07_explaining_a_run.ipynb)** — driving the pipeline from
+  Python, and reading what it says about a run that succeeds and one that does not.
+- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the run that has never been
+  done."""),
 ("md", footer(prev=("05_grand_and_tambo.ipynb", "GRAND and TAMBO"),
-              nxt=("07_running_a_search.ipynb", "Running a whole search"))),
+              nxt=("07_explaining_a_run.ipynb", "Explaining a run"))),
 ]
 
 # --------------------------------------------------------------------------- 07
 NB07 = [
-("md", """# 7. Running a whole search, and reading what comes back
+("md", """# 7. Explaining a run
 
 The earlier notebooks drive the pieces: the scan kernel, the physics, the score shapes.
 This one drives **the whole pipeline** — screen, scan, score, clean, label, pack, write
 — as an ordinary Python call, and then reads the result properly.
 
-It is also the place the **full Arequipa DEM** run belongs. That run is at the end,
-guarded so this notebook still executes without the DEM, which is gitignored and a
-quarter of a gigabyte.
+Two searches are run below — one that finds ground and one that finds none — because
+the summary of an empty result is the one that matters most and is the easiest to
+neglect. The full Arequipa DEM has its own notebook,
+**[8](08_the_full_dem.ipynb)**.
 
 Three things are worth knowing before the first call:
 
@@ -806,7 +809,6 @@ Three things are worth knowing before the first call:
 ("code", PREAMBLE_NO_PLOT + """
 import contextlib
 import io
-import json
 import tempfile
 
 import explain
@@ -1065,12 +1067,76 @@ print(f"python:   {prov['platform']['python']} on {prov['platform']['system']}")
 print(f"packages: {', '.join(f'{k} {v}' for k, v in list(prov['packages'].items())[:4])}, ...")"""),
 ("md", """---
 
-## The full Arequipa DEM
+## The other outcome: a search that finds nothing
+
+A summary of a successful run is the easy case. The one that matters is the run that
+comes back empty, because that is when a reader has no idea what to change — and it is
+the case a bare results file serves worst: every section is zero and nothing says why.
+
+Here is the same terrain asked an impossible question. The distance window is moved out
+past anything this ridge can offer, so no arrival direction can be accepted."""),
+("code", """empty = ss.find_grand_regions_interactive(
+    dem_path=dem,
+    run_output_dir=os.path.join(WORK, "empty"),
+    search_mode="distributed", grid_type="hex",
+    target_antennas=200, min_sub_array_size=20,
+    min_width_km=1.0, antenna_spacing_km=1.0,
+    min_dist_km=60.0, max_dist_km=90.0,      # further than this terrain reaches
+    downsample_factor=2, tile_size=256, candidate_stride=5, num_cores=2,
+    explain=False,                            # composed below instead, to keep this tidy
+)
+
+print(f"sites: {empty['results']['total_sites']}")
+print(f"capacity: {empty['results']['total_capacity']}\\n")
+for stage, count in empty["funnel"].items():
+    print(f"   {stage:<34} {count:>12,}")"""),
+("md", """The funnel is the whole answer, and the summary reads it: the stage where the count
+reaches zero *is* the constraint, and everything downstream of it is zero for a reason
+that is not its own. A stage that empties the map wins outright over any ratio below
+it, which is why the report names that one rather than the largest percentage drop."""),
+("code", """binding = explain.binding_constraint(empty["funnel"])
+print(f"stage:      {binding['stage']}")
+print(f"reached it: {binding['before']:,} pixels")
+print(f"survived:   {binding['survivors']:,}")
+print(f"fatal:      {binding['fatal']}")
+print(f"change:     {binding['knob']}")"""),
+("md", """And the summary in full. Note what it does *not* do: it does not apologise, and it does
+not pad. It states the outcome, names the stage, names the parameter, and then tells you
+what to try — which for an empty result is the only useful thing a report can say."""),
+("code", """print(explain.explain_results(empty))"""),
+("md", """Compare the two summaries. The successful one describes ground; this one describes a
+constraint. Both are the same function reading the same shape of dictionary — which is
+the point of keeping it a pure function of the results rather than something the
+pipeline prints as it goes."""),
+("md", """## Where to go next
+
+- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the run that has never been
+  done, and what to look at when it is.
+- **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — how firm any
+  of this is."""),
+("md", footer(prev=("06_combining_and_sensitivity.ipynb", "Combining and sensitivity"),
+              nxt=("08_the_full_dem.ipynb", "The full Arequipa DEM"))),
+]
+
+# --------------------------------------------------------------------------- 08
+NB08 = [
+("md", """# 8. The full Arequipa DEM
 
 Every number this project has published comes from **crops** — Colca, and small Arequipa
-windows. The full DEM is the run that has never been done, and this is where it lands.
+windows. The full DEM is the run that has never been done, and this notebook is where it
+lands.
 
-**Read, not run.** The cells below open results that were produced locally and stored in
+[Notebook 7](07_explaining_a_run.ipynb) covers how to drive the pipeline and how to read
+what it says. This one is about one specific run, at a scale the crops cannot speak
+for."""),
+("code", """import json
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
+
+import explain"""),
+("md", """**Read, not run.** The cells below open results that were produced locally and stored in
 `results/arequipa_full/`. They do not start a search. Each of these searches takes about
 half an hour, CI executes notebooks on every push, and a tutorial costing ninety minutes
 of compute per commit is a bill rather than a tutorial. The expensive half runs once, on
@@ -1259,7 +1325,8 @@ NOTEBOOKS = {
     "04_criteria_and_scoring.ipynb": NB04,
     "05_grand_and_tambo.ipynb": NB05,
     "06_combining_and_sensitivity.ipynb": NB06,
-    "07_running_a_search.ipynb": NB07,
+    "07_explaining_a_run.ipynb": NB07,
+    "08_the_full_dem.ipynb": NB08,
 }
 
 
