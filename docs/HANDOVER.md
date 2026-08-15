@@ -1,365 +1,288 @@
-# Handover brief — GRAND / TAMBO site-search tool
+# Handover brief — Oroscope
 
 Written to be fed into a fresh session. It assumes no memory of the previous one.
 
-**Branch:** `dev`, 19 commits ahead of `main`, all pushed to `origin/dev`.
-**Head at handover:** `a7b4ec1`.
-**Tests:** 250, `unittest`, ~25 s, no dependencies beyond what the tool already needs.
+**Repository:** `mbustama/oroscope` (renamed from `site-search`; GitHub redirects the old
+name). Local path `~/Research/GRAND/oroscope`, with a `site_search` symlink left beside
+it for anything that still points at the old path — **delete it when convenient.**
 
-**Phase 3 has since been taken a second pass** — see §6.4 for which leads are done,
-which were measured and closed, and which remain. The headline conclusion is that the
-arrival scan is **not compute-bound**: four separate arithmetic optimisations of the
-inner loop have now failed to help, because the profile walk outweighs everything else
-in the kernel by 225:1. Further scan work has to reduce samples or memory traffic.
+**Branch:** `dev`, 39 commits ahead of `main`, all pushed. **Head at handover: `34887d9`.**
+**Tests:** 370, stdlib `unittest`, ~18 s. **CI:** 8 jobs, all green.
 
-**Before trusting any timing on this machine, read ROADMAP §6.12.** It is a hybrid
-CPU (2 P-cores + 8 E-cores) that runs at about a third of its rated clock under load,
-and the same unchanged code measured 43.6 s and 39.8 s in consecutive runs. A/B
-alternating inside one process, single-threaded, on a subsample.
+`main` is protected by a repository ruleset: no direct push, no force-push, no deletion,
+pull request required, seven status checks. **You cannot push to `main`** — work on `dev`
+and open a PR.
 
 ---
 
-## 1. What the tool does
+## 1. The immediate tasks
 
-It searches Digital Elevation Models of the Peruvian Andes for sites suitable for
-neutrino observatories. Originally GRAND-only (radio detection of air showers from
-Earth-skimming tau neutrinos); being generalised to cover TAMBO (particle detection
-across a deep canyon) and, eventually, other experiments.
+### 1.1 `--explain`, on by default
 
-The pipeline: screen terrain by slope/aspect/altitude/exclusion zones → scan arrival
-directions from each surviving pixel to find where a tau could exit and how much rock
-lies behind it → score the results → clean up morphologically → label sites and
-compute capacity → write GeoTIFF/KML/PNG/JSON.
+The owner asked for a human-readable summary of a run: *"here is what was found and
+why"*. Everything needed is already in the results JSON, but a reader has to assemble
+the story themselves, and these runs are meant to be handed to other people.
 
-```bash
-cd src && python site_searcher.py --config_path ../config/arequipa_config.json
-```
+**It must default to on.** The owner was explicit. Add `--no_explain` to suppress.
 
-## 2. Environment and machine
+What it should draw on, all of which already exists:
 
-- **Use the conda env `sssearch`**: `conda activate sssearch`. It has numba, scipy,
-  tifffile, imagecodecs, matplotlib, joblib, tqdm, psutil. It does **not** have pytest,
-  which is why the suite is stdlib `unittest`.
-- **Cap parallelism at 8 cores.** The machine has 12 but is shared; the owner asked
-  explicitly not to saturate it. `bench/benchmark.py` is pinned to 8 via `BENCH_CORES`.
-- A long-running job of the owner's (`m1_2nu.py`) is often at ~100% of one core.
-  **Check `uptime` before trusting any timing.** The benchmark harness prints a warning
-  when the 1-minute load average exceeds 1.0, and records it in `baseline.json`.
-- Real DEMs live in `input/dem/` (gitignored, ~250 MB). Tests that need them skip
-  automatically when absent.
+- the **funnel** (`results["funnel"]`) — survivors after each filter. The line where the
+  count collapses is the constraint responsible, and that is the single most useful
+  thing to say when a search returns little or nothing.
+- `results["regions"]` — labelled regions → past area threshold → past capacity
+  threshold → selected.
+- per-site records, already sorted by capacity, each with 34 `arrival_scan` fields
+  (mean/median/p90 of solid angle, exit distance, column depth, horizon, grammage,
+  Earth chord, altitude, far-wall slope, score and its named components).
+- `results["parameters"]` — every resolved knob, so the summary can name the ones that
+  did the work.
+- `provenance.json` — git commit, DEM sha256, package versions.
 
-## 3. Repo map
+Worth saying in the output, because they are the things a reader will otherwise get
+wrong: that **reported area is ~2.3× the physics-accepted area** (morphological
+closing, §5.2), that the score components are named so a weak site can be *attributed*,
+and which parameters are assumptions rather than measurements.
+
+Write it as a function that takes the results dict and returns a string, called by the
+CLI — not as printing scattered through the pipeline. That way the library gets it too
+(see §1.2) and it is testable without running a search.
+
+### 1.2 Everything the CLI can do, the library must do too
+
+The owner asked for full parity. Measured, the CLI flags with no
+`find_grand_regions_interactive()` equivalent are:
+
+| flag | status |
+| --- | --- |
+| `--max_memory_gb` | **A real gap.** Applied only in `main()`; a library user must call `apply_memory_cap()` themselves. |
+| `--nearest_sampling`, `--no_geomagnetic`, `--require_sky`, `--include_near_field`, `--no_print_info` | Fine — negative-form aliases whose positive form (`bilinear_sampling`, `use_geomagnetic`, `require_terrain`, `exclude_near_field`, `print_info`) is a library parameter. |
+| `--config_path`, `--config_preset`, `--generate_config`, `--output_directory_base_with_given_json` | CLI-level concerns, but a library user would reasonably want `load_config(path)` and `generate_config(path, preset)` as functions. Worth adding. |
+
+Also only in `main()` and worth moving into the library: the **pre-flight memory
+estimate and warning**, and the **origin resolution print**. Both are useful to anyone
+driving the pipeline in a loop.
+
+The pipeline function returns `None`. It writes files and the caller reads the JSON
+back. **Returning the results dict** would make the library genuinely usable and costs
+nothing — `tests/_support.py` and `sensitivity.py` both currently re-read the file it
+just wrote.
+
+---
+
+## 2. What does NOT need to be run again
+
+Read this before measuring anything. Several of these cost real time or crashed the
+machine.
+
+**Do not re-run:**
+
+- **The benchmark baseline.** `bench/baseline.json` was refreshed at head `34887d9` on a
+  quiet machine (1-minute load 0.89) and matches the current code. Only re-run after a
+  change that should move a stage timing, with `python bench/benchmark.py --update`.
+- **The Colca searches.** Both configs were run at this head; the outputs in
+  `output/grand_colca_config/`, `output/tambo_colca_config/` and
+  `output/combined_colca/` are current. Numbers in §5.
+- **The sensitivity sweeps.** Both the single-energy and the spectrum-folded sweeps are
+  recorded in `docs/ROADMAP.md` §6.20–6.21 with their tables. Re-running costs ~10
+  minutes and will reproduce them.
+- **The stride-1 control run.** `config/grand_colca_stride1.json` exists and its result
+  is recorded (§5.2): striding is unbiased, closing inflates 2.29×.
+- **The notebooks.** All six are committed *with their outputs*. Regenerate only if you
+  change `tools/make_notebooks.py`, and then re-execute — but note the trap in §3.
+- **DEM downloads.** `input/dem/` holds `arequipa_SRTMGL1.tif`, `lima_AW3D30.tif` and the
+  derived `colca.tif` crop. **The Arequipa DEM already covers Colca Canyon** — verified,
+  1673 m of incision against the published ~1.5 km. No new download is needed for either
+  experiment.
+
+**Do not re-derive:** everything in §6. Those are measured facts, several of which
+contradicted a confident prior.
+
+**Do not retry:** everything in §7. Those were tried and rejected with numbers.
+
+---
+
+## 3. Environment, machine, and three traps
+
+- **Use the conda env `sssearch`**: `conda activate sssearch`. It has numpy, scipy,
+  numba, tifffile, imagecodecs, matplotlib, tqdm, sphinx and the docs stack, coverage,
+  ruff, jupyter. It does **not** have pytest, which is why the suite is stdlib
+  `unittest`.
+- The package is installed editable (`pip install -e .`), so `import physics` works from
+  anywhere and the five console scripts (`oroscope`, `oroscope-combine`,
+  `oroscope-crop`, `oroscope-sensitivity`, `oroscope-fetch-dem`) are on `PATH`.
+- **Cap parallelism at 8 cores.** The machine has 12 but is shared.
+
+**Trap 1 — memory.** A ten-point sensitivity sweep once reached 6.9 GB and was killed by
+the OOM killer, taking other work with it. The cause was ours (a leaked matplotlib
+figure per run) and is fixed, but the safeguards matter: every run now prints an
+estimate against available memory, caps its own address space at 80% of available, and
+`sensitivity.py` runs each point in a subprocess. The machine has 15 GB with typically
+~6 free. **For the full DEM use `downsample_factor: 4`** — the estimator says 2.3 GiB
+against 4.5 GiB at `downsample_factor: 1`.
+
+**Trap 2 — timings are unreliable here.** It is a hybrid CPU: 2 P-cores (4.6 GHz, CPUs
+0–3) and 8 E-cores (3.4 GHz), running at about a third of rated clock under load. The
+same unchanged code measured 43.6 s and 39.8 s in consecutive runs. **A/B alternating
+inside one process, single-threaded, on a subsample.** See ROADMAP §6.12.
+
+**Trap 3 — forcing a matplotlib backend breaks image capture, silently.** This bit twice.
+Setting `MPLBACKEND=Agg` as an environment variable propagates into child kernels and
+overrides the inline backend, so notebooks stored no figures and documentation pages
+rendered figures as the text `<Figure size ...>`. Both built clean and reported no
+error. `conf.py` now uses `matplotlib.use('Agg')` — module-level, not inherited — and
+the docs carry a `%matplotlib inline` setup cell. **If you touch either, check that
+images are actually produced**, don't trust a green build.
+
+---
+
+## 4. Repo map
 
 | path | what |
 | --- | --- |
-| `src/site_searcher.py` | 2033 lines. Pipeline, CLI, screening, morphology, capacity, outputs. |
+| `src/site_searcher.py` | 3517 lines. Pipeline, CLI, screening, morphology, capacity, outputs, memory guards. |
 | `src/arrival_scan.py` | The scan kernel: profile walking, column depth, Fresnel, RFI line-of-sight. Numba. |
-| `src/physics.py` | Closed-form physics: atmosphere, Earth chord, tau range and exit probability, geomagnetic field, Cherenkov footprint. Pure Python/NumPy, no terrain. |
+| `src/physics.py` | Closed-form physics, no terrain: atmosphere, shower profile, Earth chord, tau range and decay, geomagnetic, Cherenkov. |
 | `src/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
 | `src/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
-| `src/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`; renamed with packaging. |
-| `src/generate_env.py` | AST-based conda env generator. |
-| `tests/` | 250 tests. `synthetic.py` builds terrain with closed-form answers. |
-| `bench/benchmark.py` | Per-stage timings and peak RSS on fixed cases, gated at 30% regression. |
-| `data/` | Hand-digitised published curves (GRAND Fig. 25, TAMBO Fig. 3). |
-| `docs/ROADMAP.md` | 1159 lines. The full record: physics review, every phase, every measurement. **Read it.** |
+| `src/combine_experiments.py` | Overlays two or more runs: joint, union, co-location. |
+| `src/crop_dem.py` | Cuts a lat/lon window out of a DEM. |
+| `src/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
+| `src/figures.py` | The publication figures, as functions returning `Figure`. |
+| `src/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
+| `tests/` | 370 tests. `synthetic.py` builds terrain with closed-form answers. |
+| `tools/make_notebooks.py` | Generates the six tutorials. Edit here, not the `.ipynb`. |
+| `docs/source/` | Sphinx. `physics.rst` derives the criteria; `assumptions.rst` is the blunt list of what the numbers rest on. |
+| `docs/ROADMAP.md` | ~1500 lines. The durable record: every phase, every measurement, every negative result. **Read §6.11, §6.12, §6.20–6.22.** |
+| `bench/benchmark.py` | Per-stage timings and peak RSS, gated at 30% regression. |
+| `config/` | `grand_colca_config.json`, `tambo_colca_config.json` (same crop, combinable), plus arequipa/lima and the stride-1 diagnostic. |
 
-## 4. Working conventions
+## 5. What the tool does now, and its current numbers
 
-These have worked well; please keep them.
+It screens a DEM by slope/aspect/altitude/exclusion zones, scans arrival directions from
+each survivor, scores against per-experiment criteria, cleans up morphologically, labels
+sites and places detectors on a lattice, then writes GeoTIFF/world file/KML/PNG/JSON plus
+a funnel and a provenance record.
 
-1. **Measure before optimising, and measure after.** Several confident hypotheses in
-   this project turned out to be wrong when measured (§7).
-2. **Every change that alters results gets quantified**, via the golden files, and the
-   delta goes in the commit message.
-3. **Negative results are recorded**, in `docs/ROADMAP.md`, so they are not retried.
-4. **Fixtures are verified before the code that uses them.** `tests/test_fixtures.py`
-   checks that the synthetic terrain has the geometry it claims.
-5. Regenerate goldens deliberately: `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
-6. Commit messages explain *why*, and state measured deltas.
-7. The roadmap is the durable record; update it in the same commit as the code.
+**GRAND and TAMBO are configurations, not code paths.** That was the phase 2 claim and it
+held: adding an experiment means writing a JSON file.
 
-## 5. State of each phase
+### 5.1 Colca, at this head
 
-**Phase 0 — foundations. Done.** Test harness, benchmarks, selection funnel (per-filter
-survivor counts, in the log and results JSON), provenance (git commit, DEM sha256,
-resolved parameters, package versions).
+| | area | sites | capacity | of its own area in the joint |
+| --- | --- | --- | --- | --- |
+| GRAND | 4580.2 km² | 1 | 5317 | 0.6% |
+| TAMBO | 44.5 km² | 15 | 9717 | 59.3% |
+| **joint** | 26.4 km² | | | |
+| **union** | 4598.3 km² | | | |
 
-**Phase 1 — physics core. Done, and beyond its original scope.** The engine scans
-(azimuth, elevation) arrival directions, finds the first terrain intersection, and
-integrates the sub-surface chord for column depth. Scores are composable with named
-components. Added along the way: geomagnetic weighting, atmospheric grammage, Earth
-chord, Cherenkov footprint, RFI line-of-sight shielding, muon shielding, an estimated
-production-and-escape optimum, and both published aperture curves digitised.
+**Co-location is decided by slope, not arrival geometry.** GRAND's 3–25° deployable band
+against Colca's ~40° walls leaves only a 20–25° sliver.
 
-**Phase 2 — generalisation. Not started.** See §8.
+### 5.2 Numbers to quote carefully
 
-**Phase 3 — performance. In progress, and the immediate task.** See §6.
-
-**Phase 4 — usability. Not started.** See §9.
-
----
-
-## 6. Phase 3 — the immediate task
-
-### 6.1 Where the time goes now
-
-End-to-end on a 2500² Arequipa crop, 8 cores, full physics:
-
-| stage | seconds | share |
-| --- | --- | --- |
-| arrival scan | 43.6 | **91%** |
-| morphology | 1.6 | 3% |
-| topographic screen | 0.7 | 1.5% |
-| capacity analysis | 0.8 | 1.5% |
-
-Phase 3 so far took the whole run from 82.0 s to 47.9 s (30.3 s if bilinear sampling
-is disabled). The full Arequipa DEM is ~20× the pixels, so roughly 15 minutes.
-
-### 6.2 Already tried and REJECTED — do not repeat
-
-| attempt | result |
-| --- | --- |
-| Whole-raster azimuthal sweep | Premise measured wrong. Locality penalty across azimuths is only **1.14×**, not the large effect assumed; the prefetcher handles a constant row stride and 8 threads hide the latency. Would buy ≤14% for a large rewrite that does not extend to a (θ,φ) scan with sub-surface chords. |
-| Hoisting the per-sample division | **Slower**, 24.5 s → 26.1 s. The division was already pipelined; the replacement needed two multiplies per sample for the horizon. |
-| Solving the ray's exit distance up front to drop the bounds test | ~5%, but broke 405 of 40,000 candidates. The bound is `(cols − c0)/dc_per_m`, not `(cols − 1 − c0)/dc_per_m`; reproducing `int()` truncation at every edge is error-prone. Not worth it. |
-| Shuffling candidates for load balance | Works (scaling 3.3× → 5.0×) but destroys locality; net ~10%. Superseded by block-dealing, which is what is in the code. |
-| Tabulating the scan's per-bin transcendentals (was lead (f), and more) | Bit-identical, measured **0.975×**. Reverted. |
-| Short-circuiting the histogram's bin search | Bit-identical, measured **0.992×**. Reverted. |
-| Tuning `numba.set_parallel_chunksize` | ~3% at 8 threads (8.44 s → 8.17 s). Block-dealing already handles the imbalance. |
-
-**The lesson from the last two is the important one:** per (candidate, azimuth) the bin
-loop runs 12 times and the profile walk runs ~2700 samples, a ratio of 225:1. Anything
-outside the walk is under 1% of the kernel. **The scan is not compute-bound** — do not
-spend more effort on flops per sample. See ROADMAP §6.11–6.12.
-
-### 6.3 Already delivered in Phase 3
-
-- **Separable morphology** — a rectangle of ones factorises into a column and a row,
-  so O(N(h+w)) not O(Nhw). Bit-identical. 10.5 s → 1.6 s.
-- **Slope-space scan loop** — all comparisons are monotonic in elevation angle, so
-  comparing against pre-computed tangents removes an arctangent per sample.
-- **Block-dealt candidate ordering** — `prange` schedules statically and candidates
-  arrive in spatial order, so threads got uniformly-short or uniformly-long work.
-  Dealing blocks of neighbours round-robin balances without losing locality. 31.3 → 23.3 s.
-- **Bilinear profile sampling** — accuracy fix that costs 1.44×. Changes acceptance by
-  +13.4%. `--nearest_sampling` opts out.
-- **Streaming DEM cache** — non-evictable memory 623 → 132 MiB, and now bounded by
-  block size rather than DEM size.
-- **Topographic screen in gradient space** — slope band tested as `tan²(min) ≤ dx²+dy²
-  ≤ tan²(max)`, and every filter after slope/altitude works on the surviving subset, so
-  `arctan2` is evaluated only where the aspect is read. Byte-identical candidates across
-  six filter configurations; 1.25× to 4.47× depending on how much the filters reject.
-- **Per-site passes made O(N)** — one `ndimage.mean`, one lookup-table recolouring and
-  one stable `argsort` grouping replace three O(sites × pixels) loops. Flat in the site
-  count: 0.78 s → 0.22 s at 100 sites, and 900 sites now costs the same as 16.
-- **A crash fixed on the way**: `labeled_viz` was `uint8`, so selecting a 256th site
-  raised `OverflowError` after the physics had already been paid for. Relevant to
-  TAMBO, whose layout is many small sub-arrays. Pinned by `TestManySites`.
-
-### 6.4 Leads — status
-
-**Done:** (a) screening transcendentals, (b) per-site `labeled == site_id`,
-(c) `summarize_observables_by_site`, (d) the unused `joblib` import, (f) azimuth
-sin/cos, (g) RFI zone masking — (f) measured neutral and was reverted; the rest are in.
-
-**Measured and closed without a change:** (e) the Fresnel pass is 6.5% of the scan
-(43.55 s → 46.57 s), not the large share suspected, so fusing it has a 6.5% ceiling.
-(i) multiprocessing — screening and morphology together are now ~3% of runtime.
-
-**Still open:** (h) fusing `uniform_filter` with `np.gradient` — note this only bites
-when `slope_baseline_m` is set, which the shipped configs do not set. (j) the two-pass
-DEM cache build, which is first-run latency rather than throughput. (k) an early exit
-in the walk, which is the one lead with real headroom left and is described below.
-
-The original text of the remaining leads follows.
-
-**(a) The screening stage computes `arctan`, `sqrt` and `arctan2` over every pixel.**
-`src/site_searcher.py:382-383`:
-```python
-slope  = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
-aspect = np.degrees(np.arctan2(-dx, dy)) % 360
-```
-The slope is used only for a band comparison. `min ≤ atan(√g) ≤ max` is equivalent to
-`tan²(min) ≤ dx²+dy² ≤ tan²(max)`, which needs neither `sqrt` nor `arctan`. And the
-aspect is only ever read at surviving pixels (`aspect[cr, cc]`), so `arctan2` could be
-evaluated on the masked subset instead of the whole tile. On a 2500² map that is tens
-of millions of transcendental calls avoided. This is the same trick already applied
-inside the scan kernel, not yet applied here.
-
-**(b) Per-site work is O(sites × pixels).** `src/site_searcher.py:962`
-`site_mask_ds = (labeled == site_id)` scans the whole downsampled array once per site,
-and `:992` `np.isin(labeled, final_selection_ids)` is similar. `find_objects` slices
-are already computed a few lines above — use them to restrict to each site's bounding
-box, or build a lookup table indexed by label.
-
-**(c) `summarize_observables_by_site` in `site_searcher.py` masks the full accepted
-array once per site.** Same O(S·N) pattern; a single pass with `np.bincount` over site
-ids would do it in one sweep.
-
-**(d) `joblib` is imported but unused.** `src/site_searcher.py:10` — `Parallel` and
-`delayed` were only needed by the legacy ray-caster, which was removed. Dropping the
-import (and the dependency, if nothing else needs it) is free.
-
-**(e) The Fresnel clearance pass re-walks the path for every accepted cell.**
-`arrival_scan._min_clearance_ratio`. It runs only for accepted directions, but with
-high acceptance that is most of them, and it duplicates the main walk's coordinate
-arithmetic. Fusing it into the main walk, or capping the number of directions it
-evaluates, is worth measuring — it is a plausible chunk of the 1.44× bilinear cost.
-
-**(f) `sin`/`cos` of the azimuth are recomputed per candidate per azimuth.** With
-`use_aspect=True` the azimuth is `aspect_i + offset_a`, so angle-addition from
-per-candidate `sin/cos(aspect)` and precomputed `sin/cos(offset)` would replace two
-transcendentals with four multiplies and two adds. Minor but cheap.
-
-**(g) RFI zone masking loops over zones with full-array operations per zone**
-(`get_candidates_chunked`). With a dozen zones that is a dozen passes; could be one.
-
-**(h) `terrain_derivatives` runs `uniform_filter` then `np.gradient`** — two passes
-over the block. A single convolution with the derivative-of-box kernel would do both.
-
-**(i) Multiprocessing.** Everything currently parallel uses Numba threads. The
-screening and morphology stages are tile-parallel and embarrassingly so, but are now a
-small share of runtime — measure before bothering. If the scan ever needs to scale past
-one machine's cores, splitting candidates across processes is straightforward since
-they share only the read-only DEM.
-
-**(j) `build_elevation_cache` writes a temporary raw file then converts it** — two
-passes over the disk. Decoding segment-by-segment and converting in one pass would
-halve the I/O, at the cost of dealing with tifffile's segment API.
-
-**(k) The scan walks to `max_range` always.** There is no early exit, and adding one
-is subtle: the depth histogram accumulates over the whole path, and the reported
-horizon would be truncated if the walk stopped early. If an early exit is attempted,
-be explicit about what it does to `horizon_deg`, which is a reported observable.
-
-### 6.5 Method that worked
-
-- Establish a baseline on a fixed input, then change one thing.
-- **Warm the JIT before timing.** A measurement that appeared to show a large memory
-  locality effect was JIT compilation in the first case. This cost real effort.
-- Check correctness against the previous implementation on a large sample, not just
-  the unit tests — several of these changes are numerically subtle.
-- Beware the machine's load average.
+- **Reported area is ~2.29× the physics-accepted area.** Morphological closing, measured
+  with a stride-1 control. GRAND's 4580 km² corresponds to ~2120 km² actually accepted.
+- **Candidate striding is unbiased** — acceptance identical at strides 1 and 5, and the
+  stride-corrected area matches the stride-1 truth to 0.05%.
+- **TAMBO's capacity now varies by 1.46× across a plausible spectral index**, having
+  varied without bound (10878 → 0) when the decay was evaluated at a single energy.
+  `min_score` is now the dominant assumption at 2.38× to 0.20×.
 
 ---
 
-## 7. Key measured facts
-
-Do not re-derive these; they are in `docs/ROADMAP.md` with context.
+## 6. Key measured facts — do not re-derive
 
 | finding | value |
 | --- | --- |
 | Slope depends on measurement baseline | median 17.8° at ~61 m, 10.8° at 1 km |
-| Single-azimuth ray under-accepted | rejected 2.2× more than it accepted |
-| Morphological closing inflates area | reported area was ~18× the physics-validated area |
-| Capacity over-count from integer stamping | +7.4% at 1 km spacing, **+58% at 100 m** |
+| Morphological closing inflates area | **2.29×**, measured at stride 1 |
+| Candidate striding | unbiased; stride-5 matches stride-1 area to 0.05% |
+| Capacity over-count, integer stamping | +7.4% at 1 km, **+58% at 100 m** — fixed |
+| Capacity over-count, bounding box vs region | **+38%** on a canyon network, 2.07× synthetic — fixed |
 | The ±3° window sits below the horizon almost everywhere | median horizon 7.3° |
 | Geomagnetic asymmetry | east-facing targets worth 3.7× north-facing |
-| Shower maturity at Arequipa | 1.07 × X_max |
-| Antennas across the radio footprint at 1 km spacing | 0.38 |
-| Production-and-escape optimum | 12 km of rock at 100 PeV rising to 23 km at 10 EeV |
-| Earth absorption cuts the window | −4.4° at 100 PeV, −2.0° at 1 EeV, −0.9° at 10 EeV |
+| Earth absorption narrows the window | −4.4° at 100 PeV, −2.0° at 1 EeV, −0.9° at 10 EeV |
+| Colca crossing supplies | ~170 g/cm² across 2 km, ~390 across the full 4.5 km |
+| Shower maximum needs | 561 g/cm² at 3 PeV, 700 at 1 EeV |
+| Tau decay length | 147 m at 3 PeV, 49 km at 1 EeV |
+| Bilinear vs nearest sampling | acceptance +13.4%, 1.44× cost |
 | Azimuth locality penalty | 1.14× (the sweep premise, measured and rejected) |
-| Bilinear vs nearest sampling | acceptance +13.4%, 9.8% of candidates flip |
+| Scan thread scaling | 1.85× at 2 threads, **3.70× at 8** — hardware, not scheduling |
+| Far-wall slope recovered at Colca | 34.7–44.3°, median 38.6°, against a published ~40° |
 
----
+## 7. Tried and REJECTED — do not repeat
 
-## 8. Phase 2 — generalisation (after Phase 3)
-
-The goal the owner set at the outset: make the tool serve more than GRAND, and combine
-criteria across experiments.
-
-**The unifying observation:** GRAND and TAMBO ask the same structural question — *from
-this patch of ground, is there a target surface at the right range, in the right
-direction, at the right relative orientation, with the right matter behind it?* They
-differ in numbers, not structure. One scan engine already answers both.
-
-**Proposed layering:** terrain → criteria (local and view) → experiment spec (YAML) →
-region/layout → combination (`all` / `any` / weighted, plus *joint* vs *union* and a
-co-location report).
-
-**Known blocker, must be fixed first.** `count_grid_capacity` stamps integer strides,
-which over-counts capacity by **+58% at TAMBO's 100 m spacing** — only ~3 pixels span
-one detector separation on a 30 m DEM, and three separate `int()` truncations compound.
-TAMBO capacity must come from usable area and wall geometry analytically, or from a
-resampled grid. Characterisation tests already pin the current behaviour in
-`tests/test_capacity.py`; they will fail loudly when it is fixed, which is intended.
-
-**Channels to support**, from the owner's guidance:
-
-| channel | accepted arrival directions |
+| attempt | result |
 | --- | --- |
-| GRAND neutrinos | −3° to +3° about the horizon |
-| GRAND cosmic rays | above the horizon, unless a nearby mountain blocks |
-| TAMBO | facing a canyon |
+| Whole-raster azimuthal sweep | Premise measured wrong; locality penalty only 1.14×. |
+| Hoisting the per-sample division | **Slower**, 24.5 → 26.1 s. |
+| Solving the ray's exit distance up front | ~5% but broke 405 of 40,000 candidates. |
+| Tabulating the scan's per-bin transcendentals | Bit-identical, **0.975×**. Reverted. |
+| Short-circuiting the histogram's bin search | Bit-identical, **0.992×**. Reverted. |
+| Tuning `numba.set_parallel_chunksize` | ~3%. Block-dealing already handles it. |
 
-The cosmic-ray channel **inverts** the test — terrain is an obstruction, not a target —
-and `require_terrain=False` already expresses that in the same kernel. Any framework
-that cannot express both GRAND channels from one scan is not general enough.
+**The lesson:** per (candidate, azimuth) the bin loop runs 12 times and the profile walk
+~2700, a ratio of 225:1. **The scan is not compute-bound.** Four separate arithmetic
+optimisations returned nothing. Anything further must reduce *samples* or *memory
+traffic*, not flops.
 
-**TAMBO parameters** (ref. [2] and owner guidance): 5,000 detection units, 100 m
-spacing to start (published nominal is 150 m), triangular grid, Colca Canyon ~1.5 km
-deep with ~4.5 km between valley sides, τ range in the valley 50 m – 5 km, shower
-3–10 km long and 200 m across, energy reach ~3 PeV – 1 EeV.
+## 8. Working conventions — please keep
 
-Two consequences already established: Colca's walls are ~40°, well outside GRAND's
-3–25° deployable band, so **the slope criterion must be per-experiment and probably
-per-role** (the far wall wants to be steep, the near wall deployable); and 5,000 units
-at 150 m need ~97 km² of wall, i.e. a long strip rather than a compact blob, which the
-current `min_width_km` opening would destroy. **Layout models must be per-experiment.**
+1. **Measure before optimising, and after.** Several confident hypotheses here were wrong.
+2. **Run examples, don't read them.** Eight docstring examples were plausible, close, and
+   wrong; every one was caught by executing it. `tests/test_doctests.py` runs them all.
+3. **Negative results go in `docs/ROADMAP.md`** so they are not retried.
+4. **Fixtures are verified before the code that uses them** (`tests/test_fixtures.py`).
+5. Regenerate goldens deliberately: `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
+6. Commit messages explain *why* and state measured deltas.
+7. The roadmap is updated in the same commit as the code.
+8. **A failing test is more often a wrong test than wrong code** — it has been, six times
+   here. The recurring cause is forgetting that a detector on the ground has every steep
+   downward direction blocked by the ground at its feet.
 
-Also for TAMBO: no Fresnel term, no geomagnetic dependence, footprint set by lateral
-particle spread, and `--grammage_mode particle` (the band, not the radio threshold),
-because particle content dies after shower maximum whereas radio simply propagates.
+## 9. Remaining work, ranked
 
----
+**Physics**
+1. **The detector acceptance `A(E)` is not modelled.** An event rate is
+   ∫Φ(E)·A(E)·P(E)dE; the weight used is the flux alone. *Partially doable now*: both
+   published curves are in `data/` and `aperture.infer_response()` divides one by our
+   geometric model to recover everything else. A better weight than flat, but it
+   inherits the published site's geometry.
+2. **`min_score` is the dominant assumption.** `--score_percentile` and
+   `--stop_at_target` now exist as rank-based alternatives; the configs still use the
+   absolute cut. Consider switching them.
+3. Column depth is still bounded by the walk unless `max_range_km` is set.
+4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
+5. β, the tau energy-loss constant, is an estimate (0.4–1.0×10⁻⁶). Needs a collaboration
+   value.
+6. Geomagnetic **declination** does not follow the site (inclination does). Needs IGRF.
 
-## 9. Phase 4 — usability (sketch)
+**Verification**
+7. **Nothing has been checked against an external simulation.** The Earth-absorption
+   prediction in §6 is the cheapest such test and is ready for someone to run.
+8. **The full Arequipa DEM has never been run** — every number is from crops. The owner
+   wants this *after* `--explain`. Use `downsample_factor: 4`; expect ~25–30 min.
 
-- **Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint.** Verified present
-  and matching the current configs to ~1e-4°. Removes the most error-prone input.
-- ~~Rename `src/setup.py`~~ — done; it is now `src/fetch_dem.py`.
-- Real packaging: `pyproject.toml`, console entry points, pinned env including `imagecodecs`.
-- rasterio/pyproj for CRS and outputs, retiring the hand-written `.tfw`.
-- `--explain` funnel report; parameter sweeps with a sensitivity table.
-- Revisit the config > fallback > **CLI** precedence — CLI losing to a config file is
-  the reverse of what users expect.
-
----
+**Software**
+9. `--explain` — §1.1.
+10. CLI/library parity — §1.2.
+11. The pipeline still requires `cd src` for relative config paths.
+12. No release: nothing on PyPI, Pages not yet deployed (the workflow exists and fires
+    from `main`), so several README badges are dark by design.
 
 ## 10. Open questions for the owner
 
-1. **IGRF field values per site.** Inclination now follows the DEM's own coordinates via
-   a dipole model; declination still falls back to the Arequipa IGRF value (−6.9°) and
-   should be supplied per site. The dipole is unreliable for declination (−0.2° vs a
-   measured −6.9° at Arequipa) and is deliberately not used for it.
-2. **β, the tau energy-loss constant.** Estimated at (0.4–1.0)×10⁻⁶ cm²/g from mass
-   scaling, with an assumed energy dependence `0.6×10⁻⁶ (E/1 EeV)^0.20`. Worth pinning
-   to whatever the collaboration uses; it moves the optimum in proportion, though not
-   the siting conclusion.
-3. **Neutral-current regeneration** is not modelled — only charged-current attenuation —
-   so the Earth-chord suppression is somewhat overstated.
+1. **IGRF declination per site.** Inclination follows the DEM's coordinates via a dipole;
+   declination falls back to Arequipa's −6.9°. The dipole is unreliable for declination
+   (−0.2° against a measured −6.9°) and is deliberately not used for it.
+2. **β**, as above.
+3. **The TAMBO assumptions**, all flagged in `config/tambo_colca_config.json` and
+   `docs/source/assumptions.rst`: the 20–60° near-wall band, the 25° far-wall floor, the
+   ±20° arrival window, the 0.1 shower-content fraction, γ = 2.0, and `min_score` 0.35.
 4. **A prediction worth checking against the collaboration's own acceptance:** the
    effective arrival window should narrow with energy, its lower edge climbing from
    −4.4° at 100 PeV to −0.9° at 10 EeV. If their simulated window does not narrow that
    way, one of the two treatments has the absorption wrong.
-
----
-
-## 11. Lessons worth carrying forward
-
-- **My confident hypotheses were wrong more than once.** The memory-locality premise
-  for the sweep, the flat-with-energy optimum, the harmonic tau range, the claim that
-  grammage should be scored as a band for radio. Each survived until measured or
-  re-derived. Measure or derive; do not assert.
-- **Failing tests were more often wrong tests than wrong code** — four separate times.
-  The recurring cause was forgetting that a detector on the ground has every downward
-  direction blocked by the ground at its own feet. When a test fails, check the test's
-  premise before the code.
-- **A rewrite fixed a bug nobody was looking for**, twice: the slope-space rewrite
-  exposed an `int()` truncation that counted terrain below the acceptance window, and
-  the physics re-derivation found the τ range formula was wrong. Rewrites are worth
-  doing partly for this.
-- **The benchmark harness's load warning earns its keep.** A "regression" in morphology
-  turned out to be the owner's own job competing for CPU.
+5. **A logo.** A design brief was written for it; `docs/source/_static/` is where it goes,
+   and `conf.py` has `html_logo` commented out ready for it.
