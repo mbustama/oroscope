@@ -117,6 +117,15 @@ samples one pixel in five. The same control run gives acceptance of 60.1% at bot
 strides, and the stride-corrected area matches the stride-1 truth to 0.05%, so this
 costs nothing and saves five sixths of the scan.
 
+**But that was measured with a 1 km closing element, and does not transfer to a small
+one.** Each run's own funnel gives the closing factor directly, as closed pixels over
+stride-corrected accepted pixels. For GRAND at Colca it gives 2.19× — an independent
+check on the 2.29× above, agreeing to 4%. For TAMBO it gives **0.53×**: a 100 m element
+is about three pixels, too small to bridge the gaps ``candidate_stride: 5`` leaves, so
+the reported area *understates* the accepted set instead of inflating it. Until a
+stride-1 control is run at TAMBO's settings, treat TAMBO areas as a lower bound. The
+run summary reports whichever case applies.
+
 **Area and capacity are measured on different grids.** Per-site ``area_km2`` comes from
 the downsampled map, capacity from the full-resolution mask. At ``downsample_factor``
 greater than 1 a feature only a few pixels wide loses area it keeps detectors on — for

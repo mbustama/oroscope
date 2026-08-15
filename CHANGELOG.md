@@ -41,6 +41,11 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   figures in `src/figures.py`.
 
 ### Fixed
+- **`oroscope-combine` read a stale mask.** It took the alphabetically first `.tif` in
+  a run directory, and the pre-rename `grand_search_results_*` prefix sorts before
+  `oroscope_results_*` — so a re-run directory was overlaid using its superseded mask,
+  silently. Corrected Colca figures: TAMBO 44.5 → **83.6 km²**, joint 26.4 → **50.1
+  km²**, union 4598.3 → **4613.7 km²**. GRAND's own numbers are unchanged.
 - **Capacity was over-counted twice.** Integer pixel stamping inflated it by 7.4% at
   1 km spacing and 58% at 100 m; and capacity was counted over each site's *bounding
   box*, which also contains other sites — 38% on a canyon network, 2.07× on a synthetic

@@ -98,10 +98,24 @@ def load_run(run_dir: str) -> dict:
         If no mask GeoTIFF is found, or if the world file beside it is missing --
         without which alignment cannot be confirmed.
     """
-    tifs = sorted(glob.glob(os.path.join(run_dir, "*.tif")))
-    if not tifs:
-        raise SystemExit(f"no mask GeoTIFF found in {run_dir}")
-    tif = tifs[0]
+    # By prefix, not alphabetically. A directory re-run since the rename holds both
+    # `oroscope_results_*.tif` and a stale `grand_search_results_*.tif`, and the
+    # legacy name sorts first -- so taking tifs[0] silently overlaid an old mask
+    # against a current one. Measured: it reported TAMBO at Colca as 44.5 km2 from a
+    # superseded 48,663-pixel mask, against 83.6 km2 for the run it claimed to
+    # describe. Nothing failed; the number was simply wrong.
+    tif = None
+    for prefix in (ss.RESULTS_PREFIX, ss.LEGACY_RESULTS_PREFIX):
+        found = sorted(glob.glob(os.path.join(run_dir, prefix + "*.tif")))
+        if found:
+            tif = found[0]
+            break
+    if tif is None:
+        # An unprefixed mask is still a mask; only fall back once the named ones fail.
+        loose = sorted(glob.glob(os.path.join(run_dir, "*.tif")))
+        if not loose:
+            raise SystemExit(f"no mask GeoTIFF found in {run_dir}")
+        tif = loose[0]
     base = os.path.splitext(tif)[0]
     tfw = base + ".tfw"
     if not os.path.exists(tfw):

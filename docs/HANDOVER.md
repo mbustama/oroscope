@@ -15,6 +15,12 @@ and open a PR.
 
 ---
 
+> **Status update.** Both immediate tasks in §1 are **delivered** — see `docs/ROADMAP.md`
+> §6.23 (`--explain`) and §6.24 (CLI/library parity). Doing so turned up a bug in
+> `oroscope-combine` that makes **the §5.1 table below wrong for TAMBO**; the corrected
+> numbers are in that table and in ROADMAP §6.23b. §1 is kept as the record of what was
+> asked for.
+
 ## 1. The immediate tasks
 
 ### 1.1 `--explain`, on by default
@@ -169,12 +175,17 @@ held: adding an experiment means writing a JSON file.
 
 ### 5.1 Colca, at this head
 
+**Corrected.** The figures first written here came from `oroscope-combine` reading a
+stale mask — it took the alphabetically first `.tif`, and the pre-rename
+`grand_search_results_*` prefix sorts before `oroscope_results_*`. Fixed; see ROADMAP
+§6.23b. GRAND's own numbers were unaffected.
+
 | | area | sites | capacity | of its own area in the joint |
 | --- | --- | --- | --- | --- |
-| GRAND | 4580.2 km² | 1 | 5317 | 0.6% |
-| TAMBO | 44.5 km² | 15 | 9717 | 59.3% |
-| **joint** | 26.4 km² | | | |
-| **union** | 4598.3 km² | | | |
+| GRAND | 4580.2 km² | 1 | 5317 | 1.1% *(was 0.6%)* |
+| TAMBO | **83.6 km²** *(was 44.5)* | 15 | 9717 | 59.9% *(was 59.3%)* |
+| **joint** | **50.1 km²** *(was 26.4)* | | | |
+| **union** | **4613.7 km²** *(was 4598.3)* | | | |
 
 **Co-location is decided by slope, not arrival geometry.** GRAND's 3–25° deployable band
 against Colca's ~40° walls leaves only a 20–25° sliver.
@@ -265,8 +276,8 @@ traffic*, not flops.
    wants this *after* `--explain`. Use `downsample_factor: 4`; expect ~25–30 min.
 
 **Software**
-9. `--explain` — §1.1.
-10. CLI/library parity — §1.2.
+9. ~~`--explain`~~ — done, ROADMAP §6.23.
+10. ~~CLI/library parity~~ — done, ROADMAP §6.24.
 11. The pipeline still requires `cd src` for relative config paths.
 12. No release: nothing on PyPI, Pages not yet deployed (the workflow exists and fires
     from `main`), so several README badges are dark by design.

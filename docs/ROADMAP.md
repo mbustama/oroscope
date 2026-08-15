@@ -1653,6 +1653,36 @@ GRAND's 1 km element and does not transfer to TAMBO's 100 m.** A stride-1 contro
 TAMBO settings would settle it; until then TAMBO areas are a lower bound, not an upper
 one, and the summary says so.
 
+### 6.23b `oroscope-combine` was reading a stale mask ⚠️ found by accident, numbers changed
+
+Found while checking that the run summary's area agreed with the combined report's: it
+did not. The summary said TAMBO covered 83.6 km², the combined report said 44.5.
+
+`combine_experiments.load_run` took `sorted(glob("*.tif"))[0]`. A directory re-run
+since the rename holds both `oroscope_results_*.tif` and a stale
+`grand_search_results_*.tif`, and **the legacy prefix sorts first** — so the overlay
+used a superseded 48,663-pixel TAMBO mask against a current GRAND one. Nothing failed
+and nothing warned; the report simply described a run that no longer existed. Now it
+selects by prefix, current first, falling back to the legacy name and then to any
+`.tif`, so a pre-rename directory still loads. `tests/test_combine.py` pins it, and
+fails against the old behaviour.
+
+**The Colca combination numbers change. The §5.1 table in the handover brief is wrong
+for TAMBO:**
+
+| | before (stale mask) | corrected |
+| --- | --- | --- |
+| TAMBO area | 44.5 km² | **83.6 km²** |
+| joint (GRAND & TAMBO) | 26.4 km² | **50.1 km²** |
+| union | 4598.3 km² | **4613.7 km²** |
+| TAMBO's own area in the joint | 59.3% | **59.9%** |
+| GRAND's own area in the joint | 0.6% | **1.1%** |
+
+GRAND's own figures are unchanged (4580.2 km², 1 site, 5317) — its stale file happened
+to hold an identical mask, which is why the fault stayed hidden. The conclusion is
+unchanged too: co-location is still decided by slope, and the shared sliver is still a
+percent of GRAND's area. But the shared area is nearly double what was reported.
+
 ### 6.24 CLI/library parity ✅ delivered
 
 Measured, then closed. The pipeline function is now what the command line calls, not a
