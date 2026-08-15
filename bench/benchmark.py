@@ -38,15 +38,14 @@ BENCH_CORES = 8
 REGRESSION_FACTOR = 1.30
 
 
-def warm_up_jit(tmp, n_jobs):
+def warm_up_jit(tmp):
     """
-    Compiles the numba kernels before timing starts, in the processes that will use them.
+    Compiles the numba kernels before timing starts.
 
-    The ray-caster runs inside joblib workers, so compiling it in the parent does not
-    help: the first timed case would still absorb ~0.9 s of worker-side compilation and
-    report it as ray-tracing. Driving one tiny job through the real parallel path
-    compiles it where it is needed. Note that a real invocation always pays this cost
-    once — joblib's pool only persists within a single process.
+    Without this the first timed case absorbs the compilation and reports it as scan
+    time, which is how an earlier measurement came to look like a large memory-locality
+    effect. Everything now runs in-process under numba's own threads, so compiling here
+    is enough; a real invocation still pays the cost once per run.
     """
     import numpy as np
     from _support import ss
@@ -64,20 +63,25 @@ def warm_up_jit(tmp, n_jobs):
 
 def check_machine_is_quiet():
     """
-    Warns when other work is competing for the CPU.
+    Warns when other work is competing for the CPU, and returns the load it saw.
 
     Timings are only comparable against a baseline measured under similar conditions;
     an unrelated job at full tilt can double a single-threaded stage and read as a
     regression in code that did not change.
+
+    The value is returned so that ``--update`` can record the load *before* the run.
+    Sampling it afterwards instead recorded the benchmark's own load — always around 3
+    on this box — which made the field useless for the one thing it is there for.
     """
     try:
         load1 = os.getloadavg()[0]
     except (OSError, AttributeError):               # pragma: no cover
-        return
+        return None
     if load1 > 1.0:
         print(f"   WARNING: 1-minute load average is {load1:.2f}. Other work is competing "
               f"for the CPU, so these timings are not comparable with a baseline taken "
               f"on an idle machine.\n")
+    return load1
 
 
 def peak_rss_mb():
@@ -169,13 +173,13 @@ def main():
         with open(BASELINE) as f:
             baseline = json.load(f).get("cases")
 
-    check_machine_is_quiet()
+    load_at_start = check_machine_is_quiet()
 
     tmp = tempfile.mkdtemp(prefix="sitesearch_bench_")
     current = {}
     try:
         print("warming up JIT ...", flush=True)
-        warm_up_jit(tmp, n_jobs=BENCH_CORES)
+        warm_up_jit(tmp)
         for name, builder, params, is_large in CASES:
             if args.quick and is_large:
                 continue
@@ -194,12 +198,15 @@ def main():
         with open(BASELINE, "w") as f:
             json.dump({
                 "note": ("Cold-cache runs. Regenerate with: python bench/benchmark.py --update. "
-                         "Check host.load_average_1min: a baseline taken on a busy "
-                         "machine is inflated and will hide real regressions."),
+                         "Check host.load_average_1min_at_start: a baseline taken on a "
+                         "busy machine is inflated and will hide real regressions. Note "
+                         "this host is a hybrid CPU whose wall times vary by ~10% between "
+                         "identical runs; see docs/ROADMAP.md 6.12 before reading much "
+                         "into a single comparison."),
                 "host": {"platform": platform.platform(), "python": platform.python_version(),
                          "cpu_count": os.cpu_count(), "bench_cores": BENCH_CORES,
-                         "load_average_1min": round(os.getloadavg()[0], 2)
-                         if hasattr(os, "getloadavg") else None},
+                         "load_average_1min_at_start": (round(load_at_start, 2)
+                                                        if load_at_start is not None else None)},
                 "cases": current,
             }, f, indent=2, sort_keys=True)
         print(f"\nbaseline written to {BASELINE}")

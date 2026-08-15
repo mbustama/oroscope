@@ -11,13 +11,13 @@
         "pixels in selected sites (est.)": 5906720,
         "slope 3.0-25.0 deg": 3776685
       },
-      "peak_rss_mb": 654.4,
+      "peak_rss_mb": 650.3,
       "timings_sec": {
-        "capacity_analysis": 0.3875,
-        "load_dem": 0.0672,
-        "morphology": 1.1523,
-        "ray_tracing": 28.9825,
-        "topographic_screen": 0.6672
+        "capacity_analysis": 0.2201,
+        "load_dem": 0.0488,
+        "morphology": 0.6008,
+        "ray_tracing": 14.0754,
+        "topographic_screen": 0.2404
       },
       "total_capacity": 6685,
       "total_sites": 1
@@ -33,13 +33,13 @@
         "pixels in selected sites (est.)": 742228,
         "slope 3.0-25.0 deg": 580129
       },
-      "peak_rss_mb": 645.9,
+      "peak_rss_mb": 643.3,
       "timings_sec": {
-        "capacity_analysis": 0.0887,
-        "load_dem": 0.0145,
-        "morphology": 0.3145,
-        "ray_tracing": 3.0915,
-        "topographic_screen": 0.1221
+        "capacity_analysis": 0.0281,
+        "load_dem": 0.0101,
+        "morphology": 0.0937,
+        "ray_tracing": 1.1993,
+        "topographic_screen": 0.0303
       },
       "total_capacity": 859,
       "total_sites": 1
@@ -55,13 +55,13 @@
         "pixels in selected sites (est.)": 1129260,
         "slope 3.0-25.0 deg": 2773800
       },
-      "peak_rss_mb": 481.2,
+      "peak_rss_mb": 471.0,
       "timings_sec": {
-        "capacity_analysis": 0.1068,
-        "load_dem": 0.0414,
-        "morphology": 0.519,
-        "ray_tracing": 14.4073,
-        "topographic_screen": 0.1685
+        "capacity_analysis": 0.0609,
+        "load_dem": 0.0407,
+        "morphology": 0.2834,
+        "ray_tracing": 5.6182,
+        "topographic_screen": 0.1067
       },
       "total_capacity": 1287,
       "total_sites": 2
@@ -77,13 +77,13 @@
         "pixels in selected sites (est.)": 520260,
         "slope 3.0-25.0 deg": 576900
       },
-      "peak_rss_mb": 344.3,
+      "peak_rss_mb": 340.8,
       "timings_sec": {
-        "capacity_analysis": 0.2203,
-        "load_dem": 0.014,
-        "morphology": 0.1557,
-        "ray_tracing": 5.2399,
-        "topographic_screen": 0.0661
+        "capacity_analysis": 0.1439,
+        "load_dem": 0.0126,
+        "morphology": 0.0822,
+        "ray_tracing": 2.6827,
+        "topographic_screen": 0.0256
       },
       "total_capacity": 611,
       "total_sites": 2
@@ -92,9 +92,9 @@
   "host": {
     "bench_cores": 8,
     "cpu_count": 12,
-    "load_average_1min": 8.29,
+    "load_average_1min_at_start": 0.86,
     "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
     "python": "3.12.12"
   },
-  "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update. Check host.load_average_1min: a baseline taken on a busy machine is inflated and will hide real regressions."
+  "note": "Cold-cache runs. Regenerate with: python bench/benchmark.py --update. Check host.load_average_1min_at_start: a baseline taken on a busy machine is inflated and will hide real regressions. Note this host is a hybrid CPU whose wall times vary by ~10% between identical runs; see docs/ROADMAP.md 6.12 before reading much into a single comparison."
 }
