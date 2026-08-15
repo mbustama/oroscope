@@ -29,6 +29,24 @@ import aperture as aperture_mod
 import physics
 import scoring
 
+# The public surface. Without this, autodoc documents every symbol the module imports
+# -- Ellipse, FuncFormatter, tqdm, namedtuple -- as though they were ours.
+__all__ = [
+    "find_grand_regions_interactive", "main",
+    "resolve_grid_geometry", "read_dem_geometry", "build_elevation_cache",
+    "load_dem_and_init_buffers",
+    "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
+    "slope_baseline_pixels", "get_candidates_chunked",
+    "run_arrival_scan", "summarize_observables_by_site",
+    "clean_shape_artifacts", "apply_morphology_pingpong",
+    "separable_closing", "separable_opening",
+    "analyze_sites_and_capacity", "count_grid_capacity",
+    "create_world_file", "generate_kml_file", "generate_visualizations_and_outputs",
+    "collect_provenance", "validate_parameters", "parse_score_weights",
+    "explicitly_passed", "is_point_in_poly", "apply_poly_mask_numba",
+    "Funnel", "MapGrid",
+]
+
 # Try to import psutil for RAM stats
 try:
     import psutil
@@ -142,12 +160,17 @@ def is_point_in_poly(x, y, poly_verts):
     Determines if a given 2D point lies inside a polygon using the Ray-Casting algorithm.
     Optimized for Numba execution.
     
-    Parameters:
-    - x, y (float): Coordinates of the test point.
-    - poly_verts (ndarray): A list of (x, y) coordinates defining the polygon vertices.
-    
-    Returns:
-    - bool: True if the point is inside the polygon, False otherwise.
+    Parameters
+    ----------
+    x, y : float
+        Coordinates of the test point.
+    poly_verts : ndarray
+        ``(M, 2)`` array of polygon vertices as ``(x, y)``.
+
+    Returns
+    -------
+    bool
+        ``True`` if the point is inside the polygon.
     """
     n = len(poly_verts)
     inside = False
@@ -172,10 +195,15 @@ def apply_poly_mask_numba(valid_rows, valid_cols, poly_verts, mask_out):
     Parallelized application of the polygon ray-casting check across an array of coordinates.
     Used for excluding regions defined by arbitrary polygonal RFI zones.
     
-    Parameters:
-    - valid_rows, valid_cols (ndarray): Arrays containing the row and col coordinates to check.
-    - poly_verts (ndarray): Polygon vertices.
-    - mask_out (ndarray): A boolean array modified in-place. Sets to False if point is inside polygon.
+    Parameters
+    ----------
+    valid_rows, valid_cols : ndarray
+        Row and column coordinates of the points to check.
+    poly_verts : ndarray
+        ``(M, 2)`` array of polygon vertices.
+    mask_out : ndarray
+        Boolean array modified in place; entries inside the polygon are cleared. Only
+        ever clears bits, so several polygons can be applied in sequence.
     """
     n = len(valid_rows)
     for i in prange(n):
@@ -290,7 +318,17 @@ class Funnel:
         self._index = {}
 
     def add(self, name, count):
-        """Adds to a stage's running total, creating the stage on first use."""
+        """
+        Adds to a stage's running total, creating the stage on first use.
+
+        Parameters
+        ----------
+        name : str
+            Stage label, as it will appear in the funnel table.
+        count : int
+            Survivors to add. Stages accumulate across tiles, so this is called once
+            per tile per filter.
+        """
         count = int(count)
         if name in self._index:
             self.stages[self._index[name]][1] += count
@@ -368,6 +406,20 @@ def collect_provenance(dem_path, map_grid):
     """
     Captures everything needed to reproduce a run: code version, input identity,
     environment and invocation. Written alongside the scientific outputs.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM, whose sha256 is recorded.
+    map_grid : MapGrid
+        Resolved grid geometry, recorded along with where its resolution came from.
+
+    Returns
+    -------
+    dict
+        Git commit and dirty flag, DEM path, size and checksum, resolved grid
+        geometry, and third-party package versions -- enough to say what produced a
+        result months later.
     """
     dem_abs = os.path.abspath(dem_path)
     return {
@@ -470,7 +522,7 @@ def slope_band_gradient_sq(min_slope_deg: float | None,
     """
     The slope band restated as bounds on the squared gradient magnitude.
 
-    slope = atan(|grad|) rises monotonically with |grad|, so
+    ``slope = atan(|grad|)`` rises monotonically with the gradient magnitude, so
 
         min <= atan(sqrt(g)) <= max   <=>   tan(min)^2 <= g <= tan(max)^2
 
@@ -549,12 +601,17 @@ def read_dem_geometry(dem_path):
     size in degrees, which is what the georeferenced outputs (.tfw, .kml) require.
     Only the header is touched, so this stays cheap on multi-gigabyte files.
 
-    Parameters:
-    - dem_path (str): Path to the input elevation .tif file.
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
 
-    Returns:
-    - tuple(float or None, int or None): Pixel size in degrees and the number of
-      rows, either of which is None when the file or the tag cannot be read.
+    Returns
+    -------
+    tuple
+        Pixel size in degrees and the number of rows. Either is ``None`` when the file
+        or the tag cannot be read, which is not an error: the caller falls back to an
+        explicit value or to 1 arc-second.
     """
     try:
         with tiff.TiffFile(dem_path) as tf:
@@ -577,6 +634,25 @@ def read_dem_geometry(dem_path):
 # Describes the sampling grid of the DEM. Angular pixel size is identical on both
 # axes (that is what "geographic" means), but the two metric sizes are not.
 MapGrid = namedtuple("MapGrid", "cell_size_deg cell_size_y cell_size_x center_lat source")
+MapGrid.__doc__ = """
+Resolved pixel geometry of a DEM.
+
+Parameters
+----------
+cell_size_deg : float
+    Angular pixel size, in degrees. A geographic DEM steps by the same angle on both
+    axes, which is why this is a single number while the metric sizes are two.
+cell_size_y : float
+    North-south ground size of one pixel, in metres.
+cell_size_x : float
+    East-west ground size of one pixel, in metres. Smaller than ``cell_size_y`` away
+    from the equator, by the cosine of the latitude.
+center_lat : float
+    Latitude at which ``cell_size_x`` was evaluated, in degrees.
+source : str
+    Where the resolution came from -- detected from the GeoTIFF, supplied explicitly,
+    or defaulted. Recorded so a run's provenance says which.
+"""
 
 def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     """
@@ -591,14 +667,29 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     residual error from ignoring its north-south variation is spread evenly over the
     map rather than accumulating towards one edge.
 
-    Parameters:
-    - dem_path (str): Path to the input elevation .tif file.
-    - origin_lat (float): Latitude of the DEM's top-left corner.
-    - cell_size_deg (float or None): Explicit override in degrees per pixel.
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
+    origin_lat : float
+        Latitude of the DEM's northern edge, in degrees, for the latitude-dependent
+        east-west scaling.
+    cell_size_deg : float, optional
+        Explicit pixel size in degrees, overriding whatever the file says.
 
-    Returns:
-    - MapGrid: Angular pixel size, both metric pixel sizes, the centre latitude used
-      for the longitude scaling, and where the resolution value came from.
+    Returns
+    -------
+    MapGrid
+        Angular pixel size, both metric pixel sizes, the centre latitude used for the
+        longitude scaling, and where the resolution value came from -- recorded so a
+        run's provenance says whether the resolution was detected or asserted.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> grid = ss.resolve_grid_geometry("nonexistent.tif", -15.6, cell_size_deg=1/3600)
+    >>> f"{grid.cell_size_y:.1f} m x {grid.cell_size_x:.1f} m"
+    '30.7 m x 29.8 m'
     """
     detected_deg, n_rows = read_dem_geometry(dem_path)
 
@@ -641,6 +732,15 @@ def build_elevation_cache(dem_path, npy_path, block_rows=2048):
     excluded without a sentinel test in every kernel. That costs twice the disk of an
     int16 cache and buys correctness that would otherwise have to be re-established in
     half a dozen places.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input GeoTIFF.
+    npy_path : str
+        Path to write the float32 memory-mapped cache to.
+    block_rows : int, optional
+        Rows converted at a time. Peak memory is one block, whatever the DEM's size.
     """
     raw_path = npy_path + ".raw"
     try:
@@ -673,12 +773,29 @@ def load_dem_and_init_buffers(dem_path, temp_dir, resume=False, resume_dir=None)
     and initializes the ping-pong buffers for later morphology steps.
     If resume is True and resume_dir is provided, it attempts to load an existing ray-tracing buffer.
     
-    Returns:
-    - elevation (ndarray): Memory mapped DEM.
-    - rows, cols (int): Array dimensions.
-    - path_A, path_B (str): Paths to the initialized boolean buffer arrays.
-    - buf_a (ndarray): Open memory map of Buffer A.
-    - is_resuming (bool): True if successfully loaded a previous physics buffer.
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
+    temp_dir : str
+        Directory for the working buffers.
+    resume : bool, optional
+        Reuse a previous run's scan buffer instead of recomputing it.
+    resume_dir : str, optional
+        Directory holding that buffer.
+
+    Returns
+    -------
+    elevation : ndarray
+        Memory-mapped DEM.
+    rows, cols : int
+        Array dimensions.
+    path_A, path_B : str
+        Paths to the boolean ping-pong buffers.
+    buf_a : ndarray
+        Open memory map of buffer A.
+    is_resuming : bool
+        ``True`` if a previous scan buffer was loaded successfully.
     """
     npy_path = dem_path.replace(".tif", ".npy")
     if not os.path.exists(npy_path):
@@ -735,8 +852,46 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
       the DEM's native resolution, which on 30 m data is dominated by DEM noise.
     - funnel (Funnel): Optional accounting object recording per-filter survivor counts.
 
-    Returns:
-    - ndarray: Nx3 array of valid candidate pixels formatted as [row, col, aspect_degrees].
+    Parameters
+    ----------
+    elevation : ndarray
+        Full DEM, usually memory-mapped.
+    map_grid : MapGrid
+        Angular and metric pixel sizes.
+    rfi_zones : list or None
+        Exclusion zones as ``('circle', lat, lon, radius_km, name)`` or
+        ``('poly', [(lat, lon), ...], name)``.
+    origin_lat, origin_lon : float
+        North-west corner of the DEM, in degrees, for converting zones to pixels.
+    min_alt, max_alt : float, optional
+        Altitude bounds, in metres.
+    min_aspect_deg, max_aspect_deg : float, optional
+        Required facing directions, in degrees clockwise from north. Wraps through 360
+        when the lower bound exceeds the upper.
+    road_map_path : str, optional
+        Aligned GeoTIFF of distance-to-road values.
+    max_road_dist_km : float, optional
+        Maximum allowed distance from a road, in km.
+    min_slope_deg, max_slope_deg : float, optional
+        Slope band, in degrees. Tested on the squared gradient, so neither a square
+        root nor an arctangent is formed over the tile.
+    tile_size : int, optional
+        Side of the square chunk processed in RAM at once.
+    candidate_stride : int, optional
+        Keeps every Nth surviving pixel. Measured to be unbiased: acceptance is
+        identical at strides 1 and 5, and the stride-corrected area matches the
+        stride-1 truth to 0.05%.
+    slope_baseline_m : float, optional
+        Ground distance over which slope is measured, in metres. ``None`` uses the
+        DEM's native resolution, which on 30 m data is dominated by DEM noise.
+    funnel : Funnel, optional
+        Accounting object recording per-filter survivor counts.
+
+    Returns
+    -------
+    ndarray
+        ``(N, 3)`` array of surviving pixels as ``[row, col, aspect_deg]``, ready for
+        :func:`run_arrival_scan`.
     """
     rows, cols = elevation.shape
     candidates_list = []
@@ -763,7 +918,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
             try:
                 road_dist_map = tiff.imread(road_map_path, out='memmap')
                 print(f"      {Icon.INFO}Logistics: Loaded Road Distance Map ({road_map_path})")
-            except:
+            except Exception:
                 print(f"      {C.WARN}{Icon.WARN}WARNING: Could not load road map.{C.RESET}")
         else:
             print(f"      {C.WARN}{Icon.WARN}WARNING: Road map file not found.{C.RESET}")
@@ -909,9 +1064,34 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     direction strikes rock within the decay-baseline window with enough column depth.
     See arrival_scan.py for the geometry.
 
-    Returns:
-    - tuple(int, dict): number of accepted candidates, and the per-candidate
-      observables kept for per-site aggregation.
+    Parameters
+    ----------
+    candidates_arr : ndarray
+        ``(N, 3)`` array of ``[row, col, aspect_deg]``.
+    elevation : ndarray
+        The DEM.
+    map_grid : MapGrid
+        Angular and metric pixel sizes.
+    buf_a : ndarray
+        Open memory map to mark accepted pixels in.
+    scan_params : dict
+        Keyword arguments for :func:`arrival_scan.scan`.
+    score_config : dict, optional
+        Overrides for :data:`scoring.DEFAULT_SCORE_CONFIG`.
+    min_score : float, optional
+        Score a candidate must reach to be accepted. Note the default composition is a
+        product, whose distribution piles up near zero, so any threshold in the middle
+        sits on a cliff.
+    rfi_zones_px : sequence, optional
+        Radio-noise sources in pixel coordinates, enabling the exposure observable.
+
+    Returns
+    -------
+    n_hits : int
+        Number of accepted candidates.
+    observables : dict
+        Per-candidate arrays, including the scores and their named components, kept
+        for per-site aggregation.
     """
     observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
 
@@ -950,8 +1130,25 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     apertures can then be obtained later by folding these against an acceptance table,
     without re-running the terrain analysis (roadmap 4.10).
 
-    Returns:
-    - dict mapping site id to summary statistics of that site's accepted candidates.
+    Parameters
+    ----------
+    labeled : ndarray
+        Downsampled labelled site map.
+    downsample_factor : int
+        Factor relating full-resolution candidate coordinates to ``labeled``.
+    candidates_arr : ndarray
+        ``(N, 3)`` array of ``[row, col, aspect_deg]``.
+    observables : dict
+        Per-candidate arrays from :func:`run_arrival_scan`.
+    site_ids : sequence of int
+        Sites to summarise.
+
+    Returns
+    -------
+    dict
+        Site id to summary statistics -- mean, median and 90th percentile of each
+        observable -- over that site's accepted candidates. Empty when there are no
+        accepted candidates at all.
     """
     if observables is None or candidates_arr is None or len(site_ids) == 0:
         return {}
@@ -1003,9 +1200,28 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
     Applies image morphology operations (closing/opening) on a massive memory-mapped array
     without loading the whole array into RAM. It reads from one file and writes to another ("ping-pong").
 
-    Returns:
-    - int: Number of set pixels in the result, counted while writing so the funnel
-      accounting costs nothing extra.
+    Parameters
+    ----------
+    source_path, dest_path : str
+        Paths to the two ``.npy`` buffers, read and written respectively.
+    shape : tuple of int
+        Shape of the arrays.
+    dtype : dtype
+        Element type of the destination.
+    operation_func : callable
+        Morphological operation, applied tile by tile.
+    structure : ndarray
+        Structuring element.
+    desc : str, optional
+        Label for the progress bar.
+    tile_size : int, optional
+        Side of the square tile held in RAM at once.
+
+    Returns
+    -------
+    int
+        Set pixels in the result, counted while writing so the funnel accounting costs
+        nothing extra.
     """
     surviving = 0
     source = np.lib.format.open_memmap(source_path, mode='r')
@@ -1043,6 +1259,18 @@ def separable_closing(chunk, structure):
     (h, w) is dilation by (h, 1) followed by (1, w). That turns an O(N h w) operation
     into O(N (h + w)) -- about 10x for the 33x33 element a 1 km antenna spacing implies
     -- and the result is bit-identical, not an approximation.
+
+    Parameters
+    ----------
+    chunk : ndarray
+        Boolean tile to operate on.
+    structure : ndarray
+        Rectangle of ones. Its two side lengths are what the operation factorises into.
+
+    Returns
+    -------
+    ndarray
+        The closed tile.
     """
     h, w = structure.shape
     col = np.ones((h, 1), dtype=bool)
@@ -1052,7 +1280,24 @@ def separable_closing(chunk, structure):
 
 
 def separable_opening(chunk, structure):
-    """Binary opening with a rectangular element, separably. See :func:`separable_closing`."""
+    """
+    Binary opening with a rectangular element, separably.
+
+    Prunes features narrower than the element. See :func:`separable_closing` for why
+    the factorisation is exact rather than an approximation.
+
+    Parameters
+    ----------
+    chunk : ndarray
+        Boolean tile to operate on.
+    structure : ndarray
+        Rectangle of ones.
+
+    Returns
+    -------
+    ndarray
+        The opened tile.
+    """
     h, w = structure.shape
     col = np.ones((h, 1), dtype=bool)
     row = np.ones((1, w), dtype=bool)
@@ -1074,8 +1319,28 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     canyon wall is a strip a few hundred metres wide and tens of kilometres long,
     which the opening would delete outright.
 
-    Returns:
-    - tuple(int, int): Set-pixel counts after closing and after pruning.
+    Parameters
+    ----------
+    path_A, path_B : str
+        The two ping-pong buffers. The result is left in ``path_A``.
+    rows, cols : int
+        Array dimensions.
+    cell_size_y, cell_size_x : float
+        Ground size of one pixel on each axis, in metres.
+    antenna_spacing_km : float
+        Detector spacing, used as the default closing scale.
+    min_width_km : float
+        Narrowest feature to keep. 0 disables pruning, which is what a strip-shaped
+        array needs.
+    tile_size : int
+        Side of the square tile held in RAM at once.
+    gap_close_km : float, optional
+        Size of the closing element, in km. Defaults to ``antenna_spacing_km``.
+
+    Returns
+    -------
+    tuple of int
+        Set-pixel counts after closing and after pruning.
     """
     # Gap closing is its own criterion, not a consequence of detector spacing. It used
     # to be tied to antenna_spacing_km, which coupled two unrelated things and hid how
@@ -1104,6 +1369,53 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
     - cumulative_capacity (int): Sum of all antennas fitting in valid sites.
     - count (int): Total number of independent valid sites found.
     - region_stats (dict): Region-level accounting for the funnel report.
+
+    Parameters
+    ----------
+    path_A : str
+        Buffer holding the cleaned, full-resolution site mask.
+    elevation : ndarray
+        The DEM, for the per-site mean aspect.
+    rows, cols : int
+        Full-resolution dimensions.
+    cell_size_y, cell_size_x : float
+        Ground size of one pixel on each axis, in metres.
+    downsample_factor : int
+        Factor at which labelling and area are computed. Note area is measured on the
+        downsampled map while capacity is measured at full resolution, so a feature
+        only a few pixels wide loses area it keeps detectors on.
+    search_mode : str
+        ``single`` or ``distributed``, deciding which capacity threshold applies.
+    target_antennas : int
+        Capacity wanted from a single site.
+    min_sub_array_size : int
+        Capacity a sub-array must reach in distributed mode.
+    antenna_spacing_km : float
+        Detector spacing, in km.
+    grid_type : str
+        ``square`` or ``hex``.
+    funnel : Funnel, optional
+        Accounting object recording survivor counts.
+    candidates_arr : ndarray, optional
+        Candidates, for folding scan observables into each site's record.
+    observables : dict, optional
+        Their per-candidate observables.
+
+    Returns
+    -------
+    small_final : ndarray
+        Downsampled binary mask of the validated sites.
+    labeled_viz : ndarray
+        Site labels for colour coding, sized from the label count so that selecting
+        more than 255 sites does not overflow.
+    site_details : list of dict
+        Per-site metadata, sorted by capacity.
+    cumulative_capacity : int
+        Total capacity across the selected sites.
+    count : int
+        Number of sites selected.
+    region_stats : dict
+        Region-level accounting for the funnel report.
     """
     final_map_disk = np.lib.format.open_memmap(path_A, mode='r')
     small_map = final_map_disk[::downsample_factor, ::downsample_factor]
@@ -1245,13 +1557,23 @@ def create_world_file(tif_filename, top_left_lat, top_left_lon, cell_size_deg):
     """
     Creates an ESRI World File (.tfw) which accompanies a standard TIFF image, 
     allowing GIS software (like QGIS or ArcGIS) to project it correctly on a map.
+
+    Parameters
+    ----------
+    tif_filename : str
+        Path to the raster the world file accompanies. The ``.tfw`` is written beside
+        it with a matching stem.
+    top_left_lat, top_left_lon : float
+        Coordinates of the raster's north-west corner, in degrees.
+    cell_size_deg : float
+        Pixel size in degrees, after any downsampling.
     """
     tfw_name = os.path.splitext(tif_filename)[0] + ".tfw"
     try:
         with open(tfw_name, "w") as f:
             # Format: Pixel X size, Rotation, Rotation, Negative Pixel Y size, Top-Left X, Top-Left Y
             f.write(f"{cell_size_deg:.10f}\n0.0\n0.0\n-{cell_size_deg:.10f}\n{top_left_lon:.10f}\n{top_left_lat:.10f}\n") 
-    except: pass
+    except Exception: pass
 
 def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_size_deg, downsample=1):
     """
@@ -1262,6 +1584,21 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
     - mask (ndarray): Binary mask indicating valid deployment sites.
     - filename (str): Output path for the KML file.
     - origin_lat, origin_lon, cell_size_deg: Used to convert array pixel indices to GPS coordinates.
+
+    Parameters
+    ----------
+    mask : ndarray
+        Boolean site mask.
+    elevation : ndarray
+        The DEM, used to place the contours in height.
+    filename : str
+        Path to write the ``.kml`` to.
+    origin_lat, origin_lon : float
+        North-west corner of the mask, in degrees.
+    cell_size_deg : float
+        Pixel size in degrees.
+    downsample : int, optional
+        Factor by which ``mask`` is already downsampled relative to the DEM.
     """
     print(f"      {Icon.INFO}Generating KML: {os.path.basename(filename)} ...")
     
@@ -1318,6 +1655,56 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
     Step 6 Pipeline: Formats and exports all scientific products including geo-registered TIFs, KML models, 
     an annotated map graphic, and a serialized JSON summary of the run parameters and results 
     to the designated unified output directory.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM, used for the output stem.
+    elevation : ndarray
+        The DEM, as the map background.
+    small_final : ndarray
+        Downsampled binary mask of the selected sites.
+    labeled_viz : ndarray
+        Site labels for colour coding.
+    site_details : list of dict
+        Per-site records.
+    count : int
+        Number of selected sites.
+    cumulative_capacity : int
+        Total detector capacity across them.
+    origin_lat, origin_lon : float
+        North-west corner of the DEM, in degrees.
+    map_grid : MapGrid
+        Resolved grid geometry.
+    downsample_factor : int
+        Factor relating ``small_final`` to the DEM.
+    generate_kml : bool
+        Also write a Google Earth ``.kml``.
+    run_output_dir : str
+        Directory to write into.
+    output_image_format : str
+        Extension for the overview map, such as ``png`` or ``pdf``.
+    rfi_zones : sequence
+        Exclusion zones, drawn on the map.
+    search_mode : str
+        ``single`` or ``distributed``.
+    grid_type : str
+        ``square`` or ``hex``.
+    antenna_spacing_km : float
+        Detector spacing, in km.
+    min_altitude, max_altitude : float or None
+        Altitude bounds applied, for the annotation.
+    region_name : str
+        Human-readable region label.
+    final_params : dict
+        Resolved parameters, serialised into the results JSON.
+    run_info : dict, optional
+        Timings, funnel and provenance to record alongside the results.
+
+    Returns
+    -------
+    str
+        Path to the results JSON.
     """
     generated_files = []
     cell_size_deg = map_grid.cell_size_deg
@@ -1402,7 +1789,8 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         deg_viz = cell_size_deg * viz_ds
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x,p: f"{origin_lon + x*deg_viz:.2f}"))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y,p: f"{origin_lat - y*deg_viz:.2f}"))
-        ax.set_xlabel("Longitude"); ax.set_ylabel("Latitude")
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
         cbar = plt.colorbar(im, fraction=0.035, pad=0.04)
         cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
         ax.set_title(f"GRAND site search | {region_name if region_name is not None else ''} {'|' if region_name is not None else ''} {search_mode.title()} mode\nFound {count} sites | Total capacity: {cumulative_capacity if search_mode=='distributed' else 'N/A'} DUs | Grid: {grid_type} | Spacing: {antenna_spacing_km} km | Altitude restriction: {min_altitude}-{max_altitude} m")
@@ -1500,6 +1888,18 @@ def explicitly_passed(parser, argv=None):
     Re-parsing with every default suppressed answers the question directly --- with
     ``SUPPRESS``, argparse only sets an attribute for an option that actually appeared.
     The defaults are restored afterwards, so the original ``args`` is untouched.
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser
+        The parser to interrogate. Left exactly as it was found.
+    argv : list of str, optional
+        Arguments to parse. Defaults to ``sys.argv``.
+
+    Returns
+    -------
+    set of str
+        Destinations of the options that actually appeared on the command line.
     """
     saved = [(action, action.default) for action in parser._actions]
     try:
@@ -1519,7 +1919,29 @@ def parse_score_weights(value):
     cannot, so it takes ``shower=2,solid_angle=1`` instead. Both end up as a dict, and
     anything unnamed keeps weight 1.
 
-    Returns None when nothing was supplied, which leaves the composition unweighted.
+    Parameters
+    ----------
+    value : str, dict or None
+        Either ``name=value`` pairs separated by commas, or a mapping, or ``None``.
+
+    Returns
+    -------
+    dict or None
+        Component name to weight, or ``None`` when nothing was supplied, which leaves
+        the composition unweighted.
+
+    Raises
+    ------
+    SystemExit
+        If a pair lacks ``=`` or its value is not a number.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> ss.parse_score_weights("shower=2,depth=0.5") == {"shower": 2.0, "depth": 0.5}
+    True
+    >>> ss.parse_score_weights(None) is None
+    True
     """
     if value is None or value == "":
         return None
@@ -1545,6 +1967,18 @@ def validate_parameters(params):
     Pre-flight validation checks to enforce 'Fail Fast' mechanisms. 
     Verifies the existence of critical files and the physical logic of search bounds 
     before engaging the memory-heavy processing loops.
+
+    Parameters
+    ----------
+    params : dict
+        Fully resolved parameters, after the config, fallback and command line have
+        been reconciled.
+
+    Raises
+    ------
+    SystemExit
+        If any check fails. Every problem is collected and reported at once rather
+        than one per run, since the expensive stages come afterwards.
     """
     errors = []
     
@@ -1664,6 +2098,219 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
 
     The map resolution (cell_size_deg) is read from the DEM's own georeferencing tags
     unless the caller overrides it; every metric conversion downstream derives from it.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the input elevation GeoTIFF.
+
+    cell_size_deg : float, optional
+        Pixel size in degrees, overriding the GeoTIFF's own tag.
+
+    target_antennas : int, optional
+        Capacity wanted from a single site.
+
+    rfi_zones : list or str, optional
+        Exclusion zones, or the name of a bundled set.
+
+    origin_lat, origin_lon : float
+        Coordinates of the DEM's north-west corner, in degrees. They must match the
+        DEM or the output is silently mis-georeferenced.
+
+    min_width_km : float, optional
+        Narrowest feature to keep, in km. 0 disables pruning, which is what a
+        strip-shaped array along a canyon wall needs.
+
+    min_altitude, max_altitude : float, optional
+        Altitude bounds, in metres.
+
+    antenna_spacing_km : float, optional
+        Detector spacing, in km.
+
+    min_dist_km, max_dist_km : float, optional
+        Accepted range to the first terrain intersection, in km -- the decay-baseline
+        window. Also sets how far the profile is walked.
+
+    road_map_path : str, optional
+        Aligned GeoTIFF of distance-to-road values.
+
+    max_road_dist_km : float, optional
+        Maximum allowed distance from a road, in km.
+
+    grid_type : {'square', 'hex'}, optional
+        Lattice the detectors are placed on.
+
+    generate_kml : bool, optional
+        Also write a Google Earth ``.kml``.
+
+    search_mode : {'single', 'distributed'}, optional
+        Whether one site must hold the whole array.
+
+    min_sub_array_size : int, optional
+        Capacity a sub-array must reach in distributed mode.
+
+    min_aspect_deg, max_aspect_deg : float, optional
+        Required facing directions, in degrees clockwise from north.
+
+    min_slope_deg, max_slope_deg : float, optional
+        Slope band the detector site must fall in, in degrees. This is the *near* wall,
+        the ground the array stands on.
+
+    region_name : str, optional
+        Human-readable label for the outputs.
+
+    downsample_factor : int, optional
+        Factor at which sites are labelled and areas measured. Above 1, a feature only
+        a few pixels wide loses area it keeps detectors on.
+
+    run_output_dir : str, optional
+        Directory to write into.
+
+    output_image_format : str, optional
+        Extension for the overview map, such as ``png`` or ``pdf``.
+
+    tile_size : int, optional
+        Side of the square tile held in RAM at once.
+
+    resume : bool, optional
+        Reuse a previous run's scan buffer instead of recomputing it.
+
+    resume_dir : str, optional
+        Directory holding that buffer.
+
+    num_cores : int, optional
+        Threads for the scan. ``-1`` uses all of them.
+
+    candidate_stride : int, optional
+        Keeps every Nth screened pixel. Measured to be unbiased; see
+        :func:`get_candidates_chunked`.
+
+    slope_baseline_m : float, optional
+        Ground distance over which slope is measured, in metres. Slope is
+        scale-dependent, so this is an explicit choice rather than an accident of the
+        DEM's resolution.
+
+    energy_min_pev, energy_max_pev : float, optional
+        Tau energy range. When given it *overrides* the distance window with one
+        derived from the decay length, and in particle mode also sets the shower band.
+
+    n_azimuths : int, optional
+        Azimuths scanned per candidate. This is what sets the cost of a run.
+
+    azimuth_half_width_deg : float, optional
+        Half-width of the fan about each candidate's aspect, in degrees.
+
+    elev_min_deg, elev_max_deg : float, optional
+        Edges of the accepted arrival window, in degrees.
+
+    n_elev_bins : int, optional
+        Bins across that window. Nearly free: one walk serves them all.
+
+    min_column_depth_gcm2 : float, optional
+        Column depth a direction must have to count, in g/cm^2.
+
+    require_terrain : bool, optional
+        ``True`` selects directions striking rock; ``False`` selects directions
+        escaping to the sky, which is the cosmic-ray channel.
+
+    min_target_slope_deg, max_target_slope_deg : float, optional
+        Bounds on the struck terrain's slope along the arrival azimuth. This is the
+        *far* wall. Unset by default, which asks only that rock is present -- true
+        almost everywhere in mountainous terrain.
+
+    decay_energy_pev : float, optional
+        Energy at which to score the probability the tau decays in the gap. Omitted by
+        default because the probability is strongly energy-dependent and one number
+        cannot stand in for a spectrum.
+
+    shower_development_m : float, optional
+        Path the shower needs after the tau decays, in metres.
+
+    gap_close_km : float, optional
+        Size of the morphological closing element, in km. Defaults to
+        ``antenna_spacing_km``. Closing more than doubles reported area on real
+        terrain, so it is worth setting deliberately; 0 disables it.
+
+    fresnel_frequency_mhz : float, optional
+        Radio band for the Fresnel clearance measurement. ``None`` skips that pass, as
+        a particle experiment wants.
+
+    refraction_k : float, optional
+        Refraction factor for the radio path only. The particle geometry always uses
+        the true Earth radius.
+
+    antenna_height_m : float, optional
+        Receiver height above ground, in metres.
+
+    fresnel_near_field_m : float, optional
+        Stretch of path the clearance measurement skips, in metres.
+
+    exclude_near_field : bool, optional
+        Apply that near-field cut-off.
+
+    depth_band_gcm2 : tuple of float, optional
+        Column-depth band scoring 1, in g/cm^2.
+
+    score_composition : {'product', 'mean', 'min'}, optional
+        How components combine.
+
+    score_weights : dict, optional
+        Per-component weights.
+
+    distance_band_m : tuple of float, optional
+        Exit-distance band scoring 1, in metres. Defaults to the decay window.
+
+    solid_angle_half_sr : float, optional
+        Accepted solid angle scoring 0.5, in steradians. The 0.05 default is
+        GRAND-scale and saturates against a canyon's much larger acceptance.
+
+    clearance_full_at : float, optional
+        Fresnel clearance ratio scoring 1.
+
+    min_score : float, optional
+        Score a candidate must reach. Note a product composition concentrates near
+        zero, so any threshold in the middle sits on a cliff.
+
+    geomag_declination_deg, geomag_inclination_deg : float, optional
+        Field direction, in degrees. Supply the IGRF values for the site.
+
+    use_geomagnetic : bool, optional
+        Weight directions by ``|v x B|``. Radio only; particles do not care.
+
+    grammage_mode : {'radio', 'particle'}, optional
+        Whether atmospheric depth is scored as a maturity threshold or as a band.
+
+    grammage_band_gcm2 : tuple of float, optional
+        Explicit shower band in particle mode. Setting it disables
+        ``grammage_band_fraction``.
+
+    grammage_maturity_gcm2 : float, optional
+        Depth at which the radio maturity ramp reaches 1, in g/cm^2.
+
+    grammage_band_fraction : float, optional
+        Fraction of peak particle content still counted as a usable shower, when the
+        band is derived from an energy range.
+
+    shower_elongation_rate_gcm2, shower_lambda_gcm2 : float, optional
+        Shower-profile parameters: how much deeper maximum sits per decade of energy,
+        and the Gaisser-Hillas interaction length.
+
+    muon_shielding_km : float, optional
+        Rock overburden required for muon rejection, in km.
+
+    bilinear_sampling : bool, optional
+        Interpolate the terrain profile between pixel centres. Costs about 1.44x and
+        removes an asymmetric half-pixel bias.
+
+    nu_interaction_length_gcm2 : float, optional
+        Neutrino interaction length, enabling the Earth-chord attenuation term.
+
+    Notes
+    -----
+    Writes GeoTIFF, world file, PNG, optional KML, a results JSON and a provenance
+    record into ``run_output_dir``, and prints a selection funnel. When a search
+    returns nothing, the funnel is the first place to look: the constraint responsible
+    is the line where the survivor count collapses.
     """
 
     # Cast safety to ensure slice logic doesn't fail if passed as float via JSON
@@ -1978,7 +2625,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         
         if count > 0:
             print(f"   {C.BOLD}{'ID':>4} | {'Area (km²)':>12} | {'Capacity':>10} | {'Grid':>6} | {'Facing'}{C.RESET}")
-            print(f"   " + "-" * 50)
+            print("   " + "-" * 50)
             for site in site_details:
                 print(f"   {site['site_id']:>4} | {site['area_km2']:>12.2f} | {site['capacity_exact']:>10} | {site['grid_type']:>6} | {site['facing_direction']}")
         else:
@@ -2000,7 +2647,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             try:
                 if path_A and os.path.exists(path_A): os.remove(path_A)
                 if path_B and os.path.exists(path_B): os.remove(path_B)
-            except: 
+            except Exception: 
                 pass
         else:
             print(f"\n   {C.FAIL}{Icon.CROSS}[!] Run did not complete successfully.{C.RESET}")
@@ -2281,7 +2928,7 @@ def main():
     if args.config_path:
         print(f"Using config file: {os.path.abspath(args.config_path)}")
     else:
-        print(f"No config file provided. Relying on CLI arguments and fallbacks.")
+        print("No config file provided. Relying on CLI arguments and fallbacks.")
     print(f"Using fallbacks file: {os.path.abspath(fallback_path)}")
     print(f"Unified output directory initialized at: {os.path.abspath(run_output_dir)}")
     print(f"{C.HEADER}================================================================================{C.RESET}\n")

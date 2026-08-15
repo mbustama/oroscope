@@ -411,7 +411,6 @@ class TestFresnelClearance(unittest.TestCase):
         self.n = 1400
         self.r0, self.c0 = 700, 100
         cols = np.arange(self.n)
-        drop_px = int(1000.0 / self.grid.cell_size_x)
         profile = np.clip(800.0 - (cols - self.c0) * self.grid.cell_size_x * 0.8, 0.0, 800.0)
         profile[:self.c0] = 800.0
         self.elevation = np.repeat(profile[None, :], self.n, axis=0).astype(np.float32)

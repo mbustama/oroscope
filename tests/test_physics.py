@@ -434,7 +434,6 @@ class TestProductionEscapeOptimum(unittest.TestCase):
     def test_exit_probability_rises_linearly_for_thin_slabs(self):
         """A thin slab yields taus in proportion to its interaction probability."""
         e = 1000.0
-        lam = physics.neutrino_interaction_length_gcm2(e)
         p1 = physics.tau_exit_probability(1.0e4, e)
         p2 = physics.tau_exit_probability(2.0e4, e)
         self.assertAlmostEqual(p2 / p1, 2.0, delta=0.05)

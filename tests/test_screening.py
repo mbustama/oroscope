@@ -245,16 +245,22 @@ class TestSeparableMorphology(unittest.TestCase):
 
     def test_morphology_is_independent_of_tile_size(self):
         """Cleanup must not depend on how the map happens to be cut into tiles."""
-        import tempfile, shutil, os, contextlib, io
-        from scipy.ndimage import binary_closing
+        import tempfile
+        import shutil
+        import os
+        import contextlib
+        import io
 
         def run(tile):
             tmp = tempfile.mkdtemp()
             try:
-                a_path = os.path.join(tmp, "a.npy"); b_path = os.path.join(tmp, "b.npy")
+                a_path = os.path.join(tmp, "a.npy")
+                b_path = os.path.join(tmp, "b.npy")
                 a = np.lib.format.open_memmap(a_path, mode="w+", shape=self.mask.shape,
                                               dtype=bool)
-                a[:] = self.mask; a.flush(); del a
+                a[:] = self.mask
+                a.flush()
+                del a
                 np.lib.format.open_memmap(b_path, mode="w+", shape=self.mask.shape,
                                           dtype=bool).flush()
                 with contextlib.redirect_stderr(io.StringIO()):

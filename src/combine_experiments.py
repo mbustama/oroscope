@@ -31,6 +31,9 @@ import json
 import os
 
 import numpy as np
+
+__all__ = ["load_run", "check_alignment", "read_world_file",
+           "pixel_area_km2", "capacity_of", "main"]
 import tifffile as tiff
 
 # Matplotlib is only needed for the overview image, and the searcher already forces a
@@ -41,11 +44,24 @@ import matplotlib.pyplot as plt                      # noqa: E402
 from matplotlib.patches import Patch                 # noqa: E402
 
 
-def read_world_file(tfw_path):
+def read_world_file(tfw_path: str) -> tuple[float, ...]:
     """
     Reads the six affine terms of an ESRI world file.
 
-    Returns (pixel_size_x, rot_y, rot_x, pixel_size_y, upper_left_x, upper_left_y).
+    Parameters
+    ----------
+    tfw_path : str
+        Path to the ``.tfw`` file.
+
+    Returns
+    -------
+    tuple of float
+        ``(pixel_size_x, rot_y, rot_x, pixel_size_y, upper_left_x, upper_left_y)``.
+
+    Raises
+    ------
+    ValueError
+        If the file does not hold exactly six terms.
     """
     with open(tfw_path) as f:
         terms = [float(line.strip()) for line in f if line.strip()]
@@ -54,12 +70,29 @@ def read_world_file(tfw_path):
     return tuple(terms)
 
 
-def load_run(run_dir):
+def load_run(run_dir: str) -> dict:
     """
     Loads one search's mask, georeferencing and results JSON.
 
     The searcher writes the mask as a downsampled GeoTIFF beside a world file and a
     results JSON, all sharing a base name.
+
+    Parameters
+    ----------
+    run_dir : str
+        A run's output directory.
+
+    Returns
+    -------
+    dict
+        ``dir``, ``tif``, ``mask``, ``world`` and ``results``. ``results`` is ``None``
+        when no results JSON is present.
+
+    Raises
+    ------
+    SystemExit
+        If no mask GeoTIFF is found, or if the world file beside it is missing --
+        without which alignment cannot be confirmed.
     """
     tifs = sorted(glob.glob(os.path.join(run_dir, "*.tif")))
     if not tifs:
@@ -82,13 +115,24 @@ def load_run(run_dir):
     return {"dir": run_dir, "tif": tif, "mask": mask, "world": world, "results": results}
 
 
-def check_alignment(runs):
+def check_alignment(runs: list[dict]) -> None:
     """
     Refuses to overlay masks that do not describe the same ground.
 
     Comparing shapes is not enough: two crops of the same size taken from different
     corners would overlay cleanly and mean nothing. The world file's pixel size and
     upper-left corner are what actually pin the ground down.
+
+    Parameters
+    ----------
+    runs : list of dict
+        Loaded runs, from :func:`load_run`. The first is taken as the reference.
+
+    Raises
+    ------
+    SystemExit
+        If any run differs from the reference in shape, pixel size or corner. Refusing
+        is deliberate: resampling would silently compare the wrong terrain.
     """
     ref = runs[0]
     for other in runs[1:]:
@@ -107,12 +151,25 @@ def check_alignment(runs):
                     f"{ref['dir']} and {b!r} in {other['dir']}.")
 
 
-def pixel_area_km2(world, reference_latitude_deg):
+def pixel_area_km2(world: tuple[float, ...], reference_latitude_deg: float) -> float:
     """
     Ground area of one mask pixel, in km^2.
 
     The world file is in degrees, so the east-west size shrinks with the cosine of the
     latitude. This uses the same convention as the searcher's own grid geometry.
+
+    Parameters
+    ----------
+    world : tuple of float
+        The six affine terms, from :func:`read_world_file`.
+    reference_latitude_deg : float
+        Latitude at which to evaluate the east-west pixel size, in degrees. Normally
+        the centre of the map.
+
+    Returns
+    -------
+    float
+        Area of one pixel, in km^2.
     """
     cell_deg_x, _, _, cell_deg_y, _, _ = world
     km_y = abs(cell_deg_y) * 110.6
@@ -245,7 +302,8 @@ def main():
             ["#EDEFEC", "#2C6E8F", "#B0781E", "#7B2D8E"])
         ax.imshow(img, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
         ax.set_title(f"{a} and {b}: where each is viable, and where both are")
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         ax.legend(handles=[
             Patch(facecolor="#2C6E8F", label=f"{a} only"),
             Patch(facecolor="#B0781E", label=f"{b} only"),
@@ -264,7 +322,7 @@ def main():
     # ---- console summary
     print(f"\nCombining {len(runs)} searches over {rows}x{runs[0]['mask'].shape[1]} "
           f"pixels of {px_km2:.4f} km² each\n")
-    width = max(len(l) for l in labels + ["joint", "union"]) + 2
+    width = max(len(label) for label in labels + ["joint", "union"]) + 2
     print(f"   {'experiment'.ljust(width)} {'area km²':>12} {'sites':>7} {'capacity':>10}"
           f" {'in joint':>10}")
     print("   " + "-" * (width + 43))

@@ -81,6 +81,16 @@ DEFAULT_EARTH_RADIUS_M = TRUE_EARTH_RADIUS_M      # retained for older callers
 KGM2_TO_GCM2 = 0.1
 SPEED_OF_LIGHT = 2.99792458e8            # m/s, for the Fresnel wavelength
 
+# The public surface: the scan entry points, the tau kinematics they need, and the
+# helpers a caller assembles a scan from. The compiled kernels are deliberately absent
+# -- they take two dozen positional arrays and are called through `scan`.
+__all__ = [
+    "scan", "rfi_exposure", "earth_radius_for_k", "azimuth_fan", "balanced_order",
+    "tau_decay_length_m", "energy_pev_for_decay_length", "decay_probability",
+    "distance_window_from_energy",
+    "STANDARD_ROCK_DENSITY", "TRUE_EARTH_RADIUS_M", "RADIO_EARTH_RADIUS_M",
+]
+
 
 def earth_radius_for_k(k_factor: float) -> float:
     """
@@ -345,6 +355,10 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
     Results are written into the ``out_*`` arrays, one entry per candidate:
     accepted-direction count, accepted solid angle (sr), mean distance to the exit
     point (m), maximum and mean column depth (g/cm^2), and the horizon angle (deg).
+
+    This is the compiled kernel and takes everything positionally. Call :func:`scan`
+    instead, which assembles these arguments from named parameters and allocates the
+    output arrays.
     """
     n = candidates.shape[0]
     n_az = azimuth_offsets_deg.shape[0]
@@ -520,6 +534,22 @@ def tau_decay_length_m(energy_pev: float) -> float:
     the published numbers on both sides: 1-100 PeV gives 49 m to 4.9 km, matching
     TAMBO's quoted 50 m - 5 km range, while the searcher's inherited 10-80 km GRAND
     window corresponds to 0.2-1.6 EeV.
+
+    Parameters
+    ----------
+    energy_pev : float
+        Tau energy, in PeV.
+
+    Returns
+    -------
+    float
+        Decay length in the laboratory frame, in metres.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> f"{arrival_scan.tau_decay_length_m(1.0):.0f} m"
+    '49 m'
     """
     return (energy_pev * 1.0e6 / TAU_MASS_GEV) * TAU_CTAU_M
 
@@ -595,7 +625,24 @@ def distance_window_from_energy(energy_min_pev: float, energy_max_pev: float,
     correctly, but the useful window also depends on acceptance details this tool does
     not model. Callers can always set the distances directly.
 
-    Returns (min_dist_m, max_dist_m).
+    Parameters
+    ----------
+    energy_min_pev, energy_max_pev : float
+        Ends of the tau energy range, in PeV.
+    shower_development_m : float, optional
+        Path the shower needs after the tau decays, in metres.
+
+    Returns
+    -------
+    tuple of float
+        ``(min_dist_m, max_dist_m)``.
+
+    Examples
+    --------
+    >>> import arrival_scan
+    >>> lo, hi = arrival_scan.distance_window_from_energy(1.0, 100.0)
+    >>> f"{lo:.0f} m to {hi / 1000:.1f} km"
+    '49 m to 7.9 km'
     """
     return (tau_decay_length_m(energy_min_pev),
             tau_decay_length_m(energy_max_pev) + shower_development_m)
@@ -707,9 +754,82 @@ def scan(candidates, elevation, map_grid, *,
 
     Sampling defaults to one DEM pixel, since a coarser step can miss a ridge entirely.
 
-    Returns:
-    - dict of per-candidate arrays: cells, solid_angle_sr, mean_distance_m,
-      max_depth_gcm2, mean_depth_gcm2, horizon_deg.
+    Parameters
+    ----------
+    candidates : ndarray
+        ``(N, 3)`` array of ``[row, col, aspect_deg]``, as produced by the topographic
+        screen.
+    elevation : ndarray
+        The DEM, as a 2-D array. Converted to float32 if it is neither float32 nor
+        float64.
+    map_grid : MapGrid
+        Angular and metric pixel sizes of the DEM.
+    elev_min_deg, elev_max_deg : float, optional
+        Edges of the accepted arrival window, in degrees.
+    n_elev_bins : int, optional
+        Bins across that window. Nearly free: one walk serves every bin, so cost
+        scales with azimuths rather than with this.
+    n_azimuths : int, optional
+        Azimuths scanned per candidate. This is what sets the cost.
+    half_width_deg : float, optional
+        Half-width of a forward arc about each candidate's aspect. ``None`` sweeps the
+        full circle.
+    use_aspect : bool, optional
+        Treat ``half_width_deg`` offsets as relative to each candidate's aspect rather
+        than as absolute bearings.
+    step_m : float, optional
+        Sampling step along the profile, in metres. Defaults to one DEM pixel, since a
+        coarser step can miss a ridge entirely.
+    max_range_m : float, optional
+        How far to walk, in metres.
+    min_dist_km, max_dist_km : float, optional
+        Accepted range to the first intersection -- the decay-baseline window.
+    min_depth_gcm2 : float, optional
+        Column depth a direction must have to count.
+    require_terrain : bool, optional
+        ``True`` selects directions striking rock (neutrino channels); ``False``
+        selects directions escaping to the sky (cosmic-ray channels), where terrain is
+        an obstruction and the depth and distance criteria do not apply.
+    min_target_slope_deg, max_target_slope_deg : float, optional
+        Bounds on the struck terrain's slope along the arrival azimuth. Unset by
+        default, which asks only that rock is present -- true almost everywhere in
+        mountainous terrain.
+    rock_density : float, optional
+        Density used to turn path length into column depth, in kg/m^3.
+    earth_radius_m : float, optional
+        True Earth radius, for the particle geometry.
+    radio_earth_radius_m : float, optional
+        Inflated radius for the refracted radio path. Used only by the Fresnel term.
+    frequency_mhz : float, optional
+        Radio band for the Fresnel clearance measurement. ``None`` skips that pass
+        entirely.
+    shower_offset_m : float, optional
+        Path the shower needs after the tau decays, in metres. The far endpoint of the
+        Fresnel measurement.
+    antenna_height_m : float, optional
+        Height of the receiver above ground, in metres. Without it every path scores
+        near zero, since a ground-level receiver always has terrain in its own first
+        Fresnel zone.
+    near_field_m : float, optional
+        Stretch of path skipped by the Fresnel measurement, in metres.
+    bilinear : bool, optional
+        Interpolate the terrain profile between pixel centres. Costs about 1.44x and
+        removes an asymmetric half-pixel bias.
+    geomag_declination_deg, geomag_inclination_deg : float, optional
+        Field direction. Both must be given for geomagnetic weighting to apply;
+        guessing a field would be worse than declining to weight at all.
+
+    Returns
+    -------
+    dict of ndarray
+        One entry per candidate for each of: ``cells``, ``solid_angle_sr``,
+        ``mean_distance_m``, ``max_depth_gcm2``, ``mean_depth_gcm2``, ``horizon_deg``,
+        ``best_clearance_ratio``, ``geomag_solid_angle_sr``, ``path_grammage_gcm2``,
+        ``earth_chord_gcm2`` and ``target_slope_deg``.
+
+    See Also
+    --------
+    scoring.score_candidates : turns these observables into a comparable score.
     """
     candidates = np.ascontiguousarray(candidates, dtype=np.float64)
     n = candidates.shape[0]
@@ -856,15 +976,34 @@ def _rfi_exposure(candidates, elevation, zone_rows, zone_cols, zone_weight,
         out_exposure[i] = exposure
 
 
-def rfi_exposure(candidates, elevation, map_grid, zones_rowcol_weight, step_m=None,
-                 earth_radius_m=RADIO_EARTH_RADIUS_M):
+def rfi_exposure(candidates: np.ndarray, elevation: np.ndarray, map_grid,
+                 zones_rowcol_weight, step_m: float | None = None,
+                 earth_radius_m: float = RADIO_EARTH_RADIUS_M) -> np.ndarray:
     """
     Line-of-sight-weighted radio noise exposure for each candidate.
 
-    ``zones_rowcol_weight`` is an iterable of (row, col, weight); weight is normally the
-    zone's radius or population proxy. Sources hidden behind terrain contribute nothing.
+    Parameters
+    ----------
+    candidates : ndarray
+        ``(N, 3)`` array of ``[row, col, aspect_deg]``.
+    elevation : ndarray
+        The DEM.
+    map_grid : MapGrid
+        Angular and metric pixel sizes.
+    zones_rowcol_weight : iterable
+        Noise sources as ``(row, col, weight)`` in pixel coordinates; weight is
+        normally the zone's radius or a population proxy.
+    step_m : float, optional
+        Sampling step along the sight line, in metres. Defaults to one pixel.
+    earth_radius_m : float, optional
+        Radius for the curvature drop. The radio one, since this is a radio path.
 
-    Returns an array of exposure in weight per metre squared; smaller is quieter.
+    Returns
+    -------
+    ndarray
+        Exposure in weight per metre squared, one entry per candidate; smaller is
+        quieter. Sources hidden behind terrain contribute nothing, which a plain
+        distance-based exclusion zone cannot express.
     """
     candidates = np.ascontiguousarray(candidates, dtype=np.float64)
     n = candidates.shape[0]

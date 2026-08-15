@@ -28,6 +28,10 @@ import physics
 # while 'mean' lets a strong component compensate. 'min' reports the weakest link.
 COMPOSITION_MODES = ("product", "mean", "min")
 
+__all__ = ["band_score", "saturating_score", "ramp_score", "compose",
+           "score_candidates", "summarize_scores", "COMPOSITION_MODES",
+           "DEFAULT_SCORE_CONFIG"]
+
 
 def band_score(x: float | np.ndarray, lo: float, hi: float,
                soft_lo: float | None = None,
@@ -409,7 +413,25 @@ def score_candidates(observables: dict[str, np.ndarray],
 
 def summarize_scores(scores: np.ndarray,
                      components: dict[str, np.ndarray]) -> dict:
-    """Distribution summary of a score set, for reporting and per-site records."""
+    """
+    Distribution summary of a score set, for reporting and per-site records.
+
+    Storing a distribution rather than a single number is deliberate: it lets a site's
+    quality be re-examined later without re-running the terrain analysis.
+
+    Parameters
+    ----------
+    scores : ndarray
+        Composed scores, one per candidate.
+    components : dict
+        The per-component scores behind them, from :func:`score_candidates`.
+
+    Returns
+    -------
+    dict
+        Count, mean, median and 90th percentile of the total, and the mean of each
+        named component so a weak site can be attributed rather than merely ranked.
+    """
     if len(scores) == 0:
         return {}
     out = {

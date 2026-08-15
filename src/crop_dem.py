@@ -19,11 +19,27 @@ import argparse
 import os
 
 import numpy as np
+
+__all__ = ["crop", "read_geo", "main"]
 import tifffile as tiff
 
 
-def read_geo(path):
-    """Pixel size in degrees and the north-west corner, from the GeoTIFF tags."""
+def read_geo(path: str) -> tuple[float, float, float, float, int, int]:
+    """
+    Pixel size in degrees and the north-west corner, from the GeoTIFF tags.
+
+    Parameters
+    ----------
+    path : str
+        Path to a geographic GeoTIFF carrying ``ModelPixelScaleTag`` and
+        ``ModelTiepointTag``.
+
+    Returns
+    -------
+    tuple
+        ``(cell_x_deg, cell_y_deg, lon0, lat0, rows, cols)``, with ``lon0``/``lat0``
+        the north-west corner.
+    """
     with tiff.TiffFile(path) as tf:
         page = tf.pages[0]
         scale = page.tags["ModelPixelScaleTag"].value
@@ -32,7 +48,8 @@ def read_geo(path):
     return float(scale[0]), float(scale[1]), float(tie[3]), float(tie[4]), rows, cols
 
 
-def crop(src, dst, north, south, west, east):
+def crop(src: str, dst: str, north: float, south: float, west: float,
+         east: float) -> dict:
     cell_x_deg, cell_y_deg, lon0, lat0, rows, cols = read_geo(src)
 
     # Rows run north to south, columns west to east

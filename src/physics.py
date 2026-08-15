@@ -21,6 +21,21 @@ import numpy as np
 
 _trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
 
+# The public surface. Declared so that `from physics import *` and the generated API
+# reference both show what this module offers rather than everything it imported.
+__all__ = [
+    "air_density_kgm3", "slant_grammage_gcm2", "shower_maturity",
+    "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
+    "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
+    "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
+    "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
+    "production_escape_optimum_gcm2", "depth_band_from_energy",
+    "earth_absorption_cutoff_deg", "geomagnetic_latitude_deg",
+    "centered_dipole_inclination", "default_field_for_site",
+    "geomagnetic_unit_vector", "geomagnetic_sin_alpha", "refractivity",
+    "cherenkov_angle_rad", "cherenkov_footprint_radius_m", "footprint_sampling",
+]
+
 # Atmosphere: an exponential isothermal approximation, adequate over the few km of
 # relief a site search spans.
 SEA_LEVEL_DENSITY_KGM3 = 1.225
@@ -359,6 +374,24 @@ def earth_chord_m(elevation_deg: float, radius_m: float = EARTH_RADIUS_M) -> flo
     220 km, at -3 degrees about 670 km, against the tens of km of mountain a DEM can
     see. The deepest part of even a 670 km chord lies only ~9 km below the surface, so
     it stays in the crust and a constant density is adequate.
+
+    Parameters
+    ----------
+    elevation_deg : float
+        Arrival elevation angle, in degrees. Zero or above returns zero.
+    radius_m : float, optional
+        Earth radius, in metres. The true radius: the neutrino is not refracted.
+
+    Returns
+    -------
+    float
+        Chord length through the Earth, in metres.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.earth_chord_m(-3.0) / 1000:.0f} km"
+    '667 km'
     """
     if elevation_deg >= 0:
         return 0.0
@@ -993,13 +1026,33 @@ def centered_dipole_inclination(latitude_deg: float, longitude_deg: float,
     Note this approximation is only worth using for *inclination*. The dipole
     declination at Arequipa is about -0.2 degrees against an IGRF value of -6.9, so the
     non-dipole terms dominate there and a dipole declination would be misleading.
+
+    Parameters
+    ----------
+    latitude_deg, longitude_deg : float
+        Geographic coordinates of the site, in degrees.
+    **kw
+        Passed through to :func:`geomagnetic_latitude_deg`.
+
+    Returns
+    -------
+    float
+        Inclination in degrees, positive downward.
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(physics.centered_dipole_inclination(-16.4, -71.5), 1)
+    -14.0
     """
     mlat = math.radians(geomagnetic_latitude_deg(latitude_deg, longitude_deg, **kw))
     return math.degrees(math.atan(2.0 * math.tan(mlat)))
 
 
 def default_field_for_site(latitude_deg: float, longitude_deg: float,
-                           declination_deg=None, inclination_deg=None):
+                           declination_deg: float | None = None,
+                           inclination_deg: float | None = None
+                           ) -> tuple[float, float]:
     """
     Geomagnetic field for an arbitrary site, falling back sensibly.
 
@@ -1013,7 +1066,28 @@ def default_field_for_site(latitude_deg: float, longitude_deg: float,
     Arequipa IGRF value, which is right for the prototype region and approximately
     right for the rest of southern Peru. Supply the IGRF declination for anywhere else.
 
-    Returns (declination_deg, inclination_deg).
+    Parameters
+    ----------
+    latitude_deg, longitude_deg : float
+        Geographic coordinates of the site, in degrees.
+    declination_deg : float, optional
+        Declination in degrees east of north. Supply the IGRF value for the site; the
+        fallback is Arequipa's.
+    inclination_deg : float, optional
+        Inclination in degrees, positive downward. Derived from the site's coordinates
+        when omitted.
+
+    Returns
+    -------
+    tuple of float
+        ``(declination_deg, inclination_deg)``.
+
+    Examples
+    --------
+    >>> import physics
+    >>> dec, inc = physics.default_field_for_site(-16.4, -71.5)
+    >>> f"{dec:.1f} {inc:.1f}"
+    '-6.9 -14.0'
     """
     if declination_deg is None:
         declination_deg = DEFAULT_GEOMAG_DECLINATION_DEG
@@ -1029,6 +1103,25 @@ def geomagnetic_unit_vector(declination_deg: float,
 
     Declination is measured from geographic north, positive eastward; inclination is
     positive downward, so it enters the Up component with a minus sign.
+
+    Parameters
+    ----------
+    declination_deg : float
+        Declination, in degrees east of north.
+    inclination_deg : float
+        Inclination, in degrees, positive downward.
+
+    Returns
+    -------
+    tuple of float
+        ``(east, north, up)`` components of the unit field vector.
+
+    Examples
+    --------
+    >>> import physics
+    >>> e, n, u = physics.geomagnetic_unit_vector(0.0, 0.0)
+    >>> f"{e:.1f} {n:.1f} {u:.1f}"                  # due north, horizontal
+    '0.0 1.0 -0.0'
     """
     d = math.radians(declination_deg)
     i = math.radians(inclination_deg)
@@ -1051,6 +1144,30 @@ def geomagnetic_sin_alpha(azimuth_deg: float, elevation_deg: float,
 
     The sign of the axis is irrelevant -- ``|(-v) x B| = |v x B|`` -- so the same value
     applies whether the direction is taken as arrival or propagation.
+
+    Parameters
+    ----------
+    azimuth_deg : float
+        Shower azimuth, in degrees clockwise from north.
+    elevation_deg : float
+        Shower elevation angle, in degrees.
+    field_unit_vector : tuple of float
+        Field direction as ``(east, north, up)``, from
+        :func:`geomagnetic_unit_vector`.
+
+    Returns
+    -------
+    float
+        ``sin(alpha)``, in [0, 1]. Zero for a shower along the field.
+
+    Examples
+    --------
+    >>> import physics
+    >>> B = physics.geomagnetic_unit_vector(0.0, 0.0)      # horizontal, northward
+    >>> round(physics.geomagnetic_sin_alpha(0.0, 0.0, B), 3)     # along the field
+    0.0
+    >>> round(physics.geomagnetic_sin_alpha(90.0, 0.0, B), 3)    # across it
+    1.0
     """
     phi = math.radians(azimuth_deg)
     theta = math.radians(elevation_deg)
@@ -1064,8 +1181,30 @@ def geomagnetic_sin_alpha(azimuth_deg: float, elevation_deg: float,
 # ---------------------------------------------------------------- footprint
 
 def refractivity(altitude_m: float, sea_level_value: float = SEA_LEVEL_REFRACTIVITY,
-                 scale_height_m=DENSITY_SCALE_HEIGHT_M):
-    """``n - 1`` at altitude, falling with density."""
+                 scale_height_m: float = DENSITY_SCALE_HEIGHT_M) -> float:
+    """
+    ``n - 1`` at altitude, falling with density.
+
+    Parameters
+    ----------
+    altitude_m : float
+        Altitude above sea level, in metres.
+    sea_level_value : float, optional
+        Refractivity at sea level.
+    scale_height_m : float, optional
+        Density scale height, in metres.
+
+    Returns
+    -------
+    float
+        Refractivity ``n - 1``.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.refractivity(4000.0):.2e}"
+    '1.80e-04'
+    """
     return sea_level_value * math.exp(-altitude_m / scale_height_m)
 
 
@@ -1075,6 +1214,24 @@ def cherenkov_angle_rad(altitude_m: float, **kw: float) -> float:
 
     About 1.4 degrees at sea level and 1.1 degrees at 4000 m: the cone narrows with
     altitude because the air is thinner.
+
+    Parameters
+    ----------
+    altitude_m : float
+        Altitude of the emission point, in metres.
+    **kw
+        Passed through to :func:`refractivity`.
+
+    Returns
+    -------
+    float
+        Cherenkov angle, in radians.
+
+    Examples
+    --------
+    >>> import math, physics
+    >>> f"{math.degrees(physics.cherenkov_angle_rad(4000.0)):.2f} deg"
+    '1.09 deg'
     """
     return math.sqrt(2.0 * refractivity(altitude_m, **kw))
 
@@ -1088,6 +1245,26 @@ def cherenkov_footprint_radius_m(altitude_m: float, distance_m: float,
     footprint, so it needs a *denser* array for the same trigger efficiency. A 1 km
     grid under-samples a footprint of a few hundred metres either way, which is why
     counted antennas are a cost proxy rather than an effective area.
+
+    Parameters
+    ----------
+    altitude_m : float
+        Altitude of the emission point, in metres.
+    distance_m : float
+        Distance from emission point to the ground, in metres.
+    **kw
+        Passed through to :func:`refractivity`.
+
+    Returns
+    -------
+    float
+        Footprint radius, in metres.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.cherenkov_footprint_radius_m(4000.0, 20000.0):.0f} m"
+    '380 m'
     """
     return distance_m * cherenkov_angle_rad(altitude_m, **kw)
 
@@ -1099,6 +1276,28 @@ def footprint_sampling(spacing_m: float, altitude_m: float, distance_m: float,
 
     Below 1 the array does not resolve the footprint and triggering relies on a single
     antenna happening to fall inside it.
+
+    Parameters
+    ----------
+    spacing_m : float
+        Detector spacing, in metres. Zero or less returns 0.
+    altitude_m : float
+        Altitude of the emission point, in metres.
+    distance_m : float
+        Distance from emission point to the ground, in metres.
+    **kw
+        Passed through to :func:`refractivity`.
+
+    Returns
+    -------
+    float
+        Antennas spanning one footprint diameter.
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(physics.footprint_sampling(1000.0, 4000.0, 20000.0), 2)
+    0.76
     """
     radius = cherenkov_footprint_radius_m(altitude_m, distance_m, **kw)
     return (2.0 * radius / spacing_m) if spacing_m > 0 else 0.0

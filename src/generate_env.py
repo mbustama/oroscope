@@ -204,9 +204,9 @@ def main():
         print(f"\n{C.HEADER}===================================================={C.RESET}")
         print(f"   {C.BOLD}HOW TO DEPLOY YOUR ENVIRONMENT:{C.RESET}")
         print(f"{C.HEADER}===================================================={C.RESET}")
-        print(f"1. To create the environment, copy and run this command:")
+        print("1. To create the environment, copy and run this command:")
         print(f"   {C.MAGENTA}conda env create -f {output_yml}{C.RESET}\n")
-        print(f"2. To activate the environment, run:")
+        print("2. To activate the environment, run:")
         print(f"   {C.MAGENTA}conda activate {env_name}{C.RESET}\n")
         
     except Exception as e:

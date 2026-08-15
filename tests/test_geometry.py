@@ -93,7 +93,8 @@ class TestNonSquarePixelWarning(unittest.TestCase):
             tiff.imwrite(path, np.zeros((32, 32), dtype=np.float32),
                          extratags=[(33550, "d", 3, (0.0005, 0.00025, 0.0)),
                                     (33922, "d", 6, (0.0, 0.0, 0.0, -72.0, -16.0, 0.0))])
-            import contextlib, io
+            import contextlib
+            import io
             with contextlib.redirect_stdout(io.StringIO()):
                 deg, rows = ss.read_dem_geometry(path)
             self.assertAlmostEqual(deg, 0.00025, places=12)

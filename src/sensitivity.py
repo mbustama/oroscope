@@ -26,7 +26,6 @@ import io
 import json
 import os
 import shutil
-import sys
 import tempfile
 import time
 
@@ -34,6 +33,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import site_searcher as ss                       # noqa: E402
+
+__all__ = ["run_once", "summarise", "main"]
 
 
 def _quiet():
@@ -86,8 +87,22 @@ def run_once(config, out_dir, verbose=False):
         return json.load(f)
 
 
-def summarise(results):
-    """Reduces a results JSON to the few numbers a sensitivity table compares."""
+def summarise(results: dict | None) -> dict:
+    """
+    Reduces a results JSON to the few numbers a sensitivity table compares.
+
+    Parameters
+    ----------
+    results : dict or None
+        A parsed results JSON, or ``None`` when the run produced nothing.
+
+    Returns
+    -------
+    dict
+        ``sites``, ``capacity``, ``area_km2``, ``accepted``, ``kept`` and
+        ``acceptance``. All zero for a run that produced nothing, so a sweep row still
+        appears rather than vanishing.
+    """
     if results is None:
         return dict(sites=0, capacity=0, area_km2=0.0, accepted=0, kept=0, acceptance=0.0)
     r = results["results"]

@@ -29,11 +29,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r docs/requirements.txt
-      # Deliberately not -W yet. numpydoc_validation_checks is switched on in
-      # conf.py and currently reports every function whose parameters are not yet
-      # documented -- that is the check doing its job, and the docstring pass is
-      # what will silence it. Gating on -W today would mean a red build from the
-      # first commit and, with the main ruleset requiring this check, no mergeable
-      # pull requests at all. Turn -W on in the same commit that finishes the
-      # docstrings.
-      - run: sphinx-build -b html docs/source docs/build/html
+      # -W turns warnings into errors. Switched on now that the docstring pass is
+      # finished and numpydoc validation reports nothing: an undocumented parameter,
+      # a broken cross-reference or an autodoc import failure should fail the build
+      # rather than quietly produce a page with a hole in it.
+      - run: sphinx-build -W -b html docs/source docs/build/html

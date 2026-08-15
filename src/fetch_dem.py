@@ -126,7 +126,7 @@ def generate_and_patch_config(region_name, preset, dem_filepath):
             "--generate_config", config_filename, 
             "--config_preset", preset
         ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print(f"      {Icon.CROSS}{C.FAIL}Failed to generate config. Ensure 'site_searcher.py' is in this directory.{C.RESET}")
         return
         
@@ -172,7 +172,7 @@ def main():
     if not args.open_topography_api_key:
         print(f"\n{C.FAIL}{Icon.CROSS}ERROR: Missing Required Parameter.{C.RESET}")
         print(f"{C.WARN}The flag {C.BOLD}--open_topography_api_key{C.RESET}{C.WARN} must be provided.{C.RESET}")
-        print(f"If you do not have an API key, you cannot use this setup script and must download the TIF files manually from OpenTopography.")
+        print("If you do not have an API key, you cannot use this setup script and must download the TIF files manually from OpenTopography.")
         print(f"Register for a free key at: {C.MAGENTA}https://portal.opentopography.org/myopentopo{C.RESET}\n")
         sys.exit(1)
 
@@ -219,7 +219,7 @@ def main():
             
     print(f"\n{C.HEADER}===================================================={C.RESET}")
     print(f"{C.OK}{Icon.CHECK}{C.BOLD}Setup Complete.{C.RESET}")
-    print(f"You can now run the main script using your new configs:")
+    print("You can now run the main script using your new configs:")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/lima_config.json{C.RESET}")
     print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/arequipa_config.json{C.RESET}\n")
 
