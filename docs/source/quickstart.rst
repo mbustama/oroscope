@@ -1,6 +1,16 @@
 Quickstart
 ==========
 
+.. jupyter-execute::
+   :hide-code:
+   :hide-output:
+
+   # jupyter-sphinx runs these blocks in a plain kernel, which renders a Figure as its
+   # text repr rather than as a PNG unless the inline backend is switched on. Without
+   # this every diagram below silently became "<Figure size 1020x415 with 2 Axes>".
+   %matplotlib inline
+
+
 A search in three commands, then what each knob does.
 
 Cut a region

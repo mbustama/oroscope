@@ -1921,6 +1921,52 @@ def explicitly_passed(parser, argv=None):
             action.default = default
 
 
+def _one_or_pair(value):
+    """
+    Normalises a parameter that may be a single number or a (low, high) range.
+
+    The command line gives ``nargs="+"``, so one value arrives as a one-element list; a
+    config file may give a bare number or a two-element list. All three mean the same
+    things, and the physics accepts either form, so this only has to unwrap the
+    one-element case.
+
+    Parameters
+    ----------
+    value : float, sequence of float, or None
+        As supplied by the configuration or the command line.
+
+    Returns
+    -------
+    float, tuple of float, or None
+        A scalar for one value, a ``(low, high)`` tuple for two, ``None`` for nothing.
+
+    Raises
+    ------
+    SystemExit
+        If more than two values are given, which no parameter here means.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> ss._one_or_pair([2.0])
+    2.0
+    >>> ss._one_or_pair([1.5, 2.7])
+    (1.5, 2.7)
+    >>> ss._one_or_pair(None) is None
+    True
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    values = [float(v) for v in value]
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return (values[0], values[1])
+    raise SystemExit(f"expected one value or a (low, high) pair, got {len(values)}")
+
+
 def parse_score_weights(value):
     """
     Normalises per-component score weights from either input form.
@@ -2894,7 +2940,7 @@ def main():
     parser.add_argument("--max_memory_gb", type=float, default=None, help="Ceiling on this process's address space, in GiB. Defaults to 80%% of what the system reports available, so a search that outgrows the machine fails with MemoryError instead of inviting the OOM killer to choose a victim. 0 disables the cap.")
     parser.add_argument("--decay_energy_min_pev", type=float, default=None, help="Lower end of the tau energy range for the decay term. With --decay_energy_max_pev this folds the decay probability over a power-law spectrum, which is the defensible form: the probability runs over three decades across one experiment's reach, so a single energy chooses the answer rather than approximating it.")
     parser.add_argument("--decay_energy_max_pev", type=float, default=None, help="Upper end of that range, in PeV.")
-    parser.add_argument("--decay_spectral_index", type=float, default=None, help="Spectral index gamma in dN/dE ~ E^-gamma for the folded decay term (default: 2.0). A softer spectrum weights low energies, where the tau decays readily, so it drives the term toward 1.")
+    parser.add_argument("--decay_spectral_index", type=float, nargs="+", default=None, metavar="GAMMA", help="Spectral index gamma in dN/dE ~ E^-gamma for the folded decay term (default: 2.0). Give one value to pin the spectrum, or two to marginalise uniformly over that range when the index is not known -- a flat prior says so rather than pretending to a value. A softer spectrum weights low energies, where the tau decays readily, so it drives the term toward 1.")
     parser.add_argument("--shower_development_m", type=float, default=3000.0, help="Path the shower needs after the tau decays, in metres (default: 3000). Used both by the decay term and as the far endpoint of the Fresnel clearance measurement.")
     parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.")
     parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
@@ -3259,7 +3305,7 @@ def main():
         decay_energy_pev=final_params.get('decay_energy_pev'),
         decay_energy_min_pev=final_params.get('decay_energy_min_pev'),
         decay_energy_max_pev=final_params.get('decay_energy_max_pev'),
-        decay_spectral_index=final_params.get('decay_spectral_index'),
+        decay_spectral_index=_one_or_pair(final_params.get('decay_spectral_index')),
         shower_development_m=final_params.get('shower_development_m', 3000.0),
         gap_close_km=final_params.get('gap_close_km'),
         min_target_slope_deg=final_params.get('min_target_slope_deg'),

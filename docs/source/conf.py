@@ -20,10 +20,18 @@ import sys
 
 sys.path.insert(0, os.path.abspath('../../src'))
 
-# Importing site_searcher pulls in matplotlib.pyplot, which will try to reach for a
-# display if one is not ruled out first. autodoc imports every documented module, so
-# this has to happen before Sphinx does.
-os.environ.setdefault('MPLBACKEND', 'Agg')
+# Importing site_searcher pulls in matplotlib.pyplot, so Sphinx's own process needs a
+# non-interactive backend before autodoc imports anything.
+#
+# Set on the matplotlib module rather than through the MPLBACKEND environment variable,
+# and the distinction is the whole reason the figures on physics.rst were blank. An
+# environment variable is inherited by child processes, and jupyter-sphinx runs the
+# `jupyter-execute` blocks in a *separate kernel*: Agg reached that kernel, overrode the
+# inline backend that captures figures as PNGs, and every diagram silently produced no
+# output. The pages built clean and showed nothing.
+import matplotlib                                  # noqa: E402
+
+matplotlib.use('Agg')
 
 # -- Project information -----------------------------------------------------
 

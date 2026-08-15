@@ -741,3 +741,83 @@ class TestSpectrumWeightedDecay(unittest.TestCase):
         fine = float(physics.spectrum_weighted_decay_probability(
             d, self.LO, self.HI, samples=384))
         self.assertAlmostEqual(coarse, fine, places=4)
+
+
+class TestSpectralIndexPinnedOrMarginalised(unittest.TestCase):
+    """
+    The index can be pinned to a value or left to vary over a range.
+
+    Pinning states a belief about the spectrum. Marginalising states that the belief is
+    not held, which for an input nobody has measured for this purpose is often the
+    honest position -- and a flat prior over a stated range says so, rather than a
+    single number pretending to knowledge.
+    """
+
+    LO, HI = 3.0, 1000.0
+    D = 3000.0
+
+    def folded(self, index):
+        return float(physics.spectrum_weighted_decay_probability(
+            self.D, self.LO, self.HI, index))
+
+    def test_marginalising_lands_between_the_extremes_it_spans(self):
+        hard, soft = self.folded(1.5), self.folded(2.7)
+        spread = self.folded((1.5, 2.7))
+        self.assertLess(hard, spread)
+        self.assertLess(spread, soft)
+
+    def test_a_degenerate_range_reproduces_the_single_value(self):
+        self.assertAlmostEqual(self.folded((2.0, 2.0)), self.folded(2.0), places=9)
+
+    def test_the_order_of_the_pair_does_not_matter(self):
+        self.assertAlmostEqual(self.folded((1.5, 2.7)), self.folded((2.7, 1.5)), places=9)
+
+    def test_a_wider_range_is_still_a_probability(self):
+        for index in (0.5, 3.5, (0.5, 3.5)):
+            p = self.folded(index)
+            self.assertGreaterEqual(p, 0.0)
+            self.assertLessEqual(p, 1.0)
+
+    def test_more_than_two_indices_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(
+                self.D, self.LO, self.HI, (1.5, 2.0, 2.7))
+
+    def test_marginalising_preserves_shape(self):
+        d = np.array([[1000.0, 3000.0], [10_000.0, 30_000.0]])
+        p = physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, (1.5, 2.7))
+        self.assertEqual(p.shape, d.shape)
+
+    def test_the_default_index_grid_has_converged(self):
+        """
+        The default, against a grid fine enough to stand as truth.
+
+        Worth asserting on the default specifically: a coarse grid is *not* converged
+        here -- nine points differ from the limit in the fourth decimal -- and the
+        reason the default can afford to be generous is that the index integral folds
+        into a weight vector computed once, so a fine grid costs nothing per candidate.
+        """
+        default = float(physics.spectrum_weighted_decay_probability(
+            self.D, self.LO, self.HI, (1.5, 2.7)))
+        truth = float(physics.spectrum_weighted_decay_probability(
+            self.D, self.LO, self.HI, (1.5, 2.7), index_samples=2001))
+        self.assertAlmostEqual(default, truth, places=5)
+
+    def test_marginalising_costs_no_more_than_pinning(self):
+        """
+        The refactor that makes a fine grid affordable.
+
+        Folding the index integral into the weights turned marginalising from 45 times
+        the work of a single index into the same work. Asserted as a loose bound rather
+        than a timing, so it cannot fail on a busy machine.
+        """
+        import time
+        d = np.full(200_000, 3000.0)
+        t0 = time.perf_counter()
+        physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, 2.0)
+        pinned = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, (1.5, 2.7))
+        marginal = time.perf_counter() - t0
+        self.assertLess(marginal, 5.0 * pinned + 1.0,
+                        "marginalising should fold into the weights, not re-integrate")

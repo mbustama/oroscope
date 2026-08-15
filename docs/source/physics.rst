@@ -1,6 +1,16 @@
 The physics
 ===========
 
+.. jupyter-execute::
+   :hide-code:
+   :hide-output:
+
+   # jupyter-sphinx runs these blocks in a plain kernel, which renders a Figure as its
+   # text repr rather than as a PNG unless the inline backend is switched on. Without
+   # this every diagram below silently became "<Figure size 1020x415 with 2 Axes>".
+   %matplotlib inline
+
+
 What the search is actually computing, why each criterion is there, and where each
 number came from. :doc:`assumptions` states what is taken for granted and what that
 costs; this page is the derivation.
@@ -33,7 +43,7 @@ Tracing backwards from the detector
    :hide-code:
 
    import figures
-   figures.walk_mechanism()
+   _ = figures.walk_mechanism()
 
 
 Fix a candidate pixel and an arrival direction: azimuth :math:`\phi`, elevation
@@ -124,7 +134,7 @@ resolution.
    :hide-code:
 
    import figures
-   figures.canyon_geometry()
+   _ = figures.canyon_geometry()
 
 The band is **per experiment, and probably per role**. GRAND wants ground it can
 deploy on: 3–25°. Colca's canyon walls are ~40°, far outside that. A single global
@@ -219,13 +229,51 @@ decay length,
    :hide-code:
 
    import figures
-   figures.decay_and_shower()
+   _ = figures.decay_and_shower()
 
 For GRAND this is largely implicit, because its distance window is *derived* from the
 decay length. For a canyon it is not: the window comes from the terrain, and across a
 3 km crossing the probability runs from 1.00 at 3 PeV to 0.06 at 1 EeV. That is a
 factor of seventeen inside a single experiment's energy reach, and it is invisible to
 every other term.
+
+**So the term is folded over the spectrum rather than evaluated at one energy.** With a
+flux :math:`{\rm d}N/{\rm d}E \propto E^{-\gamma}`,
+
+.. math::
+
+   P(u) = \frac{\int E^{-\gamma}\left(1 - e^{-u/L(E)}\right)\,{\rm d}E}
+               {\int E^{-\gamma}\,{\rm d}E}.
+
+That this matters is measurable rather than arguable. Sweeping the assumption each way:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Assumption swept
+     - Range
+     - Reported capacity
+   * - single representative energy
+     - 3 – 1000 PeV
+     - 10878 → **0**
+   * - spectral index, folded
+     - :math:`\gamma` = 1.5 – 2.7
+     - 7205 → **10495**
+
+A single energy chooses the answer; folding makes it a property of the terrain and the
+spectrum. The index itself may be **pinned or left to vary**: pass one value to state a
+belief about the spectrum, or a ``(low, high)`` pair to marginalise uniformly over the
+range, which is the honest form when the index is not known.
+
+.. jupyter-execute::
+
+   import physics
+
+   pinned = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, 2.0)
+   spread = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, (1.5, 2.7))
+   print(f"gamma pinned at 2.0     : {float(pinned):.4f}")
+   print(f"gamma marginal 1.5-2.7  : {float(spread):.4f}")
 
 Geomagnetic emission
 ````````````````````

@@ -44,10 +44,11 @@ These are the ones to check before quoting a result.
    * - ``min_target_slope_deg``
      - unset
      - When set for a canyon search, the floor separating a wall from a hillside.
-   * - ``decay_energy_pev``
-     - unset
-     - **A single energy standing in for a spectrum.** See below; this is the worst of
-       them.
+   * - ``decay_spectral_index``
+     - 2.0
+     - The flux slope the decay term is folded against. May be pinned to a value or
+       given as a ``(low, high)`` pair to marginalise over. Folding replaced a single
+       representative energy, which was far worse: see below.
    * - ``min_score``
      - 0.0
      - A cut on a product of six components. See below.
@@ -67,10 +68,10 @@ parameter at a time:
      - Low
      - Baseline
      - High
-   * - ``decay_energy_pev``
-     - 3 PeV → 10 878
-     - 55 PeV → **2056**
-     - 100 PeV → **0**
+   * - ``decay_spectral_index`` (folded)
+     - 1.5 → 7205
+     - 2.0 → **9717**
+     - 2.7 → 10 495
    * - ``min_score``
      - 0.0 → 45 928
      - 0.35 → **2056**
@@ -80,11 +81,18 @@ parameter at a time:
      - 25° → **2056**
      - 35° → **0**
 
-**The decay energy is not an approximation, it is the answer.** Across TAMBO's own
-3 PeV – 1 EeV reach the reported capacity runs from 10 878 to zero, because the decay
-length runs from 147 m to 49 km against a ~3 km crossing. A single representative
-energy cannot stand in for a spectrum here. Any capacity quoted for a canyon experiment
-should be folded over the real spectrum first.
+**The decay term is now folded over the spectrum, and that fixed it.** Evaluated at a
+single representative energy it *was* the answer rather than an approximation to one:
+across TAMBO's own 3 PeV – 1 EeV reach the reported capacity ran from 10 878 to zero,
+because the decay length runs from 147 m to 49 km against a ~3 km crossing. Folded
+against the flux, the same result varies by 1.46× across a plausible range of spectral
+index. The remaining exposure is the index itself, and it can be marginalised rather
+than chosen.
+
+What has *not* been done is the full job: the number of detected events is
+:math:`\int \Phi(E)\,A(E)\,P_{\rm decay}(E)\,{\rm d}E`, and the acceptance
+:math:`A(E)` is exactly what no available table supplies. The weight here is the flux
+alone.
 
 **A product score has no safe threshold.** Six components each in :math:`[0,1]`
 multiply to a distribution piled up near zero, so ``min_score`` anywhere in the middle

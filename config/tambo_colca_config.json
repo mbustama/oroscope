@@ -1,5 +1,5 @@
 {
-    "_comment": "TAMBO over the Colca crop. Same dem_path, origin and downsample_factor as grand_colca_config.json so the masks are pixel-aligned. Values marked ASSUMPTION in docs/EXPERIMENTS.md are the ones to check against the collaboration before quoting results.",
+    "_comment": "TAMBO over the Colca crop. Same dem_path, origin and downsample_factor as grand_colca_config.json so the masks are pixel-aligned. Values marked ASSUMPTION in the comments below are the ones to check against the collaboration before quoting results; docs/source/assumptions.rst collects them with what each one costs.",
     "dem_path": "../input/dem/colca.tif",
     "origin_lat": -15.299861,
     "origin_lon": -72.400139,
@@ -27,7 +27,7 @@
     "max_target_slope_deg": null,
     "_comment_physics": "Particle detection, not radio: no Fresnel clearance, no geomagnetic weighting, and grammage scored as a band because particle content dies after shower maximum whereas radio simply propagates.",
     "_comment_shower_band": "= physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.1), i.e. TAMBO's 3 PeV - 1 EeV reach, taken as the depth range where the charged-particle content stays above a tenth of its own maximum. Stated explicitly rather than via energy_min/max_pev only because those also override the distance window. The default (700, 2800) is a GRAND-scale band and rejects every canyon.",
-    "_comment_decay": "Folded over the spectrum rather than evaluated at one energy. The decay probability runs over three decades across TAMBO's 3 PeV - 1 EeV reach, so a single representative energy chooses the answer rather than approximating it: the sensitivity sweep gave 10878 detector positions at 3 PeV and zero at 100. decay_spectral_index is 2.0, the canonical slope, and is an ASSUMPTION worth the same scrutiny as any other. shower_development_m is 0 because the grammage band already carries the requirement that enough air was traversed.",
+    "_comment_decay": "Folded over the spectrum rather than evaluated at one energy. The decay probability runs over three decades across TAMBO's 3 PeV - 1 EeV reach, so a single representative energy chooses the answer rather than approximating it: the sensitivity sweep gave 10878 detector positions at 3 PeV and zero at 100. decay_spectral_index may be a single value to pin the spectrum, or a [low, high] pair to marginalise uniformly over the range when the index is not known -- e.g. [1.5, 2.7]. 2.0 is the canonical slope and is an ASSUMPTION worth the same scrutiny as any other; marginalising costs nothing, since the index integral folds into a weight computed once. shower_development_m is 0 because the grammage band already carries the requirement that enough air was traversed.",
     "shower_development_m": 0.0,
     "use_geomagnetic": false,
     "grammage_mode": "particle",

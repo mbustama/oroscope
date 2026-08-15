@@ -30,7 +30,8 @@ __all__ = [
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
     "production_escape_optimum_gcm2", "depth_band_from_energy",
-    "earth_absorption_cutoff_deg", "geomagnetic_latitude_deg",
+    "earth_absorption_cutoff_deg", "spectrum_weighted_decay_probability",
+    "geomagnetic_latitude_deg",
     "centered_dipole_inclination", "default_field_for_site",
     "geomagnetic_unit_vector", "geomagnetic_sin_alpha", "refractivity",
     "cherenkov_angle_rad", "cherenkov_footprint_radius_m", "footprint_sampling",
@@ -967,7 +968,8 @@ DEFAULT_SPECTRAL_INDEX = 2.0
 
 def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_pev,
                                         spectral_index=DEFAULT_SPECTRAL_INDEX,
-                                        shower_development_m=0.0, samples=96):
+                                        shower_development_m=0.0, samples=96,
+                                        index_samples=129):
     r"""
     Probability the tau decays inside the usable gap, folded over a power-law spectrum.
 
@@ -1006,12 +1008,22 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
         a target closer than this yields nothing usable.
     samples : int, optional
         Points on the log-spaced energy grid.
+    index_samples : int, optional
+        Points across the spectral-index range, when one is given. Generous by default
+        because the index integral is folded into a weight vector computed once, so a
+        fine grid costs nothing per candidate. Ignored for a single index.
 
     Returns
     -------
     ndarray
         Flux-weighted decay probability, in [0, 1], matching the shape of
         ``distance_m``.
+
+    Raises
+    ------
+    ValueError
+        If the energy range is inverted, or ``spectral_index`` is neither one value
+        nor a pair.
 
     See Also
     --------
@@ -1030,9 +1042,26 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     >>> hard = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, 1.5)
     >>> bool(hard < soft)
     True
+
+    Or marginalise over the index rather than choosing one, which lands between the
+    extremes it spans:
+
+    >>> spread = physics.spectrum_weighted_decay_probability(
+    ...     3000.0, 3.0, 1000.0, (1.5, 2.7))
+    >>> bool(hard < spread < soft)
+    True
     """
     if energy_max_pev <= energy_min_pev:
         raise ValueError("energy_max_pev must exceed energy_min_pev")
+
+    gammas = np.atleast_1d(np.asarray(spectral_index, dtype=np.float64))
+    if gammas.size == 2:
+        lo, hi = float(gammas.min()), float(gammas.max())
+        # Marginalised uniformly over the range: no basis for preferring a value
+        # inside it, and a flat prior is the honest way to say so.
+        gammas = np.linspace(lo, hi, int(index_samples)) if hi > lo else np.array([lo])
+    elif gammas.size != 1:
+        raise ValueError("spectral_index must be one value or a (low, high) pair")
 
     d = np.asarray(distance_m, dtype=np.float64)
     usable = np.clip(d - float(shower_development_m), 0.0, None)
@@ -1041,9 +1070,25 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     # which keeps the quadrature well conditioned over three decades.
     ln_e = np.linspace(np.log(energy_min_pev), np.log(energy_max_pev), int(samples))
     energies = np.exp(ln_e)
-    weights = energies ** (1.0 - spectral_index)
     lengths = tau_decay_length_m(energies)
-    denominator = float(_trapezoid(weights, ln_e))
+
+    # One effective weight, computed once and independent of the candidates.
+    #
+    # The decay factor depends on the energy but not on the index, so the index
+    # integral can be moved inside:
+    #
+    #     (1/dg) * INT dg [ INT dE decay(E) w(E,g) / Z(g) ]
+    #         = INT dE decay(E) * [ (1/dg) INT dg w(E,g)/Z(g) ]
+    #
+    # so marginalising costs a weight vector rather than a re-integration per index.
+    # Done the obvious way it was 45 times the work for a 45-point index grid, which on
+    # a real search was 25 s against 1 s; this way a fine grid is free.
+    weights = energies[None, :] ** (1.0 - gammas[:, None])
+    normalised = weights / _trapezoid(weights, ln_e, axis=-1)[:, None]
+    if gammas.size == 1:
+        effective = normalised[0]
+    else:
+        effective = _trapezoid(normalised, gammas, axis=0) / (gammas[-1] - gammas[0])
 
     # Chunked over candidates rather than broadcast in one go. A real search carries
     # hundreds of thousands of them, and the full (candidates x energies) outer product
@@ -1053,10 +1098,10 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     chunk = 65536
     for i in range(0, flat.size, chunk):
         block = flat[i:i + chunk, None]
-        integrand = -np.expm1(-block / lengths) * weights
-        out[i:i + chunk] = _trapezoid(integrand, ln_e, axis=-1)
+        decay = -np.expm1(-block / lengths)
+        out[i:i + chunk] = _trapezoid(decay * effective, ln_e, axis=-1)
 
-    result = np.clip(out / denominator, 0.0, 1.0)
+    result = np.clip(out, 0.0, 1.0)
     return result.reshape(usable.shape) if usable.ndim else result[0]
 
 
