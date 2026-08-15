@@ -176,6 +176,53 @@ class TestScoreCandidates(unittest.TestCase):
         self.assertLessEqual(float(total.max()), 1.0)
 
 
+class TestTheGeomagneticComponentAppearsOnlyWhenApplied(unittest.TestCase):
+    """
+    A run with the weighting switched off must not grow a ``geomagnetic`` component.
+
+    Whether it was applied is decided by comparing the geomagnetically-weighted solid
+    angle with the plain one. A candidate that accepted *no* directions has a ratio of
+    zero by construction, and testing the whole array let those zeros stand in as
+    evidence of weighting — so ``use_geomagnetic: false`` still produced a component
+    that was identically 1 for every viable candidate. Harmless under a product,
+    wrong under ``mean``, and it put a criterion the run had disabled among the
+    reasons its sites were good.
+    """
+
+    def observables(self, weighted, with_a_dead_candidate=True):
+        omega = np.array([0.05, 0.05, 0.0 if with_a_dead_candidate else 0.05])
+        geomag = omega * (0.4 if weighted else 1.0)
+        return dict(cells=np.array([4, 4, 0 if with_a_dead_candidate else 4]),
+                    max_depth_gcm2=np.array([1e6, 1e6, 1e6]),
+                    mean_distance_m=np.array([10000.0, 10000.0, 10000.0]),
+                    solid_angle_sr=omega,
+                    geomag_solid_angle_sr=geomag)
+
+    def test_it_is_absent_when_the_weighting_was_not_applied(self):
+        _, components = scoring.score_candidates(self.observables(weighted=False))
+        self.assertNotIn("geomagnetic", components)
+
+    def test_a_candidate_with_no_accepted_sky_does_not_fake_it(self):
+        """The specific fault: the dead candidate's zero ratio was the only evidence."""
+        with_dead, without_dead = (
+            scoring.score_candidates(
+                self.observables(weighted=False, with_a_dead_candidate=flag))[1]
+            for flag in (True, False))
+        self.assertNotIn("geomagnetic", with_dead)
+        self.assertNotIn("geomagnetic", without_dead)
+
+    def test_it_is_present_when_the_weighting_was_applied(self):
+        _, components = scoring.score_candidates(self.observables(weighted=True))
+        self.assertIn("geomagnetic", components)
+        self.assertAlmostEqual(float(components["geomagnetic"][0]), 0.4, places=6)
+
+    def test_dropping_it_does_not_change_a_product_score(self):
+        """Which is why this went unnoticed: it was multiplying by one."""
+        total, components = scoring.score_candidates(self.observables(weighted=False))
+        self.assertNotIn("geomagnetic", components)
+        self.assertGreater(float(total[0]), 0.0)
+
+
 class TestApertureInvariants(unittest.TestCase):
     """
     What must hold whatever the unknown normalisation is.

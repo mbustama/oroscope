@@ -892,6 +892,10 @@ with contextlib.redirect_stdout(log), contextlib.redirect_stderr(io.StringIO()):
     results = ss.find_grand_regions_interactive(
         dem_path=dem,
         run_output_dir=os.path.join(WORK, "run"),
+        # Note search_mode and grid_type. The function's own defaults are 'single'
+        # and 'square'; the config template's are 'distributed' and 'hex'. Omitting
+        # them here is not the same as omitting them from a config file -- see below.
+        search_mode="distributed", grid_type="hex",
         target_antennas=200, min_sub_array_size=20,
         min_width_km=1.0, antenna_spacing_km=1.0,
         min_dist_km=3.0, max_dist_km=20.0,
@@ -900,6 +904,32 @@ with contextlib.redirect_stdout(log), contextlib.redirect_stderr(io.StringIO()):
 
 print(f"{len(log.getvalue().splitlines())} lines of output captured\\n")
 print("returned:", ", ".join(sorted(results)))"""),
+("md", """### One trap worth knowing
+
+**The function's defaults are not the config template's defaults.** Five parameters
+differ, and omitting one means different things depending on which door you came in by:
+
+| parameter | `find_grand_regions_interactive` | `default_config()` |
+|---|---|---|
+| `search_mode` | `single` | `distributed` |
+| `grid_type` | `square` | `hex` |
+| `target_antennas` | 1000 | 10000 |
+| `min_dist_km` | 30.0 | 10.0 |
+| `min_sub_array_size` | 100 | 500 |
+
+An earlier draft of this notebook omitted `search_mode` and quietly ran a *single*
+search with a 30 km minimum distance, which on this small ridge found nothing at all.
+The funnel said so plainly, which is the system working — but the safe habit when
+driving the library is to start from `ss.default_config()` and override, rather than to
+rely on the signature's defaults."""),
+("code", """template = ss.default_config()
+signature_defaults = {
+    "search_mode": "single", "grid_type": "square",
+    "target_antennas": 1000, "min_dist_km": 30.0, "min_sub_array_size": 100,
+}
+print(f"{'parameter':22} {'function':>12} {'config template':>18}")
+for key, value in signature_defaults.items():
+    print(f"{key:22} {str(value):>12} {str(template[key]):>18}")"""),
 ("md", """That dictionary is the same content the results JSON holds, plus the explanation and
 the paths written. No re-reading the file it just wrote."""),
 ("code", """print(f"sites:    {results['results']['total_sites']}")
@@ -997,7 +1027,7 @@ print("\\nOn the real configurations:")
 print("   GRAND Colca  2.19x   (against 2.29x from a stride-1 control -- an independent check)")
 print("   TAMBO Colca  0.53x   (a 100 m element cannot bridge the gaps stride 5 leaves,")
 print("                        so its area is a LOWER bound, not an upper one)")"""),
-("md", """## The run, explained
+("md", """## The run, explained — the whole summary, here
 
 Everything above is assembled for you. `explain.explain_results` takes the results
 dictionary and returns a string — it opens no files, runs nothing and needs no DEM, so
@@ -1005,7 +1035,22 @@ a run from months ago can still be explained from its JSON.
 
 It is on by default, printed at the end of every run and saved as `explanation.txt`
 beside the results, because these runs are meant to be handed to other people and a
-terminal scrollback is not. `--no_explain` suppresses it."""),
+terminal scrollback is not. `--no_explain` suppresses it.
+
+This is the text in full. Its sections, in order:
+
+| section | answers |
+|---|---|
+| **The run** | what was searched, at what resolution, by which commit |
+| **The headline** | how many sites, how much area, how many detectors |
+| **Where the candidates went** | the funnel, and **which constraint bound this run** |
+| **From pixels to sites** | labelled regions → area threshold → capacity threshold |
+| **The sites** | each one's area, capacity, facing, score and weakest criterion |
+| **Why these sites qualify** | what the ground actually offers, criterion by criterion, with coordinates |
+| **What energy this geometry favours** | where the geometric aperture peaks |
+| **How to read these numbers** | the closing factor *for this run*, and what area is not |
+| **Which of these are assumptions** | choices rather than measurements, with measured sensitivities |
+| **What to try next** | concrete commands, chosen from what this run did |"""),
 ("code", """print(results["explanation"])"""),
 ("md", """## Provenance
 
@@ -1170,6 +1215,20 @@ else:
     print(f"   union  {report['union']['area_km2']:>10,.1f} km²")
     for pair, stats in report["pairwise_overlap"].items():
         print(f"   {pair}: Jaccard {stats['jaccard']:.4f}")"""),
+("md", """And the overlay explains itself too, the same way a search does — including the part
+that is easy to get wrong. Co-location is decided by whichever *ground* property the
+two experiments share least of, because a pixel has one slope and both have to accept
+it. What each asks of the **view** — the distance window, the arrival elevations — may
+differ freely: two experiments can look out from the same hillside at different ranges
+without conflict.
+
+`oroscope-combine` prints this and saves it as `combination_explanation.txt`."""),
+("code", """if not os.path.exists(report_path):
+    print("The combination has not been produced yet.")
+else:
+    runs = {label: res for label, res in (("GRAND", grand_full), ("TAMBO", tambo_full))
+            if res is not None}
+    print(explain.explain_combination(report, runs))"""),
 ("md", """### Comparing against the crop
 
 The crop's numbers, for reference — GRAND 4580.2 km² in 1 site with 5317 detectors,

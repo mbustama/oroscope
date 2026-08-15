@@ -38,6 +38,7 @@ __all__ = ["load_run", "check_alignment", "read_world_file",
            "pixel_area_km2", "capacity_of", "main"]
 import tifffile as tiff
 
+import explain as explain_mod
 import site_searcher as ss
 
 # Matplotlib is only needed for the overview image, and the searcher already forces a
@@ -203,6 +204,16 @@ def capacity_of(results):
     ``int()`` raises ``ValueError`` -- which was not caught, and took the whole
     combination down with it. A run that does not report a capacity is an ordinary
     case here, not an error: the overlay is about ground, not detectors.
+
+    Parameters
+    ----------
+    results : dict or None
+        A run's parsed results JSON, or ``None`` when the directory held none.
+
+    Returns
+    -------
+    int or None
+        The reported capacity, or ``None`` when the run did not report one.
     """
     try:
         return int(results["results"]["total_capacity"])
@@ -224,6 +235,12 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--no_explain", action="store_false", dest="explain",
+                    help="Skip the plain-language account of the overlay. It is printed "
+                         "by default and saved as combination_explanation.txt: what each "
+                         "experiment brings, how much ground they can share, and which "
+                         "screening band decides that. Co-location is usually settled by "
+                         "slope rather than by anything about the physics.")
     args = ap.parse_args()
 
     if len(args.run_dirs) < 2:
@@ -376,6 +393,23 @@ def main():
         for pair, stats in report["pairwise_overlap"].items():
             print(f"      {pair}: {stats['area_km2']:,.1f} km² shared, "
                   f"Jaccard {stats['jaccard']:.3f}")
+
+    # The overlay, explained. Same reasoning as the search's own summary: the report
+    # gives a joint area and a Jaccard index, and neither says why either is what it
+    # is. Failures are reported and swallowed -- a summary that cannot be written is
+    # not a reason to lose a combination that already succeeded.
+    if args.explain:
+        try:
+            text = explain_mod.explain_combination(
+                report, {label: run["results"] for label, run in zip(labels, runs)
+                         if run.get("results")})
+            print("\n" + text)
+            explanation_path = os.path.join(out_dir, "combination_explanation.txt")
+            with open(explanation_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            written.append(explanation_path)
+        except Exception as e:                       # pragma: no cover - defensive
+            print(f"   could not compose the combination summary: {e}")
 
     print("\n   written:")
     for path in written:

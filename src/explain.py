@@ -19,9 +19,91 @@ ANSI colour does not survive a paste into an email.
 
 from __future__ import annotations
 
-__all__ = ["explain_results", "binding_constraint", "weakest_component",
-           "closing_inflation", "selected_sites", "STAGE_KNOBS",
-           "AREA_INFLATION_AT_COLCA"]
+__all__ = ["explain_results", "explain_combination", "binding_constraint",
+           "weakest_component", "site_strengths", "constraint_overlap",
+           "closing_inflation", "selected_sites", "COMPONENT_MEANING",
+           "STAGE_KNOBS", "AREA_INFLATION_AT_COLCA"]
+
+# What each named score component means, and which measured quantity earns it.
+#
+# The components were named so that a weak site could be attributed. The same naming
+# answers the more useful question -- why is this site *good*? -- but only with this
+# table, because a component's name says what it is and not what a high score implies.
+# Each entry is (label, observable field, what a high score means, unit formatter).
+COMPONENT_MEANING = {
+    "solid_angle": (
+        "accepted sky", "solid_angle_sr",
+        "a wide spread of arrival directions reaches usable terrain. This is the "
+        "quantity an aperture is proportional to, so it is the closest thing to a "
+        "single measure of how good a site is",
+        lambda v: f"{v:.2f} sr"),
+    "depth": (
+        "column depth", "max_depth_gcm2",
+        "enough rock behind the exit point to produce a tau, and not so much that it "
+        "cannot escape -- a band, not a floor",
+        lambda v: f"{v:,.0f} g/cm²"),
+    "distance": (
+        "exit distance", "mean_distance_m",
+        "the terrain a ray strikes sits inside the decay-baseline window, so a tau "
+        "has room to decay and its shower room to develop",
+        lambda v: f"{v:,.0f} m"),
+    "shower": (
+        "shower development", "path_grammage_gcm2",
+        "the air between the exit point and the detector is deep enough for the "
+        "shower to have developed",
+        lambda v: f"{v:,.0f} g/cm²"),
+    "decay": (
+        "tau decay", None,
+        "the tau is likely to decay within the gap, folded over the assumed spectrum "
+        "rather than evaluated at one energy",
+        None),
+    "geomagnetic": (
+        "geomagnetic angle", None,
+        "the accepted directions lie across the geomagnetic field rather than along "
+        "it, so the shower radiates. Measured, an east-facing target is worth 3.7x a "
+        "north-facing one",
+        None),
+    "footprint": (
+        "footprint sampling", "altitude_m",
+        "the array spacing samples the Cherenkov footprint well at this altitude",
+        lambda v: f"{v:,.0f} m"),
+    "clearance": (
+        "Fresnel clearance", "best_clearance_ratio",
+        "the radio path clears intervening terrain by enough Fresnel radii",
+        lambda v: f"{v:.2f} F1"),
+    "muon_shielding": (
+        "muon shielding", "max_depth_gcm2",
+        "enough rock overburden along the arrival direction to reject atmospheric "
+        "muons",
+        lambda v: f"{v:,.0f} g/cm²"),
+    "nu_survival": (
+        "Earth transmission", "earth_chord_gcm2",
+        "the neutrino's chord through the Earth is short enough that it is not "
+        "absorbed before reaching the exit point",
+        lambda v: f"{v:,.3g} g/cm²"),
+}
+
+# Bands two experiments must genuinely share before they can stand on the same pixel.
+#
+# Only properties of the *ground itself* belong here. A pixel has one slope, one
+# altitude and one aspect, so both experiments must accept those same values. The
+# distance window and the arrival-elevation window are asked of the *view* from that
+# pixel, and two experiments looking out from the same hillside at different ranges and
+# different elevations are in no conflict whatever -- GRAND scanning 10-40 km within
+# +/-3 degrees and TAMBO scanning 2-5 km within +/-20 degrees can both be satisfied
+# from one patch of ground. Treating those as shared constraints produced the confident
+# and wrong conclusion that two experiments sharing 50 km2 "cannot share ground at all".
+_SHARED_BANDS = (
+    ("deployable slope", "min_slope_deg", "max_slope_deg", "°"),
+    ("altitude", "min_altitude", "max_altitude", " m"),
+    ("aspect", "min_aspect_deg", "max_aspect_deg", "°"),
+)
+
+# Asked of the view, not of the ground. Reported for contrast, never as a conflict.
+_VIEWING_BANDS = (
+    ("target distance", "min_dist_km", "max_dist_km", " km"),
+    ("arrival elevation", "elev_min_deg", "elev_max_deg", "°"),
+)
 
 # Measured with a stride-1 control run at Colca: closing a mask with a 1 km element
 # more than doubles the area it reports. Quoted rather than recomputed because it is a
@@ -223,6 +305,121 @@ def closing_inflation(funnel, candidate_stride=1):
     return None
 
 
+def site_strengths(arrival_scan, statistic="p50", threshold=0.75):
+    """
+    Why a site is good: the criteria it satisfies well, and the measurement behind each.
+
+    The mirror of :func:`weakest_component`, and the more useful half when a site has
+    been *selected*. "Site 3555 scored 0.55" says nothing a reader can act on; "it sees
+    1.08 sr of usable sky across a 3.1 km gap with 780,000 g/cm² of rock behind it, and
+    every criterion but the accepted solid angle is satisfied outright" says what the
+    ground is actually like.
+
+    Parameters
+    ----------
+    arrival_scan : dict
+        A site's ``arrival_scan`` record.
+    statistic : str, optional
+        Which per-site statistic to read, ``"mean"``, ``"p50"`` or ``"p90"``.
+    threshold : float, optional
+        Score at or above which a component counts as satisfied. 0.75 rather than 1.0
+        because a band score falls off smoothly either side of its plateau, so
+        insisting on exactly 1 would report nothing on most real sites.
+
+    Returns
+    -------
+    list of dict
+        One entry per satisfied component, strongest first, each with ``name``,
+        ``label``, ``score``, ``means`` and -- where the record carries the observable
+        behind it -- ``evidence``. Empty when the record has no components.
+
+    Examples
+    --------
+    >>> import explain
+    >>> rec = {"score_solid_angle_p50": 0.9, "score_depth_p50": 1.0,
+    ...        "solid_angle_sr_p50": 1.08, "max_depth_gcm2_p50": 784440.0}
+    >>> [s["name"] for s in explain.site_strengths(rec)]
+    ['depth', 'solid_angle']
+    >>> explain.site_strengths(rec)[1]["evidence"]
+    '1.08 sr'
+    """
+    suffix = "_" + statistic
+    found = []
+    for key, value in arrival_scan.items():
+        if not key.startswith("score_") or not key.endswith(suffix):
+            continue
+        name = key[len("score_"):-len(suffix)]
+        if not name or float(value) < threshold:
+            continue
+        label, field, means, fmt = COMPONENT_MEANING.get(
+            name, (name.replace("_", " "), None, "", None))
+        entry = {"name": name, "label": label, "score": float(value), "means": means}
+        if field and fmt:
+            measured = arrival_scan.get(f"{field}{suffix}")
+            if measured is not None:
+                entry["evidence"] = fmt(float(measured))
+        found.append(entry)
+    return sorted(found, key=lambda e: e["score"], reverse=True)
+
+
+def constraint_overlap(params_a, params_b, bands=None):
+    """
+    Where two experiments' screening bands agree, and by how little.
+
+    This is what decides whether two experiments can share ground, and it is decided
+    before any arrival geometry is considered: a pixel has one slope, and both
+    experiments must accept it. Measured at Colca, that is the whole story --
+    GRAND's 3-25 degree deployable band against a canyon's ~40 degree walls leaves a
+    20-25 degree sliver, and the joint area follows from that rather than from
+    anything about neutrinos.
+
+    Parameters
+    ----------
+    params_a, params_b : dict
+        The two runs' recorded ``parameters`` blocks.
+    bands : sequence, optional
+        Which bands to compare, as ``(label, low key, high key, unit)``. Defaults to
+        the properties of the ground itself -- slope, altitude, aspect -- which are the
+        only ones both experiments must agree on. Pass :data:`_VIEWING_BANDS` to
+        compare what each asks of the view instead, which need not agree at all.
+
+    Returns
+    -------
+    list of dict
+        One entry per band both runs recorded: ``label``, ``a``, ``b``, ``overlap``
+        (a ``(low, high)`` pair or ``None``), ``width``, and ``share_of_narrower`` --
+        the fraction of the tighter of the two bands that the overlap covers, which is
+        the number that says how much room there is to share.
+
+    Examples
+    --------
+    >>> import explain
+    >>> a = {"min_slope_deg": 3.0, "max_slope_deg": 25.0}
+    >>> b = {"min_slope_deg": 20.0, "max_slope_deg": 60.0}
+    >>> band = explain.constraint_overlap(a, b)[0]
+    >>> band["overlap"], round(band["share_of_narrower"], 3)
+    ((20.0, 25.0), 0.227)
+    """
+    out = []
+    for label, lo_key, hi_key, unit in (bands or _SHARED_BANDS):
+        a_lo, a_hi = _get(params_a, lo_key), _get(params_a, hi_key)
+        b_lo, b_hi = _get(params_b, lo_key), _get(params_b, hi_key)
+        if None in (a_lo, a_hi, b_lo, b_hi):
+            continue                       # unset on one side is not a constraint
+        lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
+        width_a, width_b = a_hi - a_lo, b_hi - b_lo
+        narrower = min(width_a, width_b)
+        overlap = (lo, hi) if hi > lo else None
+        out.append({
+            "label": label, "unit": unit,
+            "a": (a_lo, a_hi), "b": (b_lo, b_hi),
+            "overlap": overlap,
+            "width": (hi - lo) if overlap else 0.0,
+            "share_of_narrower": ((hi - lo) / narrower) if overlap and narrower else 0.0,
+        })
+    return out
+
+
 def weakest_component(arrival_scan, statistic="p50"):
     """
     Names the score component that held a site back, and its value.
@@ -389,11 +586,15 @@ def _section_headline(results):
     out += _wrap(line + ".")
 
     best = max(sites, key=lambda s: s.get("capacity_exact", 0))
+    where = ""
+    if best.get("center_lat") is not None:
+        where = (f", centred {best['center_lat']:.4f}, {best['center_lon']:.4f}"
+                 f" — paste that into a map")
     out.append("")
     out += _wrap(f"Largest by capacity: site {best.get('site_id')}, "
                  f"{float(best.get('area_km2', 0)):,.2f} km², "
                  f"{_num(int(best.get('capacity_exact', 0)))} detectors, "
-                 f"facing {best.get('facing_direction', '?')}.")
+                 f"facing {best.get('facing_direction', '?')}{where}.")
 
     if rejected:
         spare = sum(float(s.get("area_km2", 0.0)) for s in rejected)
@@ -532,6 +733,82 @@ def _section_sites(results, max_rows=25):
     return out
 
 
+def _section_why_good(results, max_sites=6):
+    """Per site: what the ground is actually like, and which criteria it satisfies."""
+    sites, _ = selected_sites(results)
+    if not sites:
+        return []
+    if not any(site_strengths(s.get("arrival_scan") or {}) for s in sites):
+        return []
+
+    out = _heading("WHY THESE SITES QUALIFY")
+    out += _wrap("What the terrain at each one actually offers. The score is a product "
+                 "of named criteria, so a site can be described rather than merely "
+                 "ranked — these are the criteria it satisfies, with the measurement "
+                 "that earned each.")
+
+    for site in sites[:max_sites]:
+        scan = site.get("arrival_scan") or {}
+        strong = site_strengths(scan)
+        if not strong:
+            continue
+        out.append("")
+        header = (f"  Site {site.get('site_id')} — "
+                  f"{float(site.get('area_km2', 0)):,.2f} km², "
+                  f"{int(site.get('capacity_exact', 0)):,} detectors, "
+                  f"facing {site.get('facing_direction', '?')}")
+        if site.get("center_lat") is not None:
+            header += f", centred {site['center_lat']:.4f}, {site['center_lon']:.4f}"
+        out.append(header)
+
+        # The measured geometry, before any scoring: the reader's own check on it.
+        facts = []
+        for field, fmt in (("solid_angle_sr", lambda v: f"{v:.2f} sr of accepted sky"),
+                           ("mean_distance_m", lambda v: f"targets at {v:,.0f} m"),
+                           ("target_slope_deg", lambda v: f"striking {v:.0f}° terrain"),
+                           ("max_depth_gcm2", lambda v: f"{v:,.0f} g/cm² of rock behind"),
+                           ("altitude_m", lambda v: f"at {v:,.0f} m altitude")):
+            value = scan.get(f"{field}_p50")
+            if value is not None:
+                facts.append(fmt(float(value)))
+        if facts:
+            out += _wrap("Measured: " + ", ".join(facts) + ".", indent="      ")
+
+        out.append(f"      Satisfies {len(strong)} of "
+                   f"{len([k for k in scan if k.startswith('score_') and k.endswith('_p50') and k != 'score_p50'])}"
+                   f" criteria:")
+        for entry in strong:
+            evidence = f" ({entry['evidence']})" if "evidence" in entry else ""
+            out.append(f"        • {entry['label']}{evidence} — {entry['score']:.2f}")
+
+        weak = weakest_component(scan)
+        if weak and weak[1] < 0.999:
+            label = COMPONENT_MEANING.get(weak[0], (weak[0].replace("_", " "),))[0]
+            out += _wrap(f"Held back by {label} at {weak[1]:.2f}, which under a product "
+                         f"composition is what bounds the total.", indent="      ")
+
+    if len(sites) > max_sites:
+        out.append("")
+        out += _wrap(f"The remaining {len(sites) - max_sites} sites are in the results "
+                     f"file, each with the same per-criterion record.")
+
+    # What the selection has in common, which is a statement about the terrain rather
+    # than about any one site.
+    shared = None
+    for site in sites:
+        names = {e["name"] for e in site_strengths(site.get("arrival_scan") or {})}
+        shared = names if shared is None else (shared & names)
+    if shared:
+        labels = sorted(COMPONENT_MEANING.get(n, (n.replace("_", " "),))[0]
+                        for n in shared)
+        out.append("")
+        out += _wrap(f"Every selected site satisfies: {', '.join(labels)}. That is a "
+                     f"statement about this terrain, not about any one site — and if a "
+                     f"criterion is satisfied everywhere, it is not discriminating "
+                     f"between sites and its threshold is worth checking.")
+    return out
+
+
 def _section_reading(results):
     params = results.get("parameters", {}) or {}
     out = _heading("HOW TO READ THESE NUMBERS")
@@ -587,6 +864,87 @@ def _section_reading(results):
     out += _wrap("The layout is anchored, not fitted: detectors are placed from each "
                  "site's bounding-box corner rather than optimised, so capacity is an "
                  "estimate for an arbitrarily placed array.")
+    return out
+
+
+def _section_aperture(results):
+    """The energy the geometry favours, which no other line of the summary carries."""
+    aperture = results.get("aperture", {}) or {}
+    energies = aperture.get("energies_pev")
+    total = aperture.get("total_m2sr")
+    if not energies or not total:
+        return []
+
+    out = _heading("WHAT ENERGY THIS GEOMETRY FAVOURS")
+    peak = aperture.get("peak_energy_pev")
+    best = max(range(len(total)), key=lambda i: total[i])
+    out += _wrap(f"Folding each site's accepted solid angle and area against the tau "
+                 f"decay length gives a geometric aperture that peaks near "
+                 f"{energies[best]:,.0f} PeV"
+                 + (f" (analytically {peak:,.0f} PeV)" if peak else "")
+                 + f", at {total[best]:,.3g} m² sr.")
+    out.append("")
+
+    # A coarse profile: enough to see the shape without a plotting library.
+    scale = max(total) or 1.0
+    for i in range(0, len(energies), max(1, len(energies) // 8)):
+        bar = "#" * int(round(40 * total[i] / scale))
+        out.append(f"  {energies[i]:>10,.0f} PeV  {total[i]:>10.3g}  {bar}")
+
+    out.append("")
+    out += _wrap("Relative, not absolute: this is geometry and an analytic decay "
+                 "factor, with no flux, no cross-section and no detector response. "
+                 "The detector acceptance A(E) is the one thing no available table "
+                 "supplies, and it is why these are apertures in shape only.")
+    return out
+
+
+def _section_next(results):
+    """Concrete things to do next, chosen from what this run actually did."""
+    params = results.get("parameters", {}) or {}
+    funnel = results.get("funnel", {}) or {}
+    sites, _ = selected_sites(results)
+    suggestions = []
+
+    binding = binding_constraint(funnel)
+    if binding and binding.get("knob"):
+        first = binding["knob"].split(" ")[0].split("/")[0].strip(",")
+        suggestions.append(
+            (f"Test the constraint that bound this run — “{binding['stage']}”",
+             f"oroscope-sensitivity <config> --sweep {first} <values>"))
+
+    if params.get("min_score") and params.get("score_percentile") is None:
+        suggestions.append(
+            ("Replace the absolute score cut with a rank, which is scale-free",
+             f"oroscope <config> --score_percentile 10   "
+             f"(instead of --min_score {params['min_score']:g})"))
+
+    gap = params.get("gap_close_km")
+    if gap is None or gap:
+        suggestions.append(
+            ("See the area the physics accepted, without morphological closing",
+             "oroscope <config> --gap_close_km 0"))
+
+    if (params.get("candidate_stride") or 1) > 1:
+        suggestions.append(
+            ("Confirm the stride is unbiased at this closing element",
+             f"oroscope <config> --candidate_stride 1   "
+             f"(currently {params['candidate_stride']})"))
+
+    if not sites:
+        suggestions.append(
+            ("Loosen the binding constraint before anything else — nothing survived",
+             "read the funnel above, then change the parameter it names"))
+
+    if not suggestions:
+        return []
+
+    out = _heading("WHAT TO TRY NEXT")
+    out += _wrap("Chosen from what this run did, not a generic list.")
+    for why, how in suggestions:
+        out.append("")
+        out += _wrap(why, indent="  ")
+        out.append(f"      {how}")
     return out
 
 
@@ -668,6 +1026,165 @@ def _section_assumptions(results):
     return out
 
 
+def explain_combination(report, runs=None):
+    """
+    Explains an overlay of two or more searches: who can share ground with whom, and why.
+
+    The combined report gives a joint area and a Jaccard index. Neither says *why* the
+    number is what it is, and the reason is usually not about neutrinos at all: a pixel
+    has one slope, and every experiment deployed on it must accept that slope. Measured
+    at Colca, the entire co-location result follows from GRAND's 3-25 degree deployable
+    band against a canyon's ~40 degree walls.
+
+    So where the runs' own parameters are available, this compares their screening
+    bands and names the one that limits the sharing.
+
+    Parameters
+    ----------
+    report : dict
+        A ``combined_report.json``, as :mod:`combine_experiments` writes it.
+    runs : dict, optional
+        Label to results dictionary, for the runs being combined. Supplying them adds
+        the constraint comparison; without them only the areas are explained.
+
+    Returns
+    -------
+    str
+        The summary, as plain text.
+
+    Examples
+    --------
+    >>> import explain
+    >>> text = explain.explain_combination({
+    ...     "runs": [{"label": "A", "area_km2": 100.0, "pixels": 10,
+    ...               "area_in_joint_km2": 20.0, "fraction_of_own_area_in_joint": 0.2,
+    ...               "reported_sites": 1, "reported_capacity": 500}],
+    ...     "joint": {"area_km2": 20.0}, "union": {"area_km2": 100.0},
+    ...     "joint_requires": ["A"], "pairwise_overlap": {}})
+    >>> "WHERE THESE EXPERIMENTS CAN SHARE GROUND" in text
+    True
+    """
+    if not isinstance(report, dict):
+        raise TypeError("explain_combination takes a combined report dictionary, "
+                        f"not {type(report).__name__}")
+    runs = runs or {}
+    entries = report.get("runs", []) or []
+    lines = _banner("WHERE THESE EXPERIMENTS CAN SHARE GROUND, AND WHY")
+
+    # --- what each brings
+    lines += ["", *_heading("WHAT EACH BRINGS")]
+    width = max([len(e.get("label", "?")) for e in entries] + [10])
+    lines.append(f"  {'experiment'.ljust(width)} | {'area km²':>12} | {'sites':>7}"
+                 f" | {'detectors':>10} | {'in joint':>9}")
+    lines.append("  " + "-" * (width + 48))
+    for entry in entries:
+        sites = entry.get("reported_sites")
+        capacity = entry.get("reported_capacity")
+        lines.append(f"  {str(entry.get('label', '?')).ljust(width)}"
+                     f" | {float(entry.get('area_km2', 0)):>12,.1f}"
+                     f" | {(f'{sites:,}' if sites is not None else '—'):>7}"
+                     f" | {(f'{capacity:,}' if capacity is not None else '—'):>10}"
+                     f" | {100 * float(entry.get('fraction_of_own_area_in_joint', 0)):>8.1f}%")
+
+    joint = float((report.get("joint") or {}).get("area_km2", 0.0))
+    union = float((report.get("union") or {}).get("area_km2", 0.0))
+    required = report.get("joint_requires") or [e.get("label") for e in entries]
+    lines.append("")
+    lines += _wrap(f"Ground satisfying {' and '.join(str(r) for r in required)} at once: "
+                   f"{joint:,.1f} km². Ground useful to any of them: {union:,.1f} km². "
+                   f"The first is the number that matters for one site, one road and "
+                   f"one power feed serving two experiments; the second is what the "
+                   f"programme as a whole could use.")
+
+    # --- why the joint is the size it is
+    labels = [e.get("label") for e in entries]
+    if len(labels) == 2 and all(lab in runs for lab in labels):
+        a, b = labels
+        bands = constraint_overlap((runs[a].get("parameters") or {}),
+                                   (runs[b].get("parameters") or {}))
+        if bands:
+            lines += ["", *_heading("WHAT DECIDES IT")]
+            lines += _wrap("A pixel has one slope, one altitude and one aspect, and "
+                           "both experiments must accept those same values to stand on "
+                           "it. So co-location is settled by whichever of those bands "
+                           "they share least of — before any arrival geometry is "
+                           "considered.")
+            lines.append("")
+            lines.append(f"  {'band'.ljust(18)} | {a:>16} | {b:>16} | shared")
+            lines.append("  " + "-" * 68)
+            for band in bands:
+                unit = band["unit"]
+                a_s = f"{band['a'][0]:g}–{band['a'][1]:g}{unit}"
+                b_s = f"{band['b'][0]:g}–{band['b'][1]:g}{unit}"
+                if band["overlap"]:
+                    shared = (f"{band['overlap'][0]:g}–{band['overlap'][1]:g}{unit}"
+                              f"  ({100 * band['share_of_narrower']:.0f}%)")
+                else:
+                    shared = "none — disjoint"
+                lines.append(f"  {band['label'].ljust(18)} | {a_s:>16} | {b_s:>16}"
+                             f" | {shared}")
+
+            tightest = min(bands, key=lambda x: x["share_of_narrower"])
+            lines.append("")
+            if not tightest["overlap"]:
+                lines += _wrap(f"Their {tightest['label']} bands are disjoint, so no "
+                               f"pixel can satisfy both. Any joint area reported above "
+                               f"is then an artefact worth investigating.")
+            else:
+                lines += _wrap(
+                    f"“{tightest['label']}” is what limits the sharing: they overlap "
+                    f"only over {tightest['overlap'][0]:g}–{tightest['overlap'][1]:g}"
+                    f"{tightest['unit']}, which is "
+                    f"{100 * tightest['share_of_narrower']:.0f}% of the narrower of the "
+                    f"two bands. Co-location is decided there, not by anything about "
+                    f"the physics of either experiment.")
+
+            # The viewing criteria, explicitly *not* a conflict. Worth stating, because
+            # they look like conflicting requirements written side by side and are not.
+            views = constraint_overlap((runs[a].get("parameters") or {}),
+                                       (runs[b].get("parameters") or {}),
+                                       bands=_VIEWING_BANDS)
+            if views:
+                lines.append("")
+                lines += _wrap("What they ask of the *view* differs, and that is no "
+                               "obstacle: two experiments can look out from the same "
+                               "hillside at different ranges and different elevations "
+                               "without conflict.")
+                lines.append("")
+                for band in views:
+                    unit = band["unit"]
+                    lines.append(
+                        f"  {band['label'].ljust(18)} | "
+                        f"{a}: {band['a'][0]:g}–{band['a'][1]:g}{unit}, "
+                        f"{b}: {band['b'][0]:g}–{band['b'][1]:g}{unit}")
+
+    # --- the overlaps themselves
+    pairwise = report.get("pairwise_overlap") or {}
+    if pairwise:
+        lines += ["", *_heading("PAIRWISE")]
+        for pair, stats in pairwise.items():
+            lines += _wrap(f"{pair}: {float(stats.get('area_km2', 0)):,.1f} km² shared, "
+                           f"Jaccard {float(stats.get('jaccard', 0)):.4f}.")
+            for key, value in stats.items():
+                if key.startswith("fraction_of_"):
+                    lines.append(f"      {100 * float(value):5.1f}% of "
+                                 f"{key[len('fraction_of_'):]}'s own ground")
+
+    lines += ["", *_heading("HOW TO READ THIS")]
+    lines += _wrap("Every caveat on the individual runs applies here and compounds: "
+                   "these are the same masks, so morphological closing has already "
+                   "moved each area, and the joint of two inflated masks is inflated "
+                   "twice over. The overlay is exact — the masks are pixel-aligned and "
+                   "the alignment is checked, not assumed — but what it overlays is "
+                   "only as good as each run.")
+    lines.append("")
+    lines += _wrap("And co-location is a question about ground, not about detectors. "
+                   "Two experiments sharing a hillside still need their own arrays, "
+                   "their own spacing and their own trigger; what they share is the "
+                   "site, the access and the power.")
+    return "\n".join(lines) + "\n"
+
+
 def explain_results(results, provenance=None):
     """
     Writes a human-readable account of one search: what was found, and why.
@@ -722,8 +1239,11 @@ def explain_results(results, provenance=None):
         _section_funnel(results),
         _section_regions(results),
         _section_sites(results),
+        _section_why_good(results),
+        _section_aperture(results),
         _section_reading(results),
         _section_assumptions(results),
+        _section_next(results),
     ]
     lines = []
     for block in blocks:

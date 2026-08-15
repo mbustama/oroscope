@@ -1542,6 +1542,7 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
 
 def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
                                target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=None,
+                               origin_lat=None, origin_lon=None, cell_size_deg=None,
                                candidates_arr=None, observables=None, stop_at_target=False):
     """
     Step 5 Pipeline: Isolates unique sites and measures their capacity mathematically.
@@ -1581,6 +1582,12 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
         ``square`` or ``hex``.
     funnel : Funnel, optional
         Accounting object recording survivor counts.
+    origin_lat, origin_lon : float, optional
+        The DEM's north-west corner. With ``cell_size_deg``, each site record gains its
+        centre coordinates and bounding box, so a reader can find the ground without
+        opening the raster.
+    cell_size_deg : float, optional
+        Pixel size in degrees, at full resolution.
     candidates_arr : ndarray, optional
         Candidates, for folding scan observables into each site's record.
     observables : dict, optional
@@ -1693,6 +1700,29 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                     dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
                     aspect_str = dirs[round(mean_aspect / 45) % 8]
                     area_km2 = sizes[site_id-1] * px_area_km2
+
+                    # Where the site actually is. The records carried area, capacity
+                    # and facing but no position, so answering "which ground is this?"
+                    # meant opening the raster in a GIS. The bounding box is already
+                    # in hand, and the centroid costs one pass over a region that has
+                    # just been scanned anyway.
+                    where = {}
+                    if origin_lat is not None and cell_size_deg:
+                        step = cell_size_deg * downsample_factor
+                        own_ds = labeled[loc] == site_id
+                        rr, cc = np.nonzero(own_ds)
+                        centre_row = loc[0].start + (rr.mean() if rr.size else 0.0)
+                        centre_col = loc[1].start + (cc.mean() if cc.size else 0.0)
+                        where = {
+                            "center_lat": float(f"{origin_lat - centre_row * step:.6f}"),
+                            "center_lon": float(f"{origin_lon + centre_col * step:.6f}"),
+                            "bounds": {
+                                "north": float(f"{origin_lat - loc[0].start * step:.6f}"),
+                                "south": float(f"{origin_lat - loc[0].stop * step:.6f}"),
+                                "west": float(f"{origin_lon + loc[1].start * step:.6f}"),
+                                "east": float(f"{origin_lon + loc[1].stop * step:.6f}"),
+                            },
+                        }
                     
                     site_details.append({
                         "site_id": int(site_id),
@@ -1701,6 +1731,7 @@ def analyze_sites_and_capacity(path_A, elevation, rows, cols, cell_size_y, cell_
                         "grid_type": grid_type,
                         "mean_aspect_deg": float(f"{mean_aspect:.1f}"),
                         "facing_direction": aspect_str,
+                        **where,
                         # Set below, once selection has run. Every site that clears the
                         # thresholds is listed, because the ones just below the cut are
                         # worth seeing -- but only the selected ones are in the exported
@@ -3438,6 +3469,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         small_final, labeled_viz, site_details, cumulative_capacity, count, region_stats = analyze_sites_and_capacity(
             path_A, elevation, rows, cols, cell_size_y, cell_size_x, downsample_factor, search_mode,
             target_antennas, min_sub_array_size, antenna_spacing_km, grid_type, funnel=funnel,
+            origin_lat=origin_lat, origin_lon=origin_lon, cell_size_deg=cell_size_deg,
             candidates_arr=candidates_arr, observables=observables,
             stop_at_target=stop_at_target
         )

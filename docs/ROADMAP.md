@@ -1840,6 +1840,98 @@ Writing them found three faults, which is the argument for having written them:
 environment file and drive subprocesses; testing them buys little against what it
 costs, and the first is exercised by the docs build and the notebooks on every push.
 
+### 6.29 Why a site is *good*, not only why it is weak
+
+§6.23 reported each site's weakest component, which answers "what is wrong with this
+site". Once a site has been *selected*, the more useful question is the other one, and
+the same named components answer it — but only with a table saying what a high score
+means, because a component's name states what it measures and not what satisfying it
+implies. `COMPONENT_MEANING` supplies that, and `site_strengths()` returns the criteria
+a site satisfies with **the measurement that earned each**:
+
+    Site 3555 — 16.14 km², 1,901 detectors, facing SE, centred -15.6366, -72.1703
+        Measured: 1.08 sr of accepted sky, targets at 3,137 m, striking 39°
+        terrain, 784,440 g/cm² of rock behind, at 2,640 m altitude.
+        Satisfies 6 of 7 criteria: column depth, exit distance, footprint
+        sampling, shower development, tau decay …
+        Held back by accepted sky at 0.57.
+
+**Site records now carry coordinates** — centre latitude/longitude and a bounding box —
+because they carried area, capacity and facing but no position, so "which ground is
+this?" meant opening the raster in a GIS. The bounding box was already computed and the
+centroid costs one pass over a region that has just been scanned.
+
+Also added, because they were in the results and unread: the energy the geometric
+aperture favours, and a **what to try next** section of concrete commands chosen from
+what the run did — sweep the constraint that bound it, replace an absolute score cut
+with a rank, see the area without closing.
+
+### 6.30 The combination explains itself, and a wrong explanation caught in the act
+
+`oroscope-combine` reported a joint area and a Jaccard index; neither says *why*. The
+answer is usually not about neutrinos: a pixel has one slope, one altitude and one
+aspect, and every experiment deployed on it must accept those same values. Colca's
+entire co-location result follows from GRAND's 3–25° deployable band against a canyon's
+~40° walls — a 20–25° sliver, 23% of the narrower band.
+
+`explain_combination()` computes that from the two runs' own recorded parameters and
+names the band that limits the sharing.
+
+⚠️ **The first version of it was confidently wrong, and the output caught it.** It
+treated the *distance window* and the *arrival-elevation window* as shared constraints
+too, and duly concluded that GRAND and TAMBO "cannot share ground at all: their target
+distance bands are disjoint" — printed directly above the 50.1 km² they demonstrably
+share. Those windows are asked of the **view** from a pixel, not of the pixel: two
+experiments looking out from the same hillside at different ranges and different
+elevations are in no conflict whatever. Only slope, altitude and aspect are properties
+of the ground. Now separated, with the viewing windows reported explicitly as *not* an
+obstacle.
+
+Worth recording as a class of fault: a summary that reasons about the numbers can be
+wrong in ways a summary that merely restates them cannot, and it will be wrong
+persuasively. The defence is the same as everywhere else here — check it against a case
+whose answer is already known.
+
+### 6.31 A component that appeared when it had been switched off
+
+Found while reading the new output: TAMBO runs listed `geomagnetic` at 1.00 among the
+reasons their sites were good, with `use_geomagnetic: false` in the configuration.
+
+Whether the weighting was applied is judged by comparing the weighted solid angle with
+the plain one — but a candidate that accepted *no* directions has a ratio of zero by
+construction, and the test looked at the whole array, so those zeros stood in as
+evidence. The component was then created, identically 1 for every viable candidate.
+
+Harmless under the default product composition, which is why it survived: TAMBO's
+capacity is unchanged at 9717 and GRAND keeps its real component at 0.742. Wrong under
+`mean` or `min`, and misleading in any summary. Judged on candidates with accepted sky
+only, now.
+
+### 6.32 ⚠️ Open: the library's defaults are not the CLI's
+
+Found by writing notebook 7, which omitted `search_mode` and quietly ran a *single*
+search with a 30 km minimum distance, finding nothing. Five parameters disagree between
+`find_grand_regions_interactive`'s signature and `default_config()`:
+
+| parameter | function | config template |
+| --- | --- | --- |
+| `search_mode` | `single` | `distributed` |
+| `grid_type` | `square` | `hex` |
+| `target_antennas` | 1000 | 10 000 |
+| `min_dist_km` | 30.0 | 10.0 |
+| `min_sub_array_size` | 100 | 500 |
+
+§6.24 closed the parity gaps in *capability* — everything the CLI can do, the library
+can. This is parity of *meaning*: the same omitted parameter should not signify
+different things depending on which entry point was used, and right now it does.
+
+**Not changed, because it is a behaviour change and the owner's call.** Aligning them
+would alter results for any existing library caller that relies on a signature default
+— `min_dist_km` 30 → 10 is physics, not cosmetics. The alternatives are to align them,
+or to give the signature no defaults at all for these five and require them explicitly.
+Until then the safe habit, and the one notebook 7 teaches, is to start from
+`ss.default_config()` and override.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

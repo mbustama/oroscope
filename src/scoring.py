@@ -363,7 +363,15 @@ def score_candidates(observables: dict[str, np.ndarray],
         raw = np.asarray(geomag, dtype=np.float64)
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(omega > 0, raw / np.clip(omega, 1e-30, None), 0.0)
-        if np.any(ratio < 0.999):        # all-ones means weighting was not applied
+        # Judged only on candidates that accepted any sky at all. A candidate with no
+        # accepted directions has ratio 0 by the line above, and testing the whole
+        # array made those zeros look like evidence that weighting had been applied --
+        # so a run with use_geomagnetic false still grew a `geomagnetic` component,
+        # identically 1 for every viable candidate. Harmless under a product, wrong
+        # under 'mean' or 'min', and misleading in the summary, which listed a
+        # criterion the run had switched off among the reasons a site was good.
+        active = omega > 0
+        if np.any(active) and np.any(ratio[active] < 0.999):
             components["geomagnetic"] = np.clip(ratio, 0.0, 1.0)
 
     # Shower maturity: grammage, not metres. Altitude enters here and nowhere else.

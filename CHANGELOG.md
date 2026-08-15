@@ -11,9 +11,21 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   measured sensitivity. Printed last and saved as `explanation.txt`; on by default,
   `--no_explain` suppresses it. `explain.explain_results(results)` is pure, so an old
   results file can be re-explained with no DEM and nothing re-run.
-- **Named score components are now stored per site**, so a weak site can be attributed
-  rather than only reported. On the Colca configs the attribution is unambiguous:
-  `solid_angle` is the weakest component at 15 of 15 TAMBO sites.
+- **Named score components are now stored per site**, so a site can be attributed
+  rather than only ranked — both ways round. The summary reports **why each site is
+  good**: the criteria it satisfies, each with the measurement that earned it ("1.08 sr
+  of accepted sky, targets at 3,137 m, striking 39° terrain"), and the one that held it
+  back. On the Colca configs `solid_angle` is the weakest component at 15 of 15 TAMBO
+  sites.
+- **Site records carry coordinates**: centre latitude/longitude and a bounding box, so
+  a reader can find the ground without opening the raster in a GIS.
+- **The combination explains itself too.** `oroscope-combine` prints and saves an
+  account of the overlay: what each experiment brings, how much ground they can share,
+  and **which screening band decides that** — a pixel has one slope and both
+  experiments must accept it, so co-location is settled there. What each asks of the
+  *view* may differ freely, and is reported as no obstacle.
+- The summary also reports the energy the geometry favours, and **what to try next**,
+  as concrete commands chosen from what the run actually did.
 - **CLI/library parity.** `max_memory_gb` is a pipeline parameter and the memory
   estimate, warning and cap are `preflight_memory()`; `load_config`,
   `generate_config` and `default_config` are ordinary functions rather than a literal
@@ -49,6 +61,13 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   changes. Configurations for both experiments over the full DEM are in `config/`.
 
 ### Fixed
+- **A `geomagnetic` score component appeared in runs that had switched the weighting
+  off.** Whether it was applied is judged by comparing the weighted solid angle with
+  the plain one, and a candidate that accepted no directions has a ratio of zero by
+  construction — so those zeros stood in as evidence of weighting. Harmless under a
+  product composition (it was multiplying by one, and TAMBO's numbers are unchanged),
+  wrong under `mean`, and it listed a disabled criterion among the reasons a site
+  was good.
 - **`oroscope-combine` crashed on any single-mode run.** Two faults in the same path,
   both found by new tests: `capacity_of` did not catch the `ValueError` from
   `int('N/A')` — which is what `search_mode: single` writes — and the console summary

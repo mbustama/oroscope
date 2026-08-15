@@ -142,6 +142,159 @@ class TestSelectedSites(unittest.TestCase):
         self.assertIn("not selected", text)
 
 
+class TestSiteStrengths(unittest.TestCase):
+    """
+    Why a site is *good* — the mirror of attribution, and the more useful half once a
+    site has been selected. "Scored 0.55" is not something a reader can act on.
+    """
+
+    RECORD = {
+        "score_p50": 0.52,
+        "score_solid_angle_p50": 0.90, "solid_angle_sr_p50": 1.08,
+        "score_depth_p50": 1.00, "max_depth_gcm2_p50": 784440.0,
+        "score_distance_p50": 1.00, "mean_distance_m_p50": 3137.0,
+        "score_decay_p50": 0.30,
+    }
+
+    def test_it_reports_the_satisfied_criteria_strongest_first(self):
+        names = [s["name"] for s in explain.site_strengths(self.RECORD)]
+        self.assertEqual(names[:2], ["depth", "distance"])
+        self.assertIn("solid_angle", names)
+
+    def test_a_weak_component_is_not_a_strength(self):
+        self.assertNotIn("decay", [s["name"] for s in explain.site_strengths(self.RECORD)])
+
+    def test_each_strength_carries_the_measurement_that_earned_it(self):
+        by_name = {s["name"]: s for s in explain.site_strengths(self.RECORD)}
+        self.assertEqual(by_name["solid_angle"]["evidence"], "1.08 sr")
+        self.assertIn("784,440", by_name["depth"]["evidence"])
+
+    def test_each_strength_says_what_it_means_physically(self):
+        for entry in explain.site_strengths(self.RECORD):
+            self.assertTrue(entry["means"], f"{entry['name']} has no explanation")
+
+    def test_the_threshold_can_be_moved(self):
+        strict = explain.site_strengths(self.RECORD, threshold=1.0)
+        self.assertEqual({s["name"] for s in strict}, {"depth", "distance"})
+
+    def test_a_component_without_a_stored_observable_still_reports(self):
+        """``decay`` has no single observable behind it; it must not be dropped."""
+        entries = explain.site_strengths({"score_decay_p50": 0.95})
+        self.assertEqual([e["name"] for e in entries], ["decay"])
+        self.assertNotIn("evidence", entries[0])
+
+    def test_a_record_without_components_yields_nothing(self):
+        self.assertEqual(explain.site_strengths({"score_p50": 0.9}), [])
+
+
+class TestConstraintOverlap(unittest.TestCase):
+    """
+    What decides whether two experiments can share ground. A pixel has one slope, and
+    both must accept it.
+    """
+
+    GRAND = {"min_slope_deg": 3.0, "max_slope_deg": 25.0}
+    TAMBO = {"min_slope_deg": 20.0, "max_slope_deg": 60.0}
+
+    def test_it_finds_the_shared_interval(self):
+        band = explain.constraint_overlap(self.GRAND, self.TAMBO)[0]
+        self.assertEqual(band["overlap"], (20.0, 25.0))
+
+    def test_the_share_is_of_the_narrower_band(self):
+        """GRAND's band is 22 degrees wide, TAMBO's 40; 5/22 is the tighter squeeze."""
+        band = explain.constraint_overlap(self.GRAND, self.TAMBO)[0]
+        self.assertAlmostEqual(band["share_of_narrower"], 5.0 / 22.0, places=6)
+
+    def test_disjoint_bands_report_no_overlap(self):
+        band = explain.constraint_overlap({"min_slope_deg": 3.0, "max_slope_deg": 10.0},
+                                          self.TAMBO)[0]
+        self.assertIsNone(band["overlap"])
+        self.assertEqual(band["share_of_narrower"], 0.0)
+
+    def test_a_band_unset_on_either_side_is_not_a_constraint(self):
+        bands = explain.constraint_overlap({"min_altitude": 2000.0}, {"max_altitude": 5000})
+        self.assertEqual([b["label"] for b in bands], [])
+
+    def test_the_viewing_windows_are_not_treated_as_shared_constraints(self):
+        """
+        Two experiments looking out from the same hillside at different ranges and
+        different elevations are in no conflict whatever. Treating those windows as
+        shared produced the confident and wrong conclusion that GRAND and TAMBO, which
+        demonstrably share 50 km², "cannot share ground at all".
+        """
+        grand = dict(self.GRAND, min_dist_km=10.0, max_dist_km=40.0)
+        tambo = dict(self.TAMBO, min_dist_km=2.0, max_dist_km=5.0)
+        labels = [b["label"] for b in explain.constraint_overlap(grand, tambo)]
+        self.assertIn("deployable slope", labels)
+        self.assertNotIn("target distance", labels)
+
+
+class TestExplainCombination(unittest.TestCase):
+    """The overlay, explained: what each brings and what limits the sharing."""
+
+    def setUp(self):
+        self.report = {
+            "runs": [
+                {"label": "GRAND", "area_km2": 4580.2, "pixels": 5005057,
+                 "reported_sites": 1, "reported_capacity": 5317,
+                 "area_in_joint_km2": 50.1, "fraction_of_own_area_in_joint": 0.011},
+                {"label": "TAMBO", "area_km2": 83.6, "pixels": 91332,
+                 "reported_sites": 15, "reported_capacity": 9717,
+                 "area_in_joint_km2": 50.1, "fraction_of_own_area_in_joint": 0.599},
+            ],
+            "joint": {"area_km2": 50.1}, "union": {"area_km2": 4613.7},
+            "joint_requires": ["GRAND", "TAMBO"],
+            "pairwise_overlap": {"GRAND & TAMBO": {"area_km2": 50.1, "jaccard": 0.0109,
+                                                   "fraction_of_GRAND": 0.011,
+                                                   "fraction_of_TAMBO": 0.599}},
+        }
+        self.runs = {
+            "GRAND": {"parameters": {"min_slope_deg": 3.0, "max_slope_deg": 25.0,
+                                     "min_dist_km": 10.0, "max_dist_km": 40.0}},
+            "TAMBO": {"parameters": {"min_slope_deg": 20.0, "max_slope_deg": 60.0,
+                                     "min_dist_km": 2.0, "max_dist_km": 5.0}},
+        }
+
+    def test_it_reports_what_each_experiment_brings(self):
+        text = explain.explain_combination(self.report)
+        self.assertIn("GRAND", text)
+        self.assertIn("4,580.2", text)
+        self.assertIn("9,717", text)
+
+    def test_it_reports_the_joint_and_the_union(self):
+        text = explain.explain_combination(self.report)
+        self.assertIn("50.1", text)
+        self.assertIn("4,613.7", text)
+
+    def test_it_names_the_band_that_limits_the_sharing(self):
+        text = explain.explain_combination(self.report, self.runs)
+        self.assertIn("deployable slope", text)
+        self.assertIn("20–25", text)
+
+    def test_it_does_not_call_the_viewing_windows_a_conflict(self):
+        text = explain.explain_combination(self.report, self.runs)
+        self.assertNotIn("cannot share ground at all", text)
+        self.assertIn("no obstacle", text)
+
+    def test_disjoint_ground_bands_are_reported_as_such(self):
+        self.runs["TAMBO"]["parameters"].update(min_slope_deg=40.0, max_slope_deg=60.0)
+        text = explain.explain_combination(self.report, self.runs)
+        self.assertIn("disjoint", text)
+
+    def test_it_works_without_the_runs(self):
+        """The report alone still explains its areas; only the 'why' needs parameters."""
+        text = explain.explain_combination(self.report)
+        self.assertIn("WHERE THESE EXPERIMENTS CAN SHARE GROUND", text)
+
+    def test_it_warns_that_the_caveats_compound(self):
+        text = explain.explain_combination(self.report)
+        self.assertIn("compounds", text)
+
+    def test_it_refuses_something_that_is_not_a_report(self):
+        with self.assertRaises(TypeError):
+            explain.explain_combination("combined_report.json")
+
+
 class TestClosingInflation(unittest.TestCase):
     """
     The gap between accepted pixels and reported area, measured from the run rather
