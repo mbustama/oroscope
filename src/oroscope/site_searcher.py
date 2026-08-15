@@ -56,11 +56,11 @@ from collections import namedtuple
 from datetime import datetime
 import re
 
-import arrival_scan
-import aperture as aperture_mod
-import explain as explain_mod
-import physics
-import scoring
+from oroscope import arrival_scan
+from oroscope import aperture as aperture_mod
+from oroscope import explain as explain_mod
+from oroscope import physics
+from oroscope import scoring
 
 # The public surface. Without this, autodoc documents every symbol the module imports
 # -- Ellipse, FuncFormatter, tqdm, namedtuple -- as though they were ours.
@@ -298,7 +298,8 @@ def count_grid_capacity(mask_chunk, cell_size_y, cell_size_x, spacing_m, grid_ty
 
     Examples
     --------
-    >>> import numpy as np, site_searcher as ss
+    >>> import numpy as np
+    >>> from oroscope import site_searcher as ss
     >>> mask = np.ones((100, 100), dtype=bool)          # 3 km square of 30 m pixels
     >>> ss.count_grid_capacity(mask, 30.0, 30.0, 1000.0, 1)
     12
@@ -583,7 +584,7 @@ def slope_band_gradient_sq(min_slope_deg: float | None,
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> lo, hi = ss.slope_band_gradient_sq(3.0, 25.0)
     >>> f"{lo:.4f} {hi:.4f}"
     '0.0027 0.2174'
@@ -720,7 +721,7 @@ def resolve_origin(dem_path, origin_lat=None, origin_lon=None, tolerance_deg=1e-
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> lat, lon, source = ss.resolve_origin("nonexistent.tif", -15.3, -72.4)
     >>> (lat, lon, source)
     (-15.3, -72.4, 'supplied (DEM carries no tiepoint)')
@@ -849,7 +850,7 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> grid = ss.resolve_grid_geometry("nonexistent.tif", -15.6, cell_size_deg=1/3600)
     >>> f"{grid.cell_size_y:.1f} m x {grid.cell_size_x:.1f} m"
     '30.7 m x 29.8 m'
@@ -1865,7 +1866,7 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
         site_idx = 1
         for path in contours.get_paths():
             placemark = ET.SubElement(doc, "Placemark")
-            ET.SubElement(placemark, "name").text = f"GRAND Site {site_idx}"
+            ET.SubElement(placemark, "name").text = f"Site {site_idx}"
             ET.SubElement(placemark, "styleUrl").text = "#grand_site"
             
             poly = ET.SubElement(placemark, "Polygon")
@@ -2038,7 +2039,9 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         ax.set_ylabel("Latitude")
         cbar = plt.colorbar(im, fraction=0.035, pad=0.04)
         cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
-        ax.set_title(f"GRAND site search | {region_name if region_name is not None else ''} {'|' if region_name is not None else ''} {search_mode.title()} mode\nFound {count} sites | Total capacity: {cumulative_capacity if search_mode=='distributed' else 'N/A'} DUs | Grid: {grid_type} | Spacing: {antenna_spacing_km} km | Altitude restriction: {min_altitude}-{max_altitude} m")
+        # "Oroscope", not "GRAND": this same map is written for a TAMBO run, and the
+        # title said GRAND on every one of them.
+        ax.set_title(f"Oroscope site search | {region_name if region_name is not None else ''} {'|' if region_name is not None else ''} {search_mode.title()} mode\nFound {count} sites | Total capacity: {cumulative_capacity if search_mode=='distributed' else 'N/A'} DUs | Grid: {grid_type} | Spacing: {antenna_spacing_km} km | Altitude restriction: {min_altitude}-{max_altitude} m")
         
         fs = 'small' if len(legend_labels) > 8 else 'medium'
         ax.legend(legend_handles, legend_labels, loc='upper right', fontsize=fs, framealpha=0.8)
@@ -2211,7 +2214,7 @@ def _one_or_pair(value):
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> ss._one_or_pair([2.0])
     2.0
     >>> ss._one_or_pair([1.5, 2.7])
@@ -2257,7 +2260,7 @@ def parse_score_weights(value):
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> ss.parse_score_weights("shower=2,depth=0.5") == {"shower": 2.0, "depth": 0.5}
     True
     >>> ss.parse_score_weights(None) is None
@@ -2319,7 +2322,7 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> round(ss.estimate_peak_memory_gb(1981, 3061, downsample_factor=1), 2)
     0.64
     >>> round(ss.estimate_peak_memory_gb(10204, 12603, downsample_factor=4), 2)
@@ -2609,7 +2612,7 @@ def default_config(preset="default"):
 
     Examples
     --------
-    >>> import site_searcher as ss
+    >>> from oroscope import site_searcher as ss
     >>> cfg = ss.default_config("arequipa")
     >>> cfg["rfi_zones"], cfg["min_slope_deg"], cfg["explain"]
     ('arequipa', 3.0, True)
@@ -2619,8 +2622,12 @@ def default_config(preset="default"):
 
     config = {
         "dem_path": "path_to_your_dem.tif",
-        "origin_lat": 0.0,
-        "origin_lon": 0.0,
+        # Deliberately null rather than 0.0. Zero is a *valid* coordinate -- it is in
+        # the Gulf of Guinea -- so a placeholder someone forgets to edit produces a
+        # run georeferenced to the wrong continent rather than an error. Null means
+        # "read the DEM's own ModelTiepointTag", which is the recommended use.
+        "origin_lat": None,
+        "origin_lon": None,
         "target_antennas": 10000,
         "min_width_km": 2.0,
         "min_altitude": None,
@@ -2692,7 +2699,7 @@ def default_config(preset="default"):
         "min_aspect_deg": None,
         "max_aspect_deg": None,
         "region_name": "Custom Region",
-        "generate_kml": True,
+        "generate_kml": False,
         "print_info": True,
         "explain": True,
         "output_directory_base_with_given_json": "../output/",
@@ -2829,13 +2836,13 @@ def emit_explanation(results, run_output_dir=None, print_it=True):
 # ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
-def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=1000,
+def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=10000,
                             rfi_zones=None, origin_lat=None, origin_lon=None,
                             min_width_km=2.0, min_altitude=None, max_altitude=None,
-                            antenna_spacing_km=1.0, min_dist_km=30.0, max_dist_km=80.0,
-                            road_map_path=None, max_road_dist_km=None,
-                            grid_type='square', generate_kml=False,
-                            search_mode='single', min_sub_array_size=100,
+                            antenna_spacing_km=1.0, min_dist_km=10.0, max_dist_km=80.0,
+                            road_map_path=None, max_road_dist_km=20.0,
+                            grid_type='hex', generate_kml=False,
+                            search_mode='distributed', min_sub_array_size=500,
                             min_aspect_deg=None, max_aspect_deg=None,
                             min_slope_deg=3.0, max_slope_deg=25.0,
                             region_name=None,
@@ -3301,7 +3308,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     }
     
     print(f"\n{C.HEADER}============================================={C.RESET}")
-    print(f"   {C.BOLD}GRAND SITE SEARCH: RUN PARAMETERS{C.RESET}")
+    print(f"   {C.BOLD}OROSCOPE SITE SEARCH: RUN PARAMETERS{C.RESET}")
     print(f"{C.HEADER}============================================={C.RESET}")
     print(f"   -> DEM File: {C.MAGENTA}{dem_path}{C.RESET}")
     print(f"   -> Origin: {C.MAGENTA}{origin_lat}, {origin_lon}{C.RESET}")

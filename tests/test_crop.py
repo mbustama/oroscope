@@ -21,7 +21,7 @@ import tifffile as tiff
 
 from _support import quiet  # noqa: F401  (also sets up sys.path)
 
-import crop_dem
+from oroscope import crop_dem
 
 # A DEM whose north-west corner is (-15.0, -72.0), one arc-second pixels, 400 x 600.
 LAT0, LON0 = -15.0, -72.0
@@ -139,7 +139,7 @@ class TestTheWindowTakesTheRightPixels(CropCase):
 
     def test_the_crop_is_readable_by_the_searcher(self):
         """The point of writing the tags: the next stage reads the corner back."""
-        import site_searcher as ss
+        from oroscope import site_searcher as ss
         info = self.crop_it()
         lat, lon = ss.read_dem_origin(self.dst)
         self.assertAlmostEqual(lat, info["origin_lat"], places=9)

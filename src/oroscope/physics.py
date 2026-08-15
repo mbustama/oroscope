@@ -85,7 +85,7 @@ def air_density_kgm3(altitude_m: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(physics.air_density_kgm3(0.0), 3)
     1.225
     >>> round(physics.air_density_kgm3(4000.0), 3)   # a third thinner at Andean altitude
@@ -134,7 +134,7 @@ def slant_grammage_gcm2(start_altitude_m: float, elevation_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> horizontal = physics.slant_grammage_gcm2(4000.0, 0.0, 20000.0)
     >>> sea_level = physics.slant_grammage_gcm2(0.0, 0.0, 20000.0)
     >>> f"{horizontal:.0f} vs {sea_level:.0f} g/cm^2"
@@ -194,7 +194,7 @@ def shower_maturity(grammage_gcm2: float | np.ndarray,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(physics.shower_maturity(750.0), 3)
     1.071
     """
@@ -244,7 +244,7 @@ def shower_maximum_gcm2(energy_pev: float | np.ndarray,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> [f"{float(physics.shower_maximum_gcm2(e)):.0f}" for e in (3.0, 1000.0)]
     ['561', '700']
     """
@@ -282,7 +282,7 @@ def shower_size_fraction(grammage_gcm2: float | np.ndarray, x_max_gcm2: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(float(physics.shower_size_fraction(700.0, 700.0)), 3)   # at maximum
     1.0
     >>> round(float(physics.shower_size_fraction(172.0, 561.0)), 3)   # a 2 km crossing
@@ -341,7 +341,7 @@ def grammage_band_from_energy(energy_min_pev: float, energy_max_pev: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> lo, hi = physics.grammage_band_from_energy(3.0, 1000.0)
     >>> f"{lo:.0f} - {hi:.0f} g/cm^2"
     '236 - 1287 g/cm^2'
@@ -390,7 +390,7 @@ def earth_chord_m(elevation_deg: float, radius_m: float = EARTH_RADIUS_M) -> flo
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.earth_chord_m(-3.0) / 1000:.0f} km"
     '667 km'
     """
@@ -420,7 +420,7 @@ def earth_chord_gcm2(elevation_deg: float, radius_m: float = EARTH_RADIUS_M,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.earth_chord_gcm2(-3.0):.2e}"
     '1.77e+08'
     """
@@ -457,7 +457,7 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> lam = physics.neutrino_interaction_length_gcm2(1000.0)
     >>> round(physics.neutrino_survival(-1.0, lam), 3)
     0.7
@@ -504,7 +504,7 @@ def muon_shielding_gcm2(thickness_km: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.muon_shielding_gcm2(4.0):.2e}"
     '1.06e+06'
     """
@@ -537,7 +537,7 @@ def tau_decay_length_m(energy_pev: float, mass_gev: float = 1.77686,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> [f"{physics.tau_decay_length_m(e):.0f}" for e in (3.0, 1000.0)]
     ['147', '48980']
     """
@@ -571,7 +571,7 @@ def cc_cross_section_cm2(energy_pev: float | np.ndarray) -> float | np.ndarray:
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.cc_cross_section_cm2(1000.0):.2e}"
     '1.01e-32'
     """
@@ -598,7 +598,7 @@ def neutrino_interaction_length_gcm2(energy_pev: float | np.ndarray
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.neutrino_interaction_length_gcm2(100.0):.2e}"
     '3.76e+08'
     """
@@ -656,7 +656,7 @@ def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
     '3.79e-07'
     """
@@ -702,7 +702,7 @@ def tau_range_gcm2(energy_pev: float, beta_cm2g: float | None = None,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.tau_range_gcm2(1000.0) / physics.CRUST_DENSITY_GCM3 / 1e5:.1f} km"
     '13.7 km'
     """
@@ -740,7 +740,7 @@ def tau_survival(depth_gcm2: float | np.ndarray, energy_pev: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(float(physics.tau_survival(0.0, 1000.0)), 3)
     1.0
     """
@@ -793,7 +793,7 @@ def tau_exit_probability(column_depth_gcm2: float | np.ndarray, energy_pev: floa
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> p = physics.tau_exit_probability(1.0e6, 1000.0)
     >>> 0.0 <= p <= 1.0
     True
@@ -845,7 +845,7 @@ def production_escape_optimum_gcm2(energy_pev: float, beta_cm2g: float | None = 
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> km = physics.production_escape_optimum_gcm2(100.0) / physics.CRUST_DENSITY_GCM3 / 1e5
     >>> 8.0 < km < 16.0
     True
@@ -890,7 +890,7 @@ def depth_band_from_energy(energy_min_pev: float, energy_max_pev: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> lo, hi = physics.depth_band_from_energy(100.0, 10000.0)
     >>> lo < hi
     True
@@ -945,7 +945,7 @@ def earth_absorption_cutoff_deg(energy_pev: float, fraction: float = 0.5,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> cut = physics.earth_absorption_cutoff_deg(1000.0)
     >>> -6.0 < cut < 0.0
     True
@@ -1031,7 +1031,7 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> p = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
     >>> round(float(p), 3)
     0.954
@@ -1147,7 +1147,7 @@ def geomagnetic_latitude_deg(latitude_deg: float, longitude_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(physics.geomagnetic_latitude_deg(-16.4, -71.5), 1)
     -7.1
     """
@@ -1187,7 +1187,7 @@ def centered_dipole_inclination(latitude_deg: float, longitude_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(physics.centered_dipole_inclination(-16.4, -71.5), 1)
     -14.0
     """
@@ -1230,7 +1230,7 @@ def default_field_for_site(latitude_deg: float, longitude_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> dec, inc = physics.default_field_for_site(-16.4, -71.5)
     >>> f"{dec:.1f} {inc:.1f}"
     '-6.9 -14.0'
@@ -1264,7 +1264,7 @@ def geomagnetic_unit_vector(declination_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> e, n, u = physics.geomagnetic_unit_vector(0.0, 0.0)
     >>> f"{e:.1f} {n:.1f} {u:.1f}"                  # due north, horizontal
     '0.0 1.0 -0.0'
@@ -1308,7 +1308,7 @@ def geomagnetic_sin_alpha(azimuth_deg: float, elevation_deg: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> B = physics.geomagnetic_unit_vector(0.0, 0.0)      # horizontal, northward
     >>> round(physics.geomagnetic_sin_alpha(0.0, 0.0, B), 3)     # along the field
     0.0
@@ -1347,7 +1347,7 @@ def refractivity(altitude_m: float, sea_level_value: float = SEA_LEVEL_REFRACTIV
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.refractivity(4000.0):.2e}"
     '1.80e-04'
     """
@@ -1375,7 +1375,8 @@ def cherenkov_angle_rad(altitude_m: float, **kw: float) -> float:
 
     Examples
     --------
-    >>> import math, physics
+    >>> import math
+    >>> from oroscope import physics
     >>> f"{math.degrees(physics.cherenkov_angle_rad(4000.0)):.2f} deg"
     '1.09 deg'
     """
@@ -1408,7 +1409,7 @@ def cherenkov_footprint_radius_m(altitude_m: float, distance_m: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> f"{physics.cherenkov_footprint_radius_m(4000.0, 20000.0):.0f} m"
     '380 m'
     """
@@ -1441,7 +1442,7 @@ def footprint_sampling(spacing_m: float, altitude_m: float, distance_m: float,
 
     Examples
     --------
-    >>> import physics
+    >>> from oroscope import physics
     >>> round(physics.footprint_sampling(1000.0, 4000.0, 20000.0), 2)
     0.76
     """

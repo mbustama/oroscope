@@ -46,7 +46,7 @@ import math
 
 import numpy as np
 
-import physics
+from oroscope import physics
 
 try:
     from numba import jit, prange
@@ -113,7 +113,7 @@ def earth_radius_for_k(k_factor: float) -> float:
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> f"{arrival_scan.earth_radius_for_k(4/3) / 1e3:.0f} km"
     '8495 km'
     """
@@ -547,7 +547,7 @@ def tau_decay_length_m(energy_pev: float) -> float:
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> f"{arrival_scan.tau_decay_length_m(1.0):.0f} m"
     '49 m'
     """
@@ -570,7 +570,7 @@ def energy_pev_for_decay_length(distance_m: float) -> float:
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> round(arrival_scan.energy_pev_for_decay_length(49000.0))
     1000
     """
@@ -599,7 +599,7 @@ def decay_probability(min_dist_m: float, max_dist_m: float,
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> round(arrival_scan.decay_probability(0.0, 3000.0, 3.0), 3)
     1.0
     >>> round(arrival_scan.decay_probability(0.0, 3000.0, 1000.0), 3)
@@ -639,7 +639,7 @@ def distance_window_from_energy(energy_min_pev: float, energy_max_pev: float,
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> lo, hi = arrival_scan.distance_window_from_energy(1.0, 100.0)
     >>> f"{lo:.0f} m to {hi / 1000:.1f} km"
     '49 m to 7.9 km'
@@ -672,7 +672,7 @@ def azimuth_fan(n_azimuths: int, half_width_deg: float | None = None) -> np.ndar
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> arrival_scan.azimuth_fan(4, None)
     array([  0.,  90., 180., 270.])
     >>> arrival_scan.azimuth_fan(3, 60.0)
@@ -719,7 +719,7 @@ def balanced_order(n_candidates: int, n_threads: int,
 
     Examples
     --------
-    >>> import arrival_scan
+    >>> from oroscope import arrival_scan
     >>> arrival_scan.balanced_order(100, 1) is None       # nothing to balance
     True
     >>> order = arrival_scan.balanced_order(20000, 8)

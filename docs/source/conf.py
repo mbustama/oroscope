@@ -18,7 +18,7 @@ import pathlib
 import re
 import sys
 
-sys.path.insert(0, os.path.abspath('../../src'))
+sys.path.insert(0, os.path.abspath('../../src'))   # so `import oroscope` works uninstalled
 
 # Importing site_searcher pulls in matplotlib.pyplot, so Sphinx's own process needs a
 # non-interactive backend before autodoc imports anything.
@@ -128,9 +128,11 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 html_title = 'Oroscope %s' % version
 
-# Uncomment once a logo exists in _static/. `logo_only = False` keeps html_title --
-# and so the version -- visible beneath it rather than letting the image stand alone.
-# html_logo = '_static/oroscope_logo.png'
+# `logo_only = False` keeps html_title -- and so the version -- visible beneath the
+# image rather than letting it stand alone. The logo is an SVG, which sphinx-rtd-theme
+# serves as-is: it stays sharp at any sidebar width, and it is transparent outside its
+# disc, so it sits correctly on the theme's background without a matte.
+html_logo = '_static/oroscope_logo.svg'
 
 html_theme_options = {
     'logo_only': False,

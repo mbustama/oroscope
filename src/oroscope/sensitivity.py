@@ -30,10 +30,11 @@ import sys
 import tempfile
 import time
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-os.environ.setdefault("MPLBACKEND", "Agg")
+# Three levels up now: src/oroscope/sensitivity.py -> src/oroscope -> src -> repo
+# Three levels up now: src/oroscope/sensitivity.py -> src/oroscope -> src -> repo
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import site_searcher as ss                       # noqa: E402
+from oroscope import site_searcher as ss         # noqa: E402
 
 __all__ = ["run_once", "summarise", "main"]
 
@@ -44,7 +45,7 @@ _CHILD = r"""
 import json, os, sys
 os.environ.setdefault("MPLBACKEND", "Agg")
 sys.path.insert(0, sys.argv[3])
-import site_searcher as ss
+from oroscope import site_searcher as ss
 
 with open(sys.argv[1]) as f:
     payload = json.load(f)

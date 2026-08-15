@@ -177,7 +177,7 @@ def binding_constraint(funnel):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> f = {"DEM pixels": 1000, "slope 3-25 deg": 800, "directions accepted": 40}
     >>> b = explain.binding_constraint(f)
     >>> b["stage"], round(b["kept_fraction"], 3), b["fatal"]
@@ -240,7 +240,7 @@ def selected_sites(results):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> r = {"results": {"total_sites": 1, "sites": [
     ...     {"site_id": 2, "capacity_exact": 252, "selected": True},
     ...     {"site_id": 1, "capacity_exact": 36, "selected": False}]}}
@@ -291,7 +291,7 @@ def closing_inflation(funnel, candidate_stride=1):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> f = {"directions accepted": 100, "after gap closing": 450}
     >>> round(explain.closing_inflation(f, candidate_stride=5), 2)
     0.9
@@ -335,7 +335,7 @@ def site_strengths(arrival_scan, statistic="p50", threshold=0.75):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> rec = {"score_solid_angle_p50": 0.9, "score_depth_p50": 1.0,
     ...        "solid_angle_sr_p50": 1.08, "max_depth_gcm2_p50": 784440.0}
     >>> [s["name"] for s in explain.site_strengths(rec)]
@@ -393,7 +393,7 @@ def constraint_overlap(params_a, params_b, bands=None):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> a = {"min_slope_deg": 3.0, "max_slope_deg": 25.0}
     >>> b = {"min_slope_deg": 20.0, "max_slope_deg": 60.0}
     >>> band = explain.constraint_overlap(a, b)[0]
@@ -444,7 +444,7 @@ def weakest_component(arrival_scan, statistic="p50"):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> rec = {"score_p50": 0.2, "score_decay_p50": 0.9, "score_shower_p50": 0.22}
     >>> explain.weakest_component(rec)
     ('shower', 0.22)
@@ -1054,7 +1054,7 @@ def explain_combination(report, runs=None):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> text = explain.explain_combination({
     ...     "runs": [{"label": "A", "area_km2": 100.0, "pixels": 10,
     ...               "area_in_joint_km2": 20.0, "fraction_of_own_area_in_joint": 0.2,
@@ -1218,7 +1218,7 @@ def explain_results(results, provenance=None):
 
     Examples
     --------
-    >>> import explain
+    >>> from oroscope import explain
     >>> text = explain.explain_results({
     ...     "funnel": {"DEM pixels": 1000, "slope 3-25 deg": 900,
     ...                "directions accepted": 12},

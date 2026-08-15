@@ -83,21 +83,20 @@ Issues = "https://github.com/mbustama/oroscope/issues"
 # entry points are the first half of removing that, and the second half is making those
 # paths relative to the configuration file instead.
 [project.scripts]
-oroscope = "site_searcher:main"
-oroscope-combine = "combine_experiments:main"
-oroscope-crop = "crop_dem:main"
-oroscope-sensitivity = "sensitivity:main"
-oroscope-fetch-dem = "fetch_dem:main"
+oroscope = "oroscope.site_searcher:main"
+oroscope-combine = "oroscope.combine_experiments:main"
+oroscope-crop = "oroscope.crop_dem:main"
+oroscope-sensitivity = "oroscope.sensitivity:main"
+oroscope-fetch-dem = "oroscope.fetch_dem:main"
 
-# A flat set of top-level modules under src/, matching how the tests, the benchmark
-# harness and every existing config refer to them (`import arrival_scan`). Keeping that
-# layout means an editable install puts exactly those names on the path and existing
-# code that does sys.path.insert(0, '../src') keeps working unchanged.
+# A real package, `oroscope`, rather than the flat top-level modules this used to
+# install. Flat modules were right while the names were still moving -- they let a
+# clone work with a sys.path insert and no install -- but they put a dozen generic
+# names like `physics` and `explain` on any installing user's path, and left nothing
+# to `import oroscope`. One namespace, one import.
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["site_searcher", "arrival_scan", "physics", "scoring", "aperture",
-              "explain", "combine_experiments", "crop_dem", "sensitivity",
-              "fetch_dem", "generate_env"]
+packages = ["oroscope"]
 
 [tool.pytest.ini_options]
 # The suite is stdlib unittest and is normally run as `python -m unittest discover`
@@ -119,9 +118,7 @@ ignore = [
 ]
 
 [tool.coverage.run]
-# No import package: flat py-modules under package-dir = {"" = "src"}, so coverage
-# measures the source files in src/ directly. `src/<package>` would match nothing.
-source = ["src"]
+source = ["src/oroscope"]
 branch = true
 
 [tool.coverage.report]

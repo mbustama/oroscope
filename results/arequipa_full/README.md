@@ -14,9 +14,28 @@ that opens instantly and needs no DEM at all. That is possible because
 ## Producing it
 
 ```bash
-python tools/run_arequipa_full.py --dry-run   # what it will do, and what it will cost
+python tools/run_arequipa_full.py --dry-run   # report the cost, then stop
 python tools/run_arequipa_full.py             # GRAND, TAMBO, then the combination
+python tools/run_arequipa_full.py --only grand
 ```
+
+`--dry-run` **starts nothing** — no search, no file, no change to this directory. It
+prints the five things worth knowing before committing an hour of a machine:
+
+```text
+DEM:       input/dem/arequipa_SRTMGL1.tif     which file, and whether it is even there
+estimate:  2.32 GiB at downsample_factor 4    the pre-flight memory estimate
+available: 5.4 GiB                            against what the system reports free
+would run: grand, tambo, then combine         honouring --only
+expected:  ~25-30 minutes each                so you do not start it before you need the machine
+store:     results/arequipa_full              where the artefacts land
+```
+
+The estimate is what decides `downsample_factor`: the same DEM needs 4.5 GiB at 1 and
+2.3 GiB at 4, because the labelling arrays scale as its inverse square. It deliberately
+excludes the memory-mapped DEM, which is file-backed and evictable — counting it would
+make every large search look impossible when the streaming design exists precisely so
+that it is not. No memory cap is applied during a dry run, since nothing is allocated.
 
 **Regenerate when a configuration changes, and not otherwise.** `manifest.json` records
 when the store was built, from which DEM and which configs; each `*_provenance.json`

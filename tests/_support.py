@@ -21,7 +21,7 @@ GOLDEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-import site_searcher as ss  # noqa: E402
+from oroscope import site_searcher as ss  # noqa: E402
 
 # Real DEMs live under input/, which is gitignored. Tests that need them skip when absent.
 REAL_DEM = os.path.join(REPO_ROOT, "input", "dem", "arequipa_SRTMGL1.tif")

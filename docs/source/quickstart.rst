@@ -11,31 +11,58 @@ Quickstart
    %matplotlib inline
 
 
-A search in three commands, then what each knob does.
+A search, and then what each knob does. **One import**: everything below is on
+``oroscope``, and the submodules stay available when a narrower namespace reads better.
+
+.. code-block:: shell
+
+   pip install oroscope
 
 Cut a region
 ------------
 
-.. code-block:: shell
+.. code-block:: python
 
-   oroscope-crop input/dem/arequipa_SRTMGL1.tif input/dem/colca.tif \
-       --north -15.30 --south -15.85 --west -72.40 --east -71.55
+   import oroscope
 
-prints the corner coordinates to paste into a configuration file.
+   info = oroscope.crop("input/dem/arequipa_SRTMGL1.tif", "input/dem/colca.tif",
+                        north=-15.30, south=-15.85, west=-72.40, east=-71.55)
+   print(info["origin_lat"], info["origin_lon"], info["rows"], info["cols"])
+
+The crop carries its own north-west corner, so it stands alone as a georeferenced file
+and the search reads its geometry back out of it.
 
 Run a search
 ------------
 
-.. code-block:: shell
+.. code-block:: python
 
-   oroscope --config_path config/grand_colca_config.json
+   config = oroscope.load_config("config/grand_colca_config.json")
 
-Every parameter can also be given on the command line, and **an explicitly typed
-option beats the configuration file**, announcing itself when it does:
+   results = oroscope.find_grand_regions_interactive(
+       dem_path="input/dem/colca.tif", run_output_dir="output/colca",
+       **{k: v for k, v in config.items()
+          if not k.startswith("_")
+          and k not in ("dem_path", "print_info",
+                        "output_directory_base_with_given_json")})
 
-.. code-block:: shell
+It **returns its results**, so nothing has to find and re-read the file it just wrote:
 
-   oroscope --config_path config/grand_colca_config.json --min_slope_deg 5
+.. code-block:: python
+
+   print(results["results"]["total_sites"])
+   print(results["results"]["total_capacity"])
+
+   for site in oroscope.selected_sites(results)[0]:
+       print(site["site_id"], site["area_km2"], site["center_lat"], site["center_lon"])
+
+Starting from ``oroscope.default_config()`` and overriding is the clearer habit — it
+puts every knob in front of you — but it is no longer a correctness matter: the
+function signature, ``oroscope --help`` and the template state the same default for
+every parameter, and a test keeps all three in step.
+
+The same search from a shell is ``oroscope --config_path config/grand_colca_config.json``
+— see :doc:`cli` for every option, and for the other four console scripts.
 
 Read what it found
 ------------------
@@ -69,24 +96,28 @@ Any results file can be re-explained later, with no DEM and nothing re-run:
 Combine two experiments
 -----------------------
 
-.. code-block:: shell
+.. code-block:: python
 
-   oroscope --config_path config/tambo_colca_config.json
-   oroscope-combine output/grand_colca_config output/tambo_colca_config \
-       --labels GRAND TAMBO --out output/combined
+   grand = oroscope.load_run("output/grand_colca_config")
+   tambo = oroscope.load_run("output/tambo_colca_config")
+   oroscope.check_alignment([grand, tambo])   # refuses to overlay the wrong ground
 
-reports terrain viable for each, for both (co-location) and for either, with a
+   print(oroscope.explain_combination(report, {"GRAND": grand_results,
+                                               "TAMBO": tambo_results}))
+
+reports terrain viable for each, for both (co-location) and for either — and says
+*which screening band decides that*, which is usually slope: a pixel has one slope and
+both experiments must accept it. ``oroscope-combine`` does the same and writes a
 membership raster and an overview map.
 
-Using it as a library
----------------------
+The physics on its own
+----------------------
 
-The physics layer takes arrays and returns values, with no side effects, so it is
-usable on its own:
+The physics layer takes arrays and returns values, with no side effects and no terrain:
 
 .. jupyter-execute::
 
-   import physics
+   from oroscope import physics
 
    print(f"tau decay length at 100 PeV: {physics.tau_decay_length_m(100.0):,.0f} m")
    print(f"X_max at 100 PeV:            {float(physics.shower_maximum_gcm2(100.0)):.0f} g/cm^2")
@@ -98,7 +129,8 @@ The scan itself takes a terrain array and a list of candidate pixels:
 
 .. jupyter-execute::
 
-   import numpy as np, arrival_scan, site_searcher as ss
+   import numpy as np
+   from oroscope import arrival_scan, site_searcher as ss
 
    # A ridge to the east of a flat plain, so a westward-facing candidate sees it
    n = 300
@@ -117,31 +149,22 @@ The scan itself takes a terrain array and a list of candidate pixels:
    print(f"mean exit distance:  {out['mean_distance_m'][0]:,.0f} m")
    print(f"horizon:             {out['horizon_deg'][0]:.2f} deg")
 
-And so is the pipeline. Anything the command line does, the library does: it reads
-and writes configuration files, estimates and caps its own memory, explains itself,
-and hands back its results rather than making the caller find the file it just wrote.
+Before a long run
+-----------------
+
+``oroscope.preflight_memory`` gives the estimate and the address-space cap on their
+own — worth calling before a loop, since it was a sweep that once reached 6.9 GB and
+was killed by the kernel:
 
 .. code-block:: python
 
-   import site_searcher as ss
+   report = oroscope.preflight_memory("input/dem/arequipa_SRTMGL1.tif",
+                                      downsample_factor=4, candidate_stride=5)
+   print(report["estimate_gb"], report["available_gb"])
 
-   config = ss.load_config("config/tambo_colca_config.json")
-   config["min_score"] = 0.2
-
-   results = ss.find_grand_regions_interactive(
-       dem_path="input/dem/colca.tif", run_output_dir="output/scan",
-       max_memory_gb=6.0, explain=False,
-       **{k: v for k, v in config.items()
-          if k not in ("dem_path", "print_info",
-                       "output_directory_base_with_given_json")})
-
-   print(results["results"]["total_capacity"])
-   print(results["explanation"])
-
-``ss.generate_config(path, preset)`` writes a template naming every knob, and
-``ss.preflight_memory(dem_path, downsample_factor=...)`` gives the estimate and the
-address-space cap on their own — worth calling before a loop, since it is a sweep
-that once reached 6.9 GB and was killed by the kernel.
+Passing ``max_memory_gb`` to a search caps its address space, so one that outgrows the
+machine fails with ``MemoryError`` naming itself rather than inviting the kernel's OOM
+killer to choose a victim.
 
 Choosing parameters
 -------------------

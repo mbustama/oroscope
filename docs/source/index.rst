@@ -58,8 +58,11 @@ same scan, and a search can report where each is viable and where the two coinci
 .. jupyter-execute::
    :hide-code:
 
-   import figures
-   figures.walk_mechanism()
+   from oroscope import figures
+   # Assigned, not left bare: the inline backend flushes the figure at the end of the
+   # cell *and* the returned Figure renders its own repr, so calling this bare put the
+   # same diagram on the page twice. physics.rst uses the same form for the same reason.
+   _ = figures.walk_mechanism()
 
 What it does
 ------------
@@ -115,6 +118,7 @@ See :doc:`installation` and :doc:`quickstart` for the longer version, and
 
    installation
    quickstart
+   cli
    notebooks
    physics
    assumptions

@@ -22,8 +22,8 @@ import tifffile as tiff
 
 from _support import quiet  # noqa: F401  (also sets up sys.path)
 
-import combine_experiments as ce
-import site_searcher as ss
+from oroscope import combine_experiments as ce
+from oroscope import site_searcher as ss
 
 
 def write_mask(path, mask, cell_deg=1 / 3600, top_lat=-15.3, left_lon=-72.4):

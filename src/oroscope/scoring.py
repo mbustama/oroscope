@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import physics
+from oroscope import physics
 
 # Composition rules. 'product' is unforgiving -- one bad component sinks the site --
 # while 'mean' lets a strong component compensate. 'min' reports the weakest link.
@@ -65,7 +65,7 @@ def band_score(x: float | np.ndarray, lo: float, hi: float,
 
     Examples
     --------
-    >>> import scoring
+    >>> from oroscope import scoring
     >>> float(scoring.band_score(5.0, 0.0, 10.0))          # inside the plateau
     1.0
     >>> float(scoring.band_score(-5.0, 0.0, 10.0))         # well below it
@@ -116,7 +116,7 @@ def saturating_score(x: float | np.ndarray, half_value: float) -> np.ndarray:
 
     Examples
     --------
-    >>> import scoring
+    >>> from oroscope import scoring
     >>> float(scoring.saturating_score(0.05, 0.05))
     0.5
     >>> round(float(scoring.saturating_score(0.7, 0.05)), 3)   # saturated
@@ -148,7 +148,7 @@ def ramp_score(x: float | np.ndarray, zero_at: float,
 
     Examples
     --------
-    >>> import scoring
+    >>> from oroscope import scoring
     >>> [float(scoring.ramp_score(v, 0.0, 10.0)) for v in (-1.0, 5.0, 99.0)]
     [0.0, 0.5, 1.0]
     """
@@ -195,7 +195,8 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
 
     Examples
     --------
-    >>> import numpy as np, scoring
+    >>> import numpy as np
+    >>> from oroscope import scoring
     >>> parts = {"a": np.array([0.5]), "b": np.array([0.5])}
     >>> float(scoring.compose(parts, "product")[0])
     0.25
@@ -320,7 +321,8 @@ def score_candidates(observables: dict[str, np.ndarray],
 
     Examples
     --------
-    >>> import numpy as np, scoring
+    >>> import numpy as np
+    >>> from oroscope import scoring
     >>> obs = {"cells": np.array([4, 0]),
     ...        "solid_angle_sr": np.array([0.4, 0.4]),
     ...        "mean_distance_m": np.array([2.0e4, 2.0e4]),

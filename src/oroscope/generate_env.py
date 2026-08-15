@@ -182,13 +182,17 @@ def main():
     print(f"{C.BOLD}   OROSCOPE CONDA ENVIRONMENT GENERATOR{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
     
-    target_script = "site_searcher.py"
+    # Beside this file, not in the working directory. It used to be read from the
+    # cwd, which meant the tool only worked when run from src/ -- and after the
+    # move into a package there is no directory a user would naturally stand in.
+    target_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "site_searcher.py")
     output_yml = "environment.yml"
     env_name = "oroscope"
     
     if not os.path.exists(target_script):
-        print(f"   {C.FAIL}[!] Target script '{target_script}' not found in the current directory.{C.RESET}")
-        print(f"   {C.WARN}Please run this script from the same directory as your main code.{C.RESET}\n")
+        print(f"   {C.FAIL}[!] Target script not found: {target_script}{C.RESET}")
+        print(f"   {C.WARN}The package looks incomplete; reinstall it.{C.RESET}\n")
         sys.exit(1)
         
     print(f"   -> Analyzing AST for: {C.MAGENTA}{target_script}{C.RESET}")

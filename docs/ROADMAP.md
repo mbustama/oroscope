@@ -322,7 +322,7 @@ result exactly, at every tile size, with and without a slope baseline.
 
 *Supersedes the original §4.2 sweep plan, §4.5 column depth and §4.2 engine geometry.*
 
-`src/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
+`src/oroscope/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
 form. Not yet wired into the pipeline — that is the next step.
 
 For each candidate and azimuth, one profile walk yields **every elevation bin at
@@ -487,7 +487,7 @@ this tool does not model.
 
 ### 4.8 Scores ✅ delivered
 
-`src/scoring.py`. Every component returns [0, 1] with a documented shape, and the
+`src/oroscope/scoring.py`. Every component returns [0, 1] with a documented shape, and the
 components are reported separately so a site's weakness can be attributed rather than
 disappearing into one opaque number.
 
@@ -517,7 +517,7 @@ without pretending to encode physics the tool has not been given.
 
 ### 4.9 Validation ✅ delivered, within what is checkable
 
-`src/aperture.py` separates the estimate into three parts: the **geometric aperture**
+`src/oroscope/aperture.py` separates the estimate into three parts: the **geometric aperture**
 (area × solid angle, fully determined by terrain), the **analytic decay factor**
 (`exp(-d_min/L) - exp(-d_max/L)`, no free parameters), and a **pluggable response**
 defaulting to unity, replaceable by a table via `TabulatedResponse`. Under that split
@@ -578,7 +578,7 @@ Effect at 25 km is small (median column depth 1.989e6 → 1.981e6 g/cm², accept
 ### 4.12 Physics accounted for ✅ delivered
 
 The sweep of §4.12 below identified seven omissions; six are now implemented in
-`src/physics.py` and the scan kernel, with 44 tests. All the analytic pieces are
+`src/oroscope/physics.py` and the scan kernel, with 44 tests. All the analytic pieces are
 closed-form and checkable by hand, which is why they live apart from the terrain code.
 
 **Measured on the Arequipa crop** (4335 m median site altitude, 10.1 km median
@@ -1503,7 +1503,7 @@ that made the old merge unfixable — a typed value that equals the default.
 
 ### 6.20 Sensitivity of the TAMBO result ⚠️ the result is not robust
 
-`src/sensitivity.py` varies one parameter at a time about the Colca baseline. The
+`src/oroscope/sensitivity.py` varies one parameter at a time about the Colca baseline. The
 answer is that **2056 detector positions is not a number to quote.** Every criterion
 sits near a cliff:
 
@@ -1907,35 +1907,89 @@ capacity is unchanged at 9717 and GRAND keeps its real component at 0.742. Wrong
 `mean` or `min`, and misleading in any summary. Judged on candidates with accepted sky
 only, now.
 
-### 6.32 ⚠️ Open: the library's defaults are not the CLI's
+### 6.32 The three sources of defaults now agree ✅ delivered
 
-Found by writing notebook 7, which omitted `search_mode` and quietly ran a *single*
-search with a 30 km minimum distance, finding nothing. Five parameters disagree between
-`find_grand_regions_interactive`'s signature and `default_config()`:
+A parameter could state its default in three places — the pipeline's signature, the
+argparse parser, and `default_config()` — and they disagreed on **ten** of them. So
+omitting a parameter meant different things depending on which door you came in by:
+`search_mode` was `single` from Python and `distributed` from a shell, and
+`min_dist_km` was 30 km against 10.
 
-| parameter | function | config template |
+§6.24 closed the parity gaps in *capability*. This is parity of **meaning**, and it is
+the one a user actually trips over — it was found by writing notebook 7, which omitted
+`search_mode`, quietly ran a single search at 30 km, and found nothing.
+
+| parameter | was (signature) | now |
 | --- | --- | --- |
 | `search_mode` | `single` | `distributed` |
 | `grid_type` | `square` | `hex` |
 | `target_antennas` | 1000 | 10 000 |
 | `min_dist_km` | 30.0 | 10.0 |
 | `min_sub_array_size` | 100 | 500 |
+| `max_road_dist_km` | `None` | 20.0 |
 
-§6.24 closed the parity gaps in *capability* — everything the CLI can do, the library
-can. This is parity of *meaning*: the same omitted parameter should not signify
-different things depending on which entry point was used, and right now it does.
+In every case the signature was the odd one out, so the CLI and the template — the
+documented values, and the ones the bundled configurations use — were taken as correct
+and the signature aligned to them.
 
-**Not changed, because it is a behaviour change and the owner's call.** Aligning them
-would alter results for any existing library caller that relies on a signature default
-— `min_dist_km` 30 → 10 is physics, not cosmetics. The alternatives are to align them,
-or to give the signature no defaults at all for these five and require them explicitly.
-Until then the safe habit, and the one notebook 7 teaches, is to start from
-`ss.default_config()` and override.
+Two of the ten were in the template rather than the signature, and one of those was a
+real hazard:
+
+- **`origin_lat`/`origin_lon` were `0.0`.** Zero is a *valid* coordinate — it is in the
+  Gulf of Guinea — so a placeholder someone forgot to edit would georeference a run to
+  the wrong continent rather than fail. They are `null` now, which means "read the DEM's
+  own tiepoint" and is the recommended use anyway.
+- **`generate_kml` was `true`** in the template against `False` everywhere else.
+
+`dem_path` and `region_name` remain deliberate placeholders — a generated template is
+meant to be edited, and those two say so by being obviously unreal.
+
+Pinned by `tests/test_cli.py`, which compares the three sources pairwise over every
+parameter, so this cannot drift back.
+
+### 6.33 A package, not a path insert ✅ delivered
+
+Every notebook used to open with ``sys.path.insert(0, '../src')`` and then
+`import site_searcher`, `import physics`, `import explain`. That worked in a clone, and
+it was the wrong thing to teach: an unconditional path insert *shadows* an installed
+copy with whatever happens to be in the source tree, and the layout underneath it was
+flat — ten top-level `py-modules`, so there was no `import oroscope` to write and a
+dozen generic names like `physics` and `explain` landed on any installing user's path.
+
+`src/oroscope/` is a real package now. `__init__.py` re-exports the whole public
+surface — **131 names** — so `import oroscope` is the only setup step, while the
+submodules stay importable when a narrower namespace reads better:
+
+```python
+import oroscope
+results = oroscope.find_grand_regions_interactive(...)
+print(oroscope.explain_results(results))
+
+from oroscope import physics          # when that reads better
+```
+
+The move touched the intra-package imports (11 of them), `pyproject.toml`'s
+`packages`/entry points/coverage source, every test, the notebooks' preamble, the
+documentation examples, and **67 docstring examples**, which are executed by
+`test_doctests` and so failed loudly until each said where its module came from.
+
+**One real defect fell out of it, and it is the interesting part.** `import oroscope`
+imports `combine_experiments`, which called `matplotlib.use("Agg")` at module level.
+Harmless while it was a standalone module someone imported deliberately; not harmless
+as a package front door, where it reached into every caller's session and overrode the
+inline backend — so notebooks captured no figures at all. Trap 3, one level up from
+where it bit twice before. The backend is chosen in `main()` now, where the command
+line actually needs it. **A library must not decide how its user's figures are
+rendered.** The same applied to `sensitivity`, which set `MPLBACKEND` at import for the
+benefit of its subprocesses.
+
+Still open for the release: PyPI does not render SVG, so the project page will need a
+PNG of the logo even though GitHub and Sphinx are happy with the vector.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
-matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/fetch_dem.py`), which is not a packaging
+matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/oroscope/fetch_dem.py`), which is not a packaging
 file and whose name hijacks `pip install`; real packaging; rasterio/pyproj for CRS and
 outputs; ~~`--explain` funnel report~~ (done, §6.23); parameter sweeps.
 

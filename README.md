@@ -1,3 +1,10 @@
+<p align="center">
+  <!-- Absolute raw URL, not a relative path: this file is also the PyPI
+       long_description, where relative links do not resolve. -->
+  <img src="https://raw.githubusercontent.com/mbustama/oroscope/main/docs/source/_static/oroscope_logo.svg"
+       alt="Oroscope" width="200">
+</p>
+
 [![tests](https://github.com/mbustama/oroscope/actions/workflows/tests.yml/badge.svg)](https://github.com/mbustama/oroscope/actions/workflows/tests.yml)
 [![Code Quality](https://github.com/mbustama/oroscope/actions/workflows/lint.yml/badge.svg)](https://github.com/mbustama/oroscope/actions/workflows/lint.yml)
 [![codecov](https://codecov.io/gh/mbustama/oroscope/branch/main/graph/badge.svg)](https://codecov.io/gh/mbustama/oroscope)
@@ -31,6 +38,21 @@ their numbers, not their structure.
 
 ```bash
 pip install oroscope
+```
+
+```python
+from oroscope import site_searcher as ss, explain
+
+results = ss.find_grand_regions_interactive(
+    dem_path="input/dem/colca.tif", run_output_dir="output/colca",
+    **ss.load_config("config/grand_colca_config.json"))
+
+print(results["explanation"])       # what was found, and why
+```
+
+or, the same search from a shell:
+
+```bash
 oroscope --config_path config/grand_colca_config.json
 ```
 
@@ -139,46 +161,136 @@ If you are targeting a region other than Lima or Arequipa:
 
 ## 3. Quick-Start Guide
 
-### Example 1: Using the Built-In Config Generator
+**Everything below can be done from Python, and that is the recommended way in.** The
+command line is a thin wrapper over the same functions — argument parsing and file
+placement, nothing else. There is no CLI-only behaviour, and anything the command line
+can reach that the library cannot is a bug.
 
-The easiest way to run the script is using a JSON configuration file. You can automatically generate a pre-filled template using the built-in generator.
+### Run a search
 
-```bash
-# Generate a template specifically pre-configured for the Arequipa region
-oroscope --generate_config arequipa_config.json --config_preset arequipa
+```python
+from oroscope import site_searcher as ss
 
-# Run the search using the newly generated configuration file
-oroscope --config_path arequipa_config.json
-
+results = ss.find_grand_regions_interactive(
+    dem_path="input/dem/colca.tif",
+    run_output_dir="output/colca",
+    search_mode="distributed", grid_type="hex",
+    min_slope_deg=3.0, max_slope_deg=25.0,       # deployable ground
+    min_dist_km=10.0, max_dist_km=40.0,          # where a tau may exit
+    elev_min_deg=-3.0, elev_max_deg=3.0,         # the arrival window
+    antenna_spacing_km=1.0, target_antennas=10000,
+    downsample_factor=4, num_cores=8,
+)
 ```
 
-### Example 2: Running entirely via CLI Flags
+It **returns its results**, so nothing has to re-read the file it just wrote:
 
-If you prefer scripting environments (like bash scripts or Makefiles), you can supply all parameters directly to the command line:
-
-```bash
-oroscope \
-    --dem_path "my_custom_map.tif" \
-    --target_antennas 5000 \
-    --grid_type hex \
-    --min_slope_deg 5.0 \
-    --max_slope_deg 20.0 \
-    --generate_kml
-
-# origin_lat/origin_lon are optional: the DEM's own tiepoint is used when they are
-# omitted, and a supplied value that disagrees with it is reported rather than
-# silently honoured.
-
+```python
+print(results["results"]["total_sites"])       # how many sites
+print(results["results"]["total_capacity"])    # how many detectors
+print(results["explanation"])                  # the run, in plain language
 ```
 
-### Example 3: Resuming a Failed Run
+### Start from a configuration rather than a signature
 
-If a run crashes halfway through (e.g., your laptop runs out of battery during Step 5), you can instantly skip the expensive ray-tracing step by pointing the script to the failed run's directory.
+Configurations are data, and the template names every knob the tool understands:
+
+```python
+config = ss.default_config("arequipa")     # every key, with its default
+ss.generate_config("arequipa.json", "arequipa")   # write it out
+config = ss.load_config("arequipa.json")          # read one back
+
+config["min_slope_deg"] = 5.0
+results = ss.find_grand_regions_interactive(
+    run_output_dir="output/arequipa",
+    **{k: v for k, v in config.items()
+       if not k.startswith("_")
+       and k not in ("print_info", "output_directory_base_with_given_json")})
+```
+
+> **The three sources of defaults agree.** A parameter's default is the same whether you
+> read it off the function signature, off `oroscope --help`, or out of
+> `default_config()` — they disagreed on ten of them once, and a test now pins all three
+> together. Starting from `default_config()` is still the clearer habit, because it puts
+> every knob in front of you.
+
+### Read what came back
+
+```python
+from oroscope import explain
+
+chosen, shortlisted = explain.selected_sites(results)   # `sites` can exceed the selection
+for site in chosen:
+    print(site["site_id"], site["area_km2"], site["capacity_exact"],
+          site["center_lat"], site["center_lon"])
+
+binding = explain.binding_constraint(results["funnel"])
+print(f"{binding['stage']} kept {100 * binding['kept_fraction']:.1f}%")
+print(f"change: {binding['knob']}")
+
+for entry in explain.site_strengths(chosen[0]["arrival_scan"]):
+    print(entry["label"], entry["score"], entry.get("evidence"))
+```
+
+`explain.explain_results(results)` is a **pure function of the results dictionary** — no
+DEM, nothing re-run — so a search from months ago can still be explained from its JSON:
+
+```python
+import json
+with open("output/colca/oroscope_results_colca.json") as f:
+    print(explain.explain_results(json.load(f)))
+```
+
+### Cut a DEM, combine experiments, test an assumption
+
+```python
+from oroscope import crop_dem, combine_experiments as combine, sensitivity
+
+info = crop_dem.crop("input/dem/arequipa_SRTMGL1.tif", "input/dem/colca.tif",
+                     north=-15.30, south=-15.85, west=-72.40, east=-71.55)
+
+grand = combine.load_run("output/grand_colca_config")
+tambo = combine.load_run("output/tambo_colca_config")
+combine.check_alignment([grand, tambo])        # refuses to overlay the wrong ground
+
+point = sensitivity.run_once(config, "output/sweep_point")
+print(sensitivity.summarise(point))
+```
+
+### Guard the memory before a long run
+
+```python
+report = ss.preflight_memory("input/dem/arequipa_SRTMGL1.tif",
+                             downsample_factor=4, candidate_stride=5)
+print(report["estimate_gb"], report["available_gb"])
+```
+
+The estimate is what decides `downsample_factor`: the full Arequipa DEM needs 4.5 GiB at
+1 and 2.3 GiB at 4, since the labelling arrays scale as its inverse square. Passing
+`max_memory_gb` to a search caps its address space, so one that outgrows the machine
+fails with `MemoryError` naming itself rather than inviting the OOM killer to pick a
+victim.
+
+### The same things from the command line
 
 ```bash
-oroscope --config_path my_config.json --resume --resume_dir ../output/20260227_153000
-
+oroscope --generate_config arequipa.json --config_preset arequipa
+oroscope --config_path arequipa.json
+oroscope --config_path arequipa.json --min_slope_deg 5   # a typed flag beats the file
+oroscope --config_path arequipa.json --resume --resume_dir output/arequipa
 ```
+
+```bash
+oroscope-crop input/dem/arequipa_SRTMGL1.tif input/dem/colca.tif \
+    --north -15.30 --south -15.85 --west -72.40 --east -71.55
+oroscope-combine output/grand_colca_config output/tambo_colca_config \
+    --labels GRAND TAMBO --out output/combined
+oroscope-sensitivity config/tambo_colca_config.json --sweep min_score 0.0 0.2 0.35 0.5
+```
+
+`origin_lat`/`origin_lon` are optional either way: the DEM's own tiepoint is used when
+they are omitted, and a supplied value that disagrees with it is reported rather than
+silently honoured.
 
 ### Output Products
 

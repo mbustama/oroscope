@@ -11,7 +11,7 @@ import unittest
 import numpy as np
 
 import _support  # noqa: F401  (path setup)
-import arrival_scan as scan_mod
+from oroscope import arrival_scan as scan_mod
 import synthetic
 from _support import ss
 

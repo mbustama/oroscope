@@ -50,7 +50,7 @@ def warm_up_jit(tmp):
     import numpy as np
     from _support import ss
     elevation = np.zeros((64, 64), dtype=np.float32)
-    import arrival_scan
+    from oroscope import arrival_scan
     grid = ss.resolve_grid_geometry("nonexistent.tif", -15.6, cell_size_deg=1 / 3600)
     arrival_scan.scan(np.array([[32.0, 32.0, 90.0]]), elevation, grid,
                       n_azimuths=1, half_width_deg=0.0, max_range_m=500.0,
