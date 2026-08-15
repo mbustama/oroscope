@@ -1,7 +1,7 @@
 Tutorial notebooks
 ==================
 
-Six worked notebooks live in `notebooks/
+Seven worked notebooks live in `notebooks/
 <https://github.com/mbustama/oroscope/tree/main/notebooks>`_, numbered in reading
 order. Each carries its figures inline, so they can be read on GitHub without being
 run, and each ends with links to the previous and next.
@@ -58,3 +58,13 @@ Two experiments
 `6. Combining and sensitivity <https://github.com/mbustama/oroscope/blob/main/notebooks/06_combining_and_sensitivity.ipynb>`_
    Joint, union and co-location, then the more important question: how much a result
    depends on its assumptions. Read this one before quoting a capacity.
+
+Running one
+-----------
+
+`7. Running a whole search <https://github.com/mbustama/oroscope/blob/main/notebooks/07_running_a_search.ipynb>`_
+   The pipeline as an ordinary Python call: configuration as data, the memory
+   pre-flight, the results dictionary it hands back, the funnel and its binding
+   constraint, which sites are actually in the result, what held each one back, and
+   the run's own summary. Ends with the plan for the **full Arequipa DEM** — the run
+   that has never been done, with what to look at when it is.

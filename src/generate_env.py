@@ -1,3 +1,16 @@
+"""
+Writes a conda ``environment.yml`` from what the code actually imports.
+
+Reads the sources with :mod:`ast` rather than importing or running them, subtracts the
+standard library, reports what the active environment is missing, and emits a
+``conda-forge``-first specification. Parsing rather than executing is the point: it
+cannot be fooled into running code, and it works on a machine where the dependencies
+are exactly what is not installed yet.
+
+An alternative to ``pip install -e .``, kept for conda users who would rather solve the
+whole environment at once. The authoritative dependency list is
+``pyproject.toml``.
+"""
 
 from __future__ import annotations
 import ast
@@ -128,7 +141,7 @@ def check_installed_modules(dependencies):
             missing.append(dep)
     return satisfied, missing
 
-def generate_conda_yaml(dependencies, output_file="environment.yml", env_name="grand_site_search"):
+def generate_conda_yaml(dependencies, output_file="environment.yml", env_name="oroscope"):
     """
     Generates a formatted YAML file compatible with Conda.
     Prioritizes the conda-forge channel for scientific packages.
@@ -166,12 +179,12 @@ def main():
     to call.
     """
     print(f"\n{C.HEADER}===================================================={C.RESET}")
-    print(f"{C.BOLD}   GRAND CONDA ENVIRONMENT GENERATOR{C.RESET}")
+    print(f"{C.BOLD}   OROSCOPE CONDA ENVIRONMENT GENERATOR{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
     
     target_script = "site_searcher.py"
     output_yml = "environment.yml"
-    env_name = "grand_site_search"
+    env_name = "oroscope"
     
     if not os.path.exists(target_script):
         print(f"   {C.FAIL}[!] Target script '{target_script}' not found in the current directory.{C.RESET}")

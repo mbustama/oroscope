@@ -1,4 +1,21 @@
 
+"""
+Downloads the elevation models a search needs, and writes configurations for them.
+
+Fetches the bundled regions -- Lima (AW3D30) and Arequipa (SRTMGL1) -- from
+OpenTopography into ``input/dem/``, and generates a ready-to-run JSON config for each
+in ``config/``. An API key is required and free: register at
+https://portal.opentopography.org/myopentopo and pass it as
+``--open_topography_api_key``.
+
+For any other region, download the tiles from the OpenTopography portal, merge them
+into one GeoTIFF if the area spans several, and cut the window you want with
+:mod:`crop_dem`.
+
+This was ``setup.py``, whose name made ``pip install`` run the downloader instead of
+building the package.
+"""
+
 from __future__ import annotations
 import argparse
 import sys
@@ -160,14 +177,14 @@ def main():
     Kept as a function so the console script declared in pyproject.toml has something
     to call.
     """
-    parser = argparse.ArgumentParser(description="GRAND Site Search - Data Setup & Downloader")
+    parser = argparse.ArgumentParser(description="Oroscope - DEM download and configuration setup")
     parser.add_argument("--open_topography_api_key", type=str, default=None, 
                         help="Your OpenTopography API key (Required to download DEMs).")
     
     args = parser.parse_args()
 
     print(f"\n{C.HEADER}===================================================={C.RESET}")
-    print(f"{C.BOLD}   GRAND OPENTOPOGRAPHY DEM SETUP{C.RESET}")
+    print(f"{C.BOLD}   OROSCOPE OPENTOPOGRAPHY DEM SETUP{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
 
     # Explicit enforcement of the API Key

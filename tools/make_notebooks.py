@@ -679,14 +679,22 @@ On the Colca crop, with both experiments run over identical terrain:
 
 | | area | sites | capacity | of its own area in the joint |
 |---|---|---|---|---|
-| GRAND | 4580.2 km² | 1 | 5317 | 1.2% |
-| TAMBO | 93.1 km² | 17 | 10 878 | 58.9% |
-| **joint** | 54.9 km² | | | Jaccard 0.012 |
+| GRAND | 4580.2 km² | 1 | 5317 | 1.1% |
+| TAMBO | 83.6 km² | 15 | 9717 | 59.9% |
+| **joint** | 50.1 km² | | | Jaccard 0.011 |
 
-The interesting part is *why* the joint is small. Two thirds of TAMBO-viable ground is
+The interesting part is *why* the joint is small. Three fifths of TAMBO-viable ground is
 also GRAND-viable, but the two deployable **slope bands barely overlap** — GRAND's 3–25°
 against Colca's ~40° walls leaves only a 20–25° sliver. Co-location is decided by slope,
-not by arrival geometry."""),
+not by arrival geometry.
+
+> An earlier version of this table reported TAMBO at 44.5 km² and the joint at 26.4.
+> Both were wrong. `load_run` took the alphabetically first `.tif` in a run directory,
+> and a directory re-run since the project was renamed holds both
+> `oroscope_results_*.tif` and a stale `grand_search_results_*.tif` — the legacy prefix
+> sorts first, so the overlay quietly used a superseded mask. Nothing failed; the
+> report simply described a run that no longer existed. It is worth knowing that this
+> class of fault produces a plausible number rather than an error."""),
 ("code", """grand = (3.0, 25.0)
 tambo = (20.0, 60.0)
 lo, hi = max(grand[0], tambo[0]), min(grand[1], tambo[1])
@@ -704,9 +712,15 @@ much each moves the answer. Run against a real TAMBO baseline, the verdict was b
 | `min_score` | 0.0 → **45 928** | 0.2 → **15 481** | 0.35 → **2056** | 0.5 → **0** |
 | `min_target_slope_deg` | 0° → **7442** | 15° → **5309** | 25° → **2056** | 35° → **0** |
 
-Every criterion sits near a cliff. **The decay energy is the worst**: across TAMBO's own
-3 PeV – 1 EeV reach the answer runs from 10 878 to zero, because a single energy cannot
-stand in for a spectrum."""),
+Every criterion sits near a cliff. **The decay energy was the worst**: across TAMBO's
+own 3 PeV – 1 EeV reach the answer ran from 10 878 to zero, because a single energy
+cannot stand in for a spectrum.
+
+That row is now history, and it is the reason the code changed. The decay term is
+folded over a power-law spectrum instead, with the index pinned or marginalised
+(`--decay_spectral_index`), and the same result then varies by **1.46×** across a
+plausible range of index rather than without bound. `min_score` is what remains
+dominant, at 2.38× to 0.20× about its baseline."""),
 ("code", """crossing_m = 3000.0
 print(f"P(tau decays within a {crossing_m/1000:.0f} km crossing):\\n")
 for e in (3.0, 10.0, 55.0, 100.0, 1000.0):
@@ -729,18 +743,444 @@ Three things this project measured about itself, worth checking in any search:
    site has to be a deployable region rather than a scatter of pixels. But the two
    numbers are different and should not be conflated.
 2. **Candidate striding is unbiased** — acceptance is identical at strides 1 and 5, and
-   the stride-corrected area matches the stride-1 truth to 0.05%. So that one *is* safe.
-3. **Area and capacity are measured on different grids** at `downsample_factor > 1`, so
+   the stride-corrected area matches the stride-1 truth to 0.05%. So that one *is*
+   safe, *with the caveat below*.
+3. **The closing element and the stride interact.** That striding result was measured
+   with GRAND's 1 km closing element. Each run's own funnel gives the factor directly,
+   and the two Colca configs disagree: GRAND's mask is 2.19× its stride-corrected
+   accepted set — an independent check on the 2.29× above — while TAMBO's is **0.53×**,
+   because a 100 m element is about three pixels and cannot bridge the gaps stride 5
+   leaves. TAMBO's area is therefore a *lower* bound, not an upper one.
+4. **Area and capacity are measured on different grids** at `downsample_factor > 1`, so
    a feature a few pixels wide loses area it keeps detectors on.
+5. **Not every site in the results file is in the result.** `sites` lists everything
+   that cleared the thresholds; with `stop_at_target`, only the first *n* were
+   selected. Filter on each record's `selected` flag before totalling anything.
 
-`docs/assumptions.rst` is the full list, and it is deliberately blunt."""),
+Every run reports 3 for itself, in its own summary. `docs/assumptions.rst` is the full
+list, and it is deliberately blunt."""),
 ("md", """## Where to go next
 
 - The **[assumptions and limitations](https://mbustama.github.io/oroscope/assumptions.html)**
   page — what the numbers rest on.
 - The **[physics](https://mbustama.github.io/oroscope/physics.html)** page — the
   derivation behind every criterion."""),
-("md", footer(prev=("05_grand_and_tambo.ipynb", "GRAND and TAMBO"))),
+("md", """## Where to go next
+
+- **[7. Running a whole search](07_running_a_search.ipynb)** — driving the pipeline from
+  Python, reading what it hands back, and the plan for the full Arequipa DEM."""),
+("md", footer(prev=("05_grand_and_tambo.ipynb", "GRAND and TAMBO"),
+              nxt=("07_running_a_search.ipynb", "Running a whole search"))),
+]
+
+# --------------------------------------------------------------------------- 07
+NB07 = [
+("md", """# 7. Running a whole search, and reading what comes back
+
+The earlier notebooks drive the pieces: the scan kernel, the physics, the score shapes.
+This one drives **the whole pipeline** — screen, scan, score, clean, label, pack, write
+— as an ordinary Python call, and then reads the result properly.
+
+It is also the place the **full Arequipa DEM** run belongs. That run is at the end,
+guarded so this notebook still executes without the DEM, which is gitignored and a
+quarter of a gigabyte.
+
+Three things are worth knowing before the first call:
+
+- **Everything the command line can do, the library can do.** Configuration files,
+  the memory pre-flight, the run summary. There is no CLI-only behaviour left.
+- **The pipeline returns its results.** It used to return `None` and leave callers to
+  find and re-read the JSON it had just written.
+- **It explains itself.** A plain-language account of what was found and why, printed
+  and saved as `explanation.txt`, on by default."""),
+("code", PREAMBLE + """
+import contextlib
+import io
+import json
+import tempfile
+
+import explain
+import site_searcher as ss
+
+WORK = tempfile.mkdtemp(prefix="oroscope_nb07_")
+print("working in", WORK)"""),
+("md", """## Configuration is data, not a command-line concern
+
+`default_config()` returns every knob the tool understands, with its default.
+`generate_config(path, preset)` writes that as a template, and `load_config(path)` reads
+one back. All three used to exist only inside `main()`, reachable by running the CLI.
+
+A template naming **every** key matters more than it sounds: a config with holes in it
+falls back silently for whatever it omits, and the fallback file is the least visible
+input the tool has."""),
+("code", """cfg = ss.default_config("arequipa")
+print(f"{len(cfg)} keys, e.g.:")
+for key in ("dem_path", "min_slope_deg", "max_slope_deg", "candidate_stride",
+            "downsample_factor", "min_score", "explain"):
+    print(f"   {key:>20}: {cfg[key]!r}")
+
+path = os.path.join(WORK, "arequipa.json")
+ss.generate_config(path, "arequipa")
+print(f"\\nwritten and read back identically: {ss.load_config(path) == cfg}")"""),
+("md", """## Before a big run: what will it cost?
+
+`estimate_peak_memory_gb` predicts the *anonymous* allocations from the DEM's size and
+two parameters. The memory-mapped DEM is deliberately excluded — it is file-backed and
+the kernel can evict it, and counting it would make every large search look impossible
+when the streaming design exists precisely so that it is not.
+
+`downsample_factor` is the knob that matters: the labelling arrays scale as its inverse
+square. Here is the real Arequipa DEM, 10204 × 12603 pixels."""),
+("code", """rows, cols = 10204, 12603
+print(f"Arequipa DEM: {rows} x {cols} = {rows*cols/1e6:.0f} Mpx\\n")
+for ds in (1, 2, 4, 8):
+    need = ss.estimate_peak_memory_gb(rows, cols, downsample_factor=ds)
+    print(f"   downsample_factor {ds}:  {need:5.2f} GiB")
+
+have = ss.available_memory_gb()
+print(f"\\navailable right now: {have:.1f} GiB" if have else "\\n(memory not reportable here)")
+print("\\nThis is why the full run uses downsample_factor 4.")"""),
+("md", """The estimate is rough and says so — `survival_fraction` is the share of pixels passing
+the topographic screen, which is terrain-dependent and unknown until the screen has run.
+It is meant to catch the order-of-magnitude mistake, not to predict a number.
+
+`preflight_memory` does the whole job: estimate, warn if it is close, and cap the
+process's address space so a search that outgrows the machine fails with `MemoryError`
+naming itself rather than letting the kernel's OOM killer pick a victim — which may be
+your editor. A ten-point sweep once did exactly that at 6.9 GB."""),
+("md", """## A complete run
+
+Synthetic terrain, so this executes anywhere. A ridge with a slope in front of it: the
+slope sees the ridge, and the ridge's own flank sees the terrain rising beyond."""),
+("code", """def ridge_and_slope(n, cell_x):
+    \"\"\"A valley between a ridge and a rising slope. Closed-form, no DEM needed.\"\"\"
+    cols = np.arange(n, dtype=np.float64)[None, :].repeat(n, 0)
+    x = cols * cell_x
+    ridge = 1400.0 * np.exp(-((x - 0.30 * n * cell_x) / (0.05 * n * cell_x)) ** 2)
+    rise = np.clip((x - 0.55 * n * cell_x) / (0.45 * n * cell_x), 0, 1) ** 2 * 1500.0
+    return (2200.0 + ridge + rise).astype(np.float32)"""),
+("code", """import tifffile as tiff
+
+grid = ss.resolve_grid_geometry("no-such-file.tif", -15.6, cell_size_deg=1/3600)
+z = ridge_and_slope(700, grid.cell_size_x)
+
+dem = os.path.join(WORK, "ridge.tif")
+tiff.imwrite(dem, z, extratags=[
+    (33550, "d", 3, (1/3600, 1/3600, 0.0)),                    # ModelPixelScale
+    (33922, "d", 6, (0.0, 0.0, 0.0, -72.3, -15.6, 0.0)),       # ModelTiepoint
+])
+print("wrote a GeoTIFF carrying its own resolution and corner:", os.path.basename(dem))"""),
+("md", """Now the search itself. Note what is *not* passed: no origin — the DEM carries its own
+corner in the tiepoint tag, and reading it removes the most error-prone input the tool
+has. A supplied origin that disagrees with the file by more than ~100 m is reported
+rather than silently honoured, because a wrong origin does not fail, it
+mis-georeferences every output.
+
+The run prints a great deal. It is captured here and unpacked below."""),
+("code", """log = io.StringIO()
+with contextlib.redirect_stdout(log), contextlib.redirect_stderr(io.StringIO()):
+    results = ss.find_grand_regions_interactive(
+        dem_path=dem,
+        run_output_dir=os.path.join(WORK, "run"),
+        target_antennas=200, min_sub_array_size=20,
+        min_width_km=1.0, antenna_spacing_km=1.0,
+        min_dist_km=3.0, max_dist_km=20.0,
+        downsample_factor=2, tile_size=256, candidate_stride=5, num_cores=2,
+    )
+
+print(f"{len(log.getvalue().splitlines())} lines of output captured\\n")
+print("returned:", ", ".join(sorted(results)))"""),
+("md", """That dictionary is the same content the results JSON holds, plus the explanation and
+the paths written. No re-reading the file it just wrote."""),
+("code", """print(f"sites:    {results['results']['total_sites']}")
+print(f"capacity: {results['results']['total_capacity']}")
+print(f"stages:   {', '.join(results['timings_sec'])}")
+print(f"files:    {len(results['output_files'])} written")
+for f in results["output_files"]:
+    print("   ", os.path.basename(f))"""),
+("md", """## The funnel is the diagnostic
+
+Every filter records how many pixels survived it. When a search returns little or
+nothing, **the stage where the count collapses is the constraint responsible** — and
+that is the single most useful thing anyone can be told about a disappointing run."""),
+("code", """for stage, count in results["funnel"].items():
+    print(f"   {stage:<34} {count:>12,}")
+
+binding = explain.binding_constraint(results["funnel"])
+print(f"\\nbinding constraint: {binding['stage']!r}")
+print(f"   kept {100*binding['kept_fraction']:.1f}% of the {binding['before']:,} that reached it")
+print(f"   change: {binding['knob']}")"""),
+("md", """Two stages are excluded from that search by construction, and it is worth knowing why:
+
+- **`kept by stride N`** is a deliberate subsample, not a filter. It removes four
+  candidates in five and the acceptance is unchanged, so calling it the constraint
+  would name the same answer on nearly every run.
+- **`after gap closing`** *adds* pixels. A stage that grows the set cannot be what
+  shrank it.
+
+## Which sites are actually in the result
+
+`sites` lists everything that cleared the area and capacity thresholds. With
+`stop_at_target`, selection walks that capacity-sorted list until the target is met and
+stops — so the list can be longer than the result. Only the selection is in
+`total_sites`, `total_capacity` and the exported raster.
+
+Each record says which it is."""),
+("code", """log2 = io.StringIO()
+with contextlib.redirect_stdout(log2), contextlib.redirect_stderr(io.StringIO()):
+    truncated = ss.find_grand_regions_interactive(
+        dem_path=dem, run_output_dir=os.path.join(WORK, "run2"),
+        target_antennas=50, min_sub_array_size=5, stop_at_target=True,
+        min_width_km=1.0, antenna_spacing_km=1.0,
+        min_dist_km=3.0, max_dist_km=20.0,
+        downsample_factor=2, tile_size=256, candidate_stride=5, num_cores=2,
+    )
+
+chosen, shortlisted = explain.selected_sites(truncated)
+print(f"listed in the file: {len(chosen) + len(shortlisted)}")
+print(f"selected:           {truncated['results']['total_sites']}\\n")
+for site in chosen + shortlisted:
+    mark = "selected" if site["selected"] else "not selected"
+    print(f"   site {site['site_id']:>3}  {site['area_km2']:>8.2f} km²  "
+          f"{site['capacity_exact']:>5} detectors   {mark}")
+
+print(f"\\nsumming everything listed:  {sum(s['area_km2'] for s in chosen + shortlisted):8.2f} km²")
+print(f"summing the selection:      {sum(s['area_km2'] for s in chosen):8.2f} km²  <- the raster")"""),
+("md", """Totalling the wrong one over-reports, which is exactly the mistake this flag exists to
+prevent. The sites that were not selected are the *next best ground*, not ground that
+failed — worth keeping in the file, worth excluding from the totals.
+
+## Attribution: what held each site back
+
+The score is a product of **named** components, each in [0, 1], and each site's record
+carries the distribution of every one. Under a product the lowest component bounds the
+total from above, so naming it turns "this site scored 0.34" into something actionable."""),
+("code", """site = chosen[0]
+scan = site["arrival_scan"]
+parts = {k[len("score_"):-len("_p50")]: v for k, v in scan.items()
+         if k.startswith("score_") and k.endswith("_p50") and k != "score_p50"}
+
+print(f"site {site['site_id']}, median score {scan['score_p50']:.3f}\\n")
+for name, value in sorted(parts.items(), key=lambda kv: kv[1]):
+    bar = "#" * int(round(value * 40))
+    print(f"   {name:>14}  {value:5.3f}  {bar}")
+
+name, value = explain.weakest_component(scan)
+print(f"\\nweakest: {name} at {value:.3f}")"""),
+("md", """On the real Colca configurations this is unambiguous: `solid_angle` is the weakest
+component at **15 of 15** TAMBO sites, with everything else at 1.0 except the decay term
+at 0.96. So that result is set almost entirely by `solid_angle_half_sr`, whose 0.05 sr
+default is a GRAND-scale value.
+
+That is the kind of statement the components make available and a single total does not.
+
+## How much did closing move the area?
+
+The reported area is not the physics-accepted area: the mask is closed morphologically
+before areas are measured. The published figure is 2.29× at Colca, measured against a
+stride-1 control — but each run has the number in it, as closed pixels over
+stride-corrected accepted pixels."""),
+("code", """ratio = explain.closing_inflation(results["funnel"],
+                                 results["parameters"]["candidate_stride"])
+print(f"this run: closing moved the mask by {ratio:.2f}x")
+print("\\nOn the real configurations:")
+print("   GRAND Colca  2.19x   (against 2.29x from a stride-1 control -- an independent check)")
+print("   TAMBO Colca  0.53x   (a 100 m element cannot bridge the gaps stride 5 leaves,")
+print("                        so its area is a LOWER bound, not an upper one)")"""),
+("md", """## The run, explained
+
+Everything above is assembled for you. `explain.explain_results` takes the results
+dictionary and returns a string — it opens no files, runs nothing and needs no DEM, so
+a run from months ago can still be explained from its JSON.
+
+It is on by default, printed at the end of every run and saved as `explanation.txt`
+beside the results, because these runs are meant to be handed to other people and a
+terminal scrollback is not. `--no_explain` suppresses it."""),
+("code", """print(results["explanation"])"""),
+("md", """## Provenance
+
+Separate from the science outputs, and the answer to "what produced this number?"."""),
+("code", """prov = results["provenance"]
+print(f"commit:   {prov['git']['commit'][:10]} on {prov['git']['branch']}"
+      f"  ({'dirty' if prov['git']['dirty'] else 'clean'} tree)")
+print(f"DEM:      {os.path.basename(prov['dem']['path'])}")
+print(f"          sha256 {prov['dem']['sha256'][:24]}...")
+print(f"          {prov['dem']['cell_size_y_m']:.2f} m N-S x {prov['dem']['cell_size_x_m']:.2f} m E-W")
+print(f"python:   {prov['platform']['python']} on {prov['platform']['system']}")
+print(f"packages: {', '.join(f'{k} {v}' for k, v in list(prov['packages'].items())[:4])}, ...")"""),
+("md", """---
+
+## The full Arequipa DEM
+
+Every number this project has published comes from **crops** — Colca, and small Arequipa
+windows. The full DEM is the run that has never been done, and this is where it lands.
+
+**Read, not run.** The cells below open results that were produced locally and stored in
+`results/arequipa_full/`. They do not start a search. Each of these searches takes about
+half an hour, CI executes notebooks on every push, and a tutorial costing ninety minutes
+of compute per commit is a bill rather than a tutorial. The expensive half runs once, on
+a machine that has the DEM; the notebook opens a few hundred kilobytes of JSON.
+
+To produce or refresh the store:
+
+```bash
+python tools/run_arequipa_full.py --dry-run   # what it will do, and what it will cost
+python tools/run_arequipa_full.py             # GRAND, TAMBO, then the combination
+```
+
+**Regenerate it when a configuration changes, and not otherwise.** The store carries a
+manifest naming the configs and the time, so a stale one is detectable rather than
+merely suspected.
+
+Three searches, all at the same `downsample_factor` so their masks are pixel-aligned:
+
+| | config | what it asks |
+|---|---|---|
+| **GRAND alone** | `config/grand_arequipa_full.json` | 3–25° deployable ground seeing a target 10–40 km away, within ±3° of the horizon |
+| **TAMBO alone** | `config/tambo_arequipa_full.json` | a 20–60° near wall facing a ≥25° far wall, 2–5 km across |
+| **Combined** | `combine_experiments` over both | joint, union, and how much of each sits inside the other |
+
+**What it costs.** 10204 × 12603 pixels, about 129 Mpx. At `downsample_factor: 4` the
+estimator says 2.3 GiB against the ~6 GiB typically free; at 1 it says 4.5 GiB, which is
+why 4 is the setting. That choice has a price worth stating: area is measured on the
+downsampled mask while capacity is measured at full resolution, so a feature a few
+pixels wide keeps its detectors and loses area. **Read these areas as lower bounds**,
+and more so for TAMBO's canyon strips than for GRAND's blobs."""),
+("code", """STORE = os.path.abspath(os.path.join("..", "results", "arequipa_full"))
+
+def load_stored(label):
+    \"\"\"Reads one stored run, or returns None when the store does not have it yet.\"\"\"
+    path = os.path.join(STORE, f"{label}_results.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+manifest_path = os.path.join(STORE, "manifest.json")
+if os.path.exists(manifest_path):
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    print(f"store generated {manifest['generated']} by {manifest['generated_by']}")
+    print(f"from {manifest['dem']}\\n")
+    for name in manifest["files"]:
+        print("   ", name)
+else:
+    manifest = None
+    print("The full-DEM store is empty: these searches have not been run yet.\\n")
+    print("Produce it with:")
+    print("    python tools/run_arequipa_full.py --dry-run")
+    print("    python tools/run_arequipa_full.py")
+
+grand_full = load_stored("grand")
+tambo_full = load_stored("tambo")"""),
+("md", """### GRAND over the whole DEM
+
+The four things worth reading, in this order:
+
+1. **The funnel**, and specifically whether the binding constraint is the same one the
+   crops found. If a full DEM is bound by a different stage than its crops were, the
+   crops were not representative and every number derived from them needs re-reading.
+2. **The area**, against the crop scaled up — and against the closing factor this run
+   reports for itself, rather than the 2.29× quoted from Colca.
+3. **The site count and their spread.** A crop cannot say whether the good ground is one
+   region or fifty scattered ones, and that is a deployment question, not a physics one.
+4. **The weakest score component**, which on the crops is `solid_angle` everywhere. If
+   that holds at full scale it is a statement about the criterion, not about Peru."""),
+("code", """def summarise(results, label):
+    if results is None:
+        print(f"{label}: not in the store yet.")
+        return
+    chosen, shortlisted = explain.selected_sites(results)
+    area = sum(s["area_km2"] for s in chosen)
+    binding = explain.binding_constraint(results["funnel"])
+    ratio = explain.closing_inflation(results["funnel"],
+                                      results["parameters"]["candidate_stride"])
+    weakest = [explain.weakest_component(s.get("arrival_scan") or {}) for s in chosen]
+    named = [w[0] for w in weakest if w]
+
+    print(f"{label}")
+    print(f"   sites          {results['results']['total_sites']:>10,}"
+          f"   ({len(shortlisted)} more cleared the thresholds, not selected)")
+    print(f"   capacity       {results['results']['total_capacity']:>10,}")
+    print(f"   area           {area:>10,.1f} km²")
+    if binding:
+        print(f"   bound by       {binding['stage']}"
+              f"  (kept {100*binding['kept_fraction']:.1f}%)")
+    if ratio is not None:
+        print(f"   closing moved  {ratio:>10.2f}x")
+    if named:
+        commonest = max(set(named), key=named.count)
+        print(f"   weakest        {commonest} at {named.count(commonest)}/{len(named)} sites")
+
+summarise(grand_full, "GRAND, full Arequipa DEM")"""),
+("code", """if grand_full is not None:
+    print(grand_full.get("explanation") or explain.explain_results(grand_full))
+else:
+    print("Nothing stored for GRAND yet -- see the cell above for how to produce it.")"""),
+("md", """### TAMBO over the whole DEM
+
+The more interesting of the two, because TAMBO's criteria are canyon-shaped and the
+crop was *chosen* for containing a canyon. Over the whole DEM the question becomes: how
+much other canyon is there, and is any of it as good?
+
+Note that the areas here are the ones most affected by `downsample_factor: 4`: a strip
+along a wall is exactly the feature that loses area to downsampling while keeping its
+detectors."""),
+("code", """summarise(tambo_full, "TAMBO, full Arequipa DEM")"""),
+("code", """if tambo_full is not None:
+    print(tambo_full.get("explanation") or explain.explain_results(tambo_full))
+else:
+    print("Nothing stored for TAMBO yet -- see above for how to produce it.")"""),
+("md", """### Where both are viable
+
+The overlay. On the Colca crop the answer was decided by slope: GRAND's 3–25° deployable
+band against Colca's ~40° walls leaves only a 20–25° sliver, so the joint was about a
+percent of GRAND's area and three fifths of TAMBO's.
+
+Whether that survives at full scale is a real question. The crop contains one canyon
+system; the DEM contains many, of varying wall slope, and the joint area is the
+programme-level number — one site, one road, one power feed, two experiments."""),
+("code", """report_path = os.path.join(STORE, "combined_report.json")
+if not os.path.exists(report_path):
+    print("The combination has not been produced yet.")
+else:
+    with open(report_path) as f:
+        report = json.load(f)
+
+    width = max(len(r["label"]) for r in report["runs"])
+    print(f"   {'experiment'.ljust(width)} {'area km²':>12} {'sites':>7} "
+          f"{'capacity':>10} {'in joint':>9}")
+    print("   " + "-" * (width + 42))
+    for r in report["runs"]:
+        print(f"   {r['label'].ljust(width)} {r['area_km2']:>12,.1f} "
+              f"{r['reported_sites']:>7,} {r['reported_capacity']:>10,} "
+              f"{100*r['fraction_of_own_area_in_joint']:>8.1f}%")
+    print("   " + "-" * (width + 42))
+    print(f"   joint  {report['joint']['area_km2']:>10,.1f} km²")
+    print(f"   union  {report['union']['area_km2']:>10,.1f} km²")
+    for pair, stats in report["pairwise_overlap"].items():
+        print(f"   {pair}: Jaccard {stats['jaccard']:.4f}")"""),
+("md", """### Comparing against the crop
+
+The crop's numbers, for reference — GRAND 4580.2 km² in 1 site with 5317 detectors,
+TAMBO 83.6 km² in 15 sites with 9717, joint 50.1 km². If the full DEM's binding
+constraint or weakest component differs from these, the crop was not representative and
+the comparison is the finding.
+
+A crop is chosen because it is interesting. **A search over ground chosen for being
+interesting is not a survey**, and that is the gap this run exists to close."""),
+("code", """if grand_full is not None and tambo_full is not None:
+    print("Both full-DEM runs are stored; compare their funnels against the crops':\\n")
+    for label, res in (("GRAND", grand_full), ("TAMBO", tambo_full)):
+        b = explain.binding_constraint(res["funnel"])
+        print(f"   {label:>6}: bound by {b['stage']!r} "
+              f"(kept {100*b['kept_fraction']:.1f}%)")
+    print("\\n   Colca crop, for comparison:")
+    print("   GRAND: bound by 'directions accepted' (kept 60.1%)")
+    print("   TAMBO: bound by 'directions accepted' (kept 17.5%)")
+else:
+    print("Run both searches to make this comparison.")"""),
+("md", footer(prev=("06_combining_and_sensitivity.ipynb", "Combining and sensitivity"))),
 ]
 
 NOTEBOOKS = {
@@ -750,14 +1190,47 @@ NOTEBOOKS = {
     "04_criteria_and_scoring.ipynb": NB04,
     "05_grand_and_tambo.ipynb": NB05,
     "06_combining_and_sensitivity.ipynb": NB06,
+    "07_running_a_search.ipynb": NB07,
 }
 
 
+def cell_sources(nb):
+    """A notebook's content, ignoring outputs and execution counts."""
+    return [(c.cell_type, c.source) for c in nb.cells]
+
+
 def main():
+    """
+    Writes only the notebooks whose *content* changed.
+
+    Rewriting all of them unconditionally stripped the stored outputs from every
+    notebook whenever one word of one notebook changed, which forced a full
+    re-execution to restore them -- and re-executing is the expensive part. Comparing
+    cell sources makes this idempotent: edit one notebook, re-execute one notebook.
+    """
     OUT.mkdir(exist_ok=True)
+    written = skipped = 0
     for name, cells in NOTEBOOKS.items():
-        nbf.write(notebook(cells), str(OUT / name))
-        print(f"wrote {name}  ({len(cells)} cells)")
+        fresh = notebook(cells)
+        path = OUT / name
+        if path.exists():
+            try:
+                if cell_sources(nbf.read(str(path), as_version=4)) == cell_sources(fresh):
+                    print(f"unchanged {name}  (outputs preserved)")
+                    skipped += 1
+                    continue
+            except Exception:
+                pass                      # unreadable or older format: just rewrite it
+        nbf.write(fresh, str(path))
+        print(f"wrote {name}  ({len(cells)} cells)  -- re-execute this one")
+        written += 1
+
+    if written:
+        print(f"\n{written} rewritten, {skipped} unchanged. Re-execute what was "
+              f"rewritten, so its stored outputs match its code:\n"
+              f"    cd notebooks && jupyter nbconvert --execute --inplace <name>.ipynb")
+    else:
+        print(f"\nnothing to do: all {skipped} notebooks are up to date.")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,35 @@
+"""
+The search itself: from a digital elevation model to sites with detector capacity.
+
+Six stages, each streamed so that a DEM larger than memory is not a special case.
+Terrain is **screened** by slope, aspect, altitude and exclusion zones; the survivors
+are **scanned** over a fan of arrival directions (:mod:`arrival_scan`) and **scored**
+against per-experiment criteria (:mod:`scoring`); the accepted mask is **cleaned**
+morphologically, **labelled** into sites and packed with a detector lattice; and the
+result is **written** as GeoTIFF, world file, KML, PNG and JSON, with a selection
+funnel, a provenance record and a plain-language summary (:mod:`explain`).
+
+Three things are worth knowing before reading further.
+
+**GRAND and TAMBO are configurations, not code paths.** Adding an experiment means
+writing a JSON file. Nothing that shapes a result is hard-coded; every criterion is a
+parameter of :func:`find_grand_regions_interactive`, and the command line, the
+configuration file and the library all reach the same function.
+
+**The funnel is the diagnostic.** Every filter records how many pixels survived it, so
+a search that returns little or nothing names the constraint responsible rather than
+leaving it to be guessed. It is printed, stored in the results JSON, and read back by
+:func:`explain.binding_constraint`.
+
+**Geometry comes from the file.** Pixel size and the north-west corner are read from
+the DEM's own GeoTIFF tags, because an origin typed by hand does not fail when it is
+wrong -- it silently georeferences every output to the wrong ground. A supplied origin
+that disagrees with the file is reported rather than honoured in silence.
+
+The pipeline returns its results dictionary, so a caller does not have to find and
+re-read the file it was just handed the path to.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -2032,39 +2064,58 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
     return generated_files, out_data
 
 def print_tool_explanation():
-    """Outputs a formatted explanation of the tool's capabilities and logic to the console."""
+    """
+    Prints what the tool is about to do, before it does it.
+
+    Suppressed with ``--no_print_info``. Kept current deliberately: this described a
+    single ray cast to a target mountain, and a clearance buffer over intervening
+    terrain, for some time after both had been replaced by the arrival-direction scan.
+    """
     print(f"""
 {C.HEADER}================================================================================
-{C.BOLD}GRAND NEUTRINO OBSERVATORY - AUTOMATED SITE SEARCH TOOL{C.RESET}{C.HEADER}
+{C.BOLD}OROSCOPE - TERRAIN SITE SEARCH FOR PARTICLE-ASTROPHYSICS OBSERVATORIES{C.RESET}{C.HEADER}
 ================================================================================{C.RESET}
-This tool performs a high-performance topographic and physics simulation to 
-identify suitable deployment sites for the GRAND array.
+Searches a digital elevation model for ground that can host an observatory, against
+one experiment's criteria. GRAND and TAMBO are configurations of the same engine, not
+separate code paths: adding an experiment means writing a JSON file.
 
-{C.BOLD}Core Workflow:{C.RESET}
-1. Topographic Filtering: Scans the DEM for terrain with suitable slopes (configurable, default 3-25 degrees),
-   enforcing altitude limits and specified facing directions (Aspect).
-2. Logistics & RFI: Masks out areas overlapping populated centers and, optionally,
-   areas situated too far from road infrastructure.
-3. Ray-Tracing (Physics): Simulates line-of-sight from candidates to target 
-   mountain ranges. It actively accounts for Earth's curvature and maintains a 
-   clearance buffer over intermediate terrain.
-4. Spatial Pruning: Implements morphological math (Closing/Opening) to remove 
-   isolated "tendril" ridges that are unsuitable for wide array deployments.
-5. Grid Packing: Simulates placing antennas in 'hex' or 'square' grids to calculate 
-   the true physical capacity of the resulting sites.
-   
-{C.BOLD}Customizable Constraints & Processing Parameters:{C.RESET}
-- Slope Bounds: Customizable minimum and maximum terrain steepness in degrees.
-- RFI Zones: Accept pre-defined sets ('lima', 'arequipa') or custom geometry lists via JSON config.
-- Map Resolution: Read from the DEM's own GeoTIFF tags, or forced via `--cell_size_deg`. Pixels
-  are square in degrees but not in metres, so each axis carries its own ground scale.
-- Candidate Stride: Thins the candidate set before ray-tracing via `--candidate_stride`.
-- Downsample Factor: Modifies the internal resolution of the capacity masking, speeding up processing.
-- Tile Size: Configures the size of memory-mapped square chunks for RAM management.
-- Core Scaling: Control CPU thread allocation via `--num_cores` (defaults to all available cores).
-- Checkpointing: The tool automatically saves progress. Use `--resume` to bypass ray-tracing on a failed run.
-- Unified Output Generation: Exports georeferenced TIFFs, a KML file, an annotated graphical map, 
-  a JSON run-summary, and the execution log into a single dynamically named output directory.
+{C.BOLD}The question it answers, for every patch of ground:{C.RESET}
+  Is there a target surface at the right range, in the right direction, at the right
+  relative orientation, with the right matter behind it?
+
+{C.BOLD}Core workflow:{C.RESET}
+1. Topographic screen: slope (default 3-25 degrees), altitude, facing direction,
+   distance to roads, and radio-quiet exclusion zones. Survivors are thinned by
+   --candidate_stride, which was measured unbiased against a stride-1 control.
+2. Arrival scan: from each survivor, walks terrain profiles along a fan of azimuths
+   and reports what each arrival direction meets -- accepted solid angle, distance to
+   the exit point, column depth of rock, horizon, atmospheric depth, Earth chord and
+   the slope of the terrain struck. One walk serves every elevation bin, so the
+   azimuth count is what sets the cost. Earth curvature throughout; the radio path
+   alone uses the 4/3 refraction convention.
+3. Scoring: each observable becomes a named component in [0, 1] -- depth, distance,
+   solid angle, shower, decay, geomagnetic, clearance -- combined by --score_composition.
+   Naming them is what lets a weak site be attributed rather than merely reported.
+4. Spatial pruning: morphological closing fills gaps between accepted pixels, opening
+   removes tendrils narrower than --min_width_km. Closing inflates reported area, so
+   --gap_close_km is worth setting deliberately.
+5. Sites and capacity: connected regions are labelled and a detector lattice is packed
+   into each, in 'hex' or 'square'. Regions below the area or capacity threshold are
+   dropped; --stop_at_target reports the best sites for the array actually wanted.
+6. Outputs: georeferenced GeoTIFF and world file, KML, annotated map, a results JSON,
+   a selection funnel, a provenance record (git commit, DEM checksum, versions), the
+   full log, and a plain-language summary of what was found and why.
+
+{C.BOLD}Two things worth knowing before reading the numbers:{C.RESET}
+- The funnel is the diagnostic. When a search returns little or nothing, the stage
+  where the survivor count collapses IS the constraint responsible.
+- Reported area is not physics-accepted area. Morphological closing inflated it 2.29x
+  at Colca, measured against a stride-1 control. The run summary reports the factor
+  for the run in front of you.
+
+{C.BOLD}Memory:{C.RESET} the DEM is memory-mapped and processed in tiles (--tile_size), the run
+estimates its own peak against available RAM and caps its address space
+(--max_memory_gb), and --resume skips the scan on a failed run.
 {C.HEADER}================================================================================{C.RESET}
     """)
 
@@ -3069,6 +3120,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"      Origin: {C.MAGENTA}{origin_lat:.6f}, {origin_lon:.6f}{C.RESET}"
           f"  ({origin_source})")
 
+    # The run's own directory, which main() created and the library did not -- so a
+    # caller who passed a path that did not exist got a FileNotFoundError from inside
+    # numpy's open_memmap, naming a scratch buffer rather than the directory.
+    os.makedirs(run_output_dir, exist_ok=True)
+
     # Estimate, warn and cap before anything expensive is allocated. In the pipeline
     # rather than in main() so that every caller is protected, not only the CLI one.
     preflight_memory(dem_path, downsample_factor=downsample_factor,
@@ -3500,7 +3556,10 @@ def main():
     declared in pyproject.toml has something to call, and so the argument handling
     can be exercised from a test without spawning a subprocess.
     """
-    parser = argparse.ArgumentParser(description="GRAND Neutrino Array - Automated Site Search Tool")
+    parser = argparse.ArgumentParser(
+        description="Oroscope - terrain site search for particle-astrophysics "
+                    "observatories. GRAND and TAMBO are configurations of the same "
+                    "engine, not separate code paths.")
     
     # Made DEM and Origin optional here so they can be exclusively provided via config or fallbacks
     parser.add_argument("--dem_path", type=str, help="Path to the Digital Elevation Model (.tif) file.")
@@ -3622,11 +3681,20 @@ def main():
     fallback_params = load_config(fallback_path)
 
     # 3. Determine Unified Logging and Output Directory Hierarchically
-    base_dir = args.output_directory_base_with_given_json
-    if "output_directory_base_with_given_json" in config_params:
-        base_dir = config_params["output_directory_base_with_given_json"]
-    elif "output_directory_base_with_given_json" in fallback_params:
-        base_dir = fallback_params["output_directory_base_with_given_json"]
+    # Same precedence as every other parameter: an explicitly typed option wins, then
+    # the config file, then the fallbacks. This one resolved before the merge loop and
+    # so kept the old rule -- the config beat the command line -- which meant
+    # --output_directory_base_with_given_json was silently ignored whenever a config
+    # set it, and every other flag on that command line was honoured.
+    key = "output_directory_base_with_given_json"
+    if key in explicit_cli:
+        base_dir = getattr(args, key)
+    elif key in config_params:
+        base_dir = config_params[key]
+    elif key in fallback_params:
+        base_dir = fallback_params[key]
+    else:
+        base_dir = getattr(args, key)
 
     if args.config_path and os.path.exists(args.config_path):
         config_basename = os.path.splitext(os.path.basename(args.config_path))[0]

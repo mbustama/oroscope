@@ -37,10 +37,30 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 - `oroscope-sensitivity`, which varies one parameter at a time and tabulates what moves.
 - Memory safeguards: a pre-flight estimate, an address-space cap, and subprocess
   isolation per sweep point.
-- Documentation: physics and assumptions pages, six tutorial notebooks, and reproducible
-  figures in `src/figures.py`.
+- Documentation: physics and assumptions pages, seven tutorial notebooks, and reproducible
+  figures in `src/figures.py`. The seventh drives the whole pipeline from Python and
+  carries the plan for the full Arequipa DEM run.
+
+- **A seventh notebook, and the full-DEM run scaffolded.** Notebook 7 drives the whole
+  pipeline from Python, then reads the stored full-Arequipa results rather than
+  producing them — three searches at half an hour each, against CI that executes every
+  notebook on every push, is not a tutorial. `tools/run_arequipa_full.py` produces the
+  store locally into `results/arequipa_full/`; regenerate it when a configuration
+  changes. Configurations for both experiments over the full DEM are in `config/`.
 
 ### Fixed
+- **Documentation had drifted from the code.** The README documented 34 of 83 CLI
+  options and one, `--fresnel_buffer`, that no longer existed; it described the old
+  precedence rule, config-over-command-line, which was fixed long ago; the startup
+  banner still described a single ray cast to a target mountain; and three modules,
+  including `site_searcher` itself, had no docstring at all. `tests/test_docs.py` now
+  pins each of those.
+- **`--output_directory_base_with_given_json` lost to the config file.** It resolved
+  before the merge loop and so kept the precedence every other flag had shed, meaning
+  it was silently ignored whenever a config set it.
+- **The library did not create its own output directory**, so a caller who passed a
+  path that did not exist got `FileNotFoundError` from inside numpy's `open_memmap`,
+  naming a scratch buffer rather than the directory.
 - **The results file listed more sites than were selected, with nothing saying which.**
   With `--stop_at_target`, `sites` holds everything that cleared the thresholds while
   `total_sites`, `total_capacity` and the exported raster cover only the selection — so

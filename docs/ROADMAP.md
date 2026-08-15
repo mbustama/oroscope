@@ -1757,6 +1757,59 @@ are noise, exactly as §6.12 warns. Updating the baseline from a run like that w
 bake the noise in. Refresh it on a quiet machine, and expect `capacity_analysis` to be
 the only stage that legitimately moved.
 
+### 6.26 The full Arequipa DEM, scaffolded but not yet run
+
+Every number published so far comes from crops. The full-DEM run now has everything it
+needs except the half hour: two configurations (`config/grand_arequipa_full.json`,
+`config/tambo_arequipa_full.json`, identical to the Colca ones except for the DEM, the
+origin and `downsample_factor: 4`), a runner (`tools/run_arequipa_full.py`), and
+notebook 7, which explains the result.
+
+**The notebook reads the results; it does not produce them.** Three searches at roughly
+half an hour each, against CI that executes every notebook on every push, is ninety
+minutes of compute per commit for something that changes only when a configuration does.
+So the runner writes the small artefacts — results JSON, provenance, explanation, about
+a few hundred KB — into `results/arequipa_full/`, which is committed, and the notebook
+opens those. This is only possible because `explain.explain_results()` is a pure
+function of the results dictionary: no DEM, no re-run, no pipeline.
+
+Notebook 7 is therefore **excluded from the CI execution job**, which is a real loss of
+coverage and is replaced deliberately: `tests/test_docs.py` asserts that every
+`ss.<name>` and `explain.<name>` the generator writes still exists, which is the drift
+an API rename produces and the one the execution would have caught.
+
+`manifest.json` and the per-run provenance record when the store was built and from
+what, so a stale store is detectable. The premise of storing rather than recomputing is
+that nobody looks again, so the store has to say when it was last right.
+
+**What to look at when it runs**, in order: whether the binding constraint is the same
+one the crops found — if not, the crops were not representative and every number derived
+from them needs re-reading; the area against the crop scaled up, and against the closing
+factor the run reports for itself; whether the good ground is one region or fifty; and
+whether `solid_angle` is still the weakest component everywhere, which would be a
+statement about the criterion rather than about Peru.
+
+### 6.27 Documentation drift, and a test for it
+
+The README documented **34 of 83** command-line options, and one of the 34,
+`--fresnel_buffer`, had not existed for months. It also described the *old* precedence
+rule — config file over command line — which §4.x fixed long ago. A wrong number in a
+docstring is caught by `test_doctests`; a missing option in the README was caught by
+nothing.
+
+`tests/test_docs.py` now pins the coverage rather than the prose: every CLI flag appears
+in the README, no documented flag is imaginary, the precedence section states the rule
+the code implements, every module has a docstring of more than a few words (three did
+not, including `site_searcher` itself, whose `automodule` page therefore opened with a
+bare list of functions), and every name in `__all__` exists.
+
+Also fixed while there: the startup banner still described a single ray cast to a target
+mountain and a "clearance buffer" over intervening terrain, both replaced by the arrival
+scan some time ago; and `--output_directory_base_with_given_json` resolved *before* the
+merge loop and so kept the old precedence — a config file silently beat an explicitly
+typed command line, for that one flag only, while every other flag on the same command
+line was honoured.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

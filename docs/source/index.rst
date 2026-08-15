@@ -71,8 +71,8 @@ What it does
 #. **Scores** the result against per-experiment criteria, each a named component.
 #. **Cleans up** morphologically, labels sites, and places detectors on a lattice in
    real ground coordinates.
-#. **Writes** GeoTIFF, KML, PNG and JSON, plus a selection funnel and a provenance
-   record.
+#. **Writes** GeoTIFF, KML, PNG and JSON, plus a selection funnel, a provenance record,
+   and a plain-language account of what was found and why.
 
 What it is not
 --------------

@@ -484,6 +484,24 @@ class TestLibraryParity(unittest.TestCase):
             report = ss.preflight_memory("nonexistent.tif", max_memory_gb=0)
         self.assertIsNone(report["estimate_gb"])
 
+    def test_the_pipeline_creates_its_own_output_directory(self):
+        """
+        main() created it, so the library raised FileNotFoundError from inside numpy's
+        open_memmap, naming a scratch buffer rather than the directory that was missing.
+        """
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(300, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "r.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        out = os.path.join(self.tmp, "does", "not", "exist")
+        with quiet():
+            results = ss.find_grand_regions_interactive(
+                dem_path=dem, origin_lat=ORIGIN_LAT, origin_lon=ORIGIN_LON,
+                run_output_dir=out, downsample_factor=2, tile_size=256,
+                num_cores=2, generate_kml=False, explain=False)
+        self.assertTrue(os.path.isdir(out))
+        self.assertIsInstance(results, dict)
+
     def test_the_pipeline_accepts_the_ceiling_as_a_parameter(self):
         """The one flag with no library equivalent at all."""
         import inspect

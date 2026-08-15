@@ -7,7 +7,7 @@ name). Local path `~/Research/GRAND/oroscope`, with a `site_search` symlink left
 it for anything that still points at the old path — **delete it when convenient.**
 
 **Branch:** `dev`, 39 commits ahead of `main`, all pushed. **Head at handover: `34887d9`.**
-**Tests:** 370, stdlib `unittest`, ~18 s. **CI:** 8 jobs, all green.
+**Tests:** 434, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
 
 `main` is protected by a repository ruleset: no direct push, no force-push, no deletion,
 pull request required, seven status checks. **You cannot push to `main`** — work on `dev`
@@ -146,10 +146,11 @@ images are actually produced**, don't trust a green build.
 
 | path | what |
 | --- | --- |
-| `src/site_searcher.py` | 3517 lines. Pipeline, CLI, screening, morphology, capacity, outputs, memory guards. |
+| `src/site_searcher.py` | 3875 lines. Pipeline, CLI, config files, screening, morphology, capacity, outputs, memory guards. |
 | `src/arrival_scan.py` | The scan kernel: profile walking, column depth, Fresnel, RFI line-of-sight. Numba. |
 | `src/physics.py` | Closed-form physics, no terrain: atmosphere, shower profile, Earth chord, tau range and decay, geomagnetic, Cherenkov. |
 | `src/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
+| `src/explain.py` | The run summary: binding constraint, per-site attribution, closing factor, assumptions. Pure function of the results dict. |
 | `src/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
 | `src/combine_experiments.py` | Overlays two or more runs: joint, union, co-location. |
 | `src/crop_dem.py` | Cuts a lat/lon window out of a DEM. |
@@ -157,7 +158,7 @@ images are actually produced**, don't trust a green build.
 | `src/figures.py` | The publication figures, as functions returning `Figure`. |
 | `src/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
 | `tests/` | 370 tests. `synthetic.py` builds terrain with closed-form answers. |
-| `tools/make_notebooks.py` | Generates the six tutorials. Edit here, not the `.ipynb`. |
+| `tools/make_notebooks.py` | Generates the seven tutorials. Edit here, not the `.ipynb`. |
 | `docs/source/` | Sphinx. `physics.rst` derives the criteria; `assumptions.rst` is the blunt list of what the numbers rest on. |
 | `docs/ROADMAP.md` | ~1500 lines. The durable record: every phase, every measurement, every negative result. **Read §6.11, §6.12, §6.20–6.22.** |
 | `bench/benchmark.py` | Per-stage timings and peak RSS, gated at 30% regression. |
