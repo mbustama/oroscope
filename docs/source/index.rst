@@ -104,6 +104,7 @@ See :doc:`installation` and :doc:`quickstart` for the longer version, and
 
    installation
    quickstart
+   notebooks
    physics
    assumptions
    functions

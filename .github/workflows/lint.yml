@@ -34,3 +34,31 @@ jobs:
       # a broken cross-reference or an autodoc import failure should fail the build
       # rather than quietly produce a page with a hole in it.
       - run: sphinx-build -W -b html docs/source docs/build/html
+
+  notebooks:
+    name: Notebooks execute
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[notebooks]'
+      - name: Execute every notebook
+        # Blocking, and that is the point of the job. A notebook is documentation
+        # claiming to work. Its stored outputs make the claim persuasive without being
+        # evidence: they were true whenever it was last run, which may predate the API
+        # change that broke it. Running them here is what makes the claim checkable.
+        #
+        # Executed into a throwaway copy rather than in place, because a notebook whose
+        # fresh outputs differ from its stored ones is not a failure -- figures are not
+        # reproducible bit-for-bit across matplotlib versions -- so nothing is written
+        # back and the working tree stays clean.
+        run: |
+          mkdir -p /tmp/nbcheck
+          cp notebooks/*.ipynb /tmp/nbcheck/
+          cd /tmp/nbcheck
+          jupyter nbconvert --to notebook --execute --inplace *.ipynb
