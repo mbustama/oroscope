@@ -14,6 +14,7 @@ import numpy as np
 import _support  # noqa: F401  (path setup)
 import aperture
 import arrival_scan
+import physics
 import scoring
 
 
@@ -386,3 +387,67 @@ class TestInferredResponse(unittest.TestCase):
         model = aperture.aperture_vs_energy(100.0, 0.05, 300.0, 4500.0, e)
         _, r = aperture.infer_response(e, model, 100.0, 0.05, 300.0, 4500.0)
         np.testing.assert_allclose(r, np.ones_like(r), rtol=1e-9)
+
+
+class TestDecayTerm(unittest.TestCase):
+    """
+    Does the tau actually decay in the gap, with room left for a shower?
+
+    GRAND gets this implicitly, because its distance window is derived from the decay
+    length. A canyon search does not: TAMBO's window comes from the terrain, so nothing
+    else in the score notices that at 1 EeV the decay length is ~49 km against a ~3 km
+    crossing. Left out unless an energy is supplied, since the probability is strongly
+    energy-dependent and one number cannot stand in for a spectrum.
+    """
+
+    def observables(self, distance_m, n=1):
+        return {
+            "cells": np.ones(n, dtype=np.int64),
+            "solid_angle_sr": np.full(n, 0.5),
+            "mean_distance_m": np.full(n, float(distance_m)),
+            "max_depth_gcm2": np.full(n, 1.0e6),
+        }
+
+    def test_absent_unless_an_energy_is_given(self):
+        _, comp = scoring.score_candidates(self.observables(3000.0))
+        self.assertNotIn("decay", comp)
+
+    def test_present_once_an_energy_is_given(self):
+        _, comp = scoring.score_candidates(self.observables(3000.0),
+                                           {"decay_energy_pev": 100.0})
+        self.assertIn("decay", comp)
+
+    def test_a_short_lived_tau_decays_in_the_gap_and_a_long_lived_one_does_not(self):
+        """The suppression the canyon geometry cares about."""
+        obs = self.observables(6000.0)
+        cfg = {"shower_development_m": 3000.0}
+        low = scoring.score_candidates(obs, dict(cfg, decay_energy_pev=3.0))[1]["decay"][0]
+        high = scoring.score_candidates(obs, dict(cfg, decay_energy_pev=1000.0))[1]["decay"][0]
+        self.assertGreater(low, 0.9, "a 3 PeV tau has a ~150 m decay length; it decays")
+        self.assertLess(high, 0.2, "a 1 EeV tau has a ~49 km decay length; it mostly does not")
+        self.assertGreater(low, high)
+
+    def test_matches_the_closed_form(self):
+        d, shower, energy = 8000.0, 3000.0, 100.0
+        _, comp = scoring.score_candidates(
+            self.observables(d), {"decay_energy_pev": energy,
+                                  "shower_development_m": shower})
+        length = physics.tau_decay_length_m(energy)
+        expected = 1.0 - math.exp(-(d - shower) / length)
+        self.assertAlmostEqual(float(comp["decay"][0]), expected, places=9)
+
+    def test_no_room_for_a_shower_means_no_usable_decay(self):
+        """A target closer than the shower needs cannot produce one."""
+        _, comp = scoring.score_candidates(
+            self.observables(2000.0), {"decay_energy_pev": 100.0,
+                                       "shower_development_m": 3000.0})
+        self.assertEqual(float(comp["decay"][0]), 0.0)
+
+    def test_is_a_probability(self):
+        for d in (0.0, 1000.0, 5000.0, 50000.0, 1.0e6):
+            for e in (3.0, 100.0, 1000.0):
+                _, comp = scoring.score_candidates(
+                    self.observables(d), {"decay_energy_pev": e})
+                v = float(comp["decay"][0])
+                self.assertGreaterEqual(v, 0.0)
+                self.assertLessEqual(v, 1.0)

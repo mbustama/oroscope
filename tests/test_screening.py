@@ -268,3 +268,49 @@ class TestSeparableMorphology(unittest.TestCase):
         ref = run(400)
         for tile in (100, 150):
             self.assertTrue(np.array_equal(run(tile), ref), msg=f"tile {tile}")
+
+
+class TestExplicitCommandLineDetection(unittest.TestCase):
+    """
+    Telling a typed option from an untyped default.
+
+    The configuration merge preferred a config file over the command line, because
+    argparse cannot distinguish ``--candidate_stride 5`` from its own default of 5.
+    Since ``--generate_config`` writes every key, a generated config silently turned
+    every command-line flag into a no-op. Knowing which options were actually typed is
+    what lets the command line win without defaults overwriting the config.
+    """
+
+    def build(self):
+        import argparse
+        p = argparse.ArgumentParser()
+        p.add_argument("--alpha", type=float, default=3.0)
+        p.add_argument("--beta", type=int, default=7)
+        p.add_argument("--flag", action="store_true")
+        return p
+
+    def test_nothing_typed_means_nothing_explicit(self):
+        self.assertEqual(ss.explicitly_passed(self.build(), []), set())
+
+    def test_a_typed_option_is_reported(self):
+        self.assertEqual(ss.explicitly_passed(self.build(), ["--alpha", "5"]), {"alpha"})
+
+    def test_a_value_equal_to_the_default_still_counts_as_typed(self):
+        """The case that made the old merge unfixable: 3.0 is also the default."""
+        self.assertEqual(ss.explicitly_passed(self.build(), ["--alpha", "3.0"]), {"alpha"})
+
+    def test_store_true_is_detected(self):
+        self.assertEqual(ss.explicitly_passed(self.build(), ["--flag"]), {"flag"})
+
+    def test_several_at_once(self):
+        got = ss.explicitly_passed(self.build(), ["--alpha", "1", "--beta", "2"])
+        self.assertEqual(got, {"alpha", "beta"})
+
+    def test_the_parser_is_left_usable_afterwards(self):
+        """Defaults are restored, so the caller's own parse is unaffected."""
+        p = self.build()
+        ss.explicitly_passed(p, ["--alpha", "9"])
+        args = p.parse_args([])
+        self.assertEqual(args.alpha, 3.0)
+        self.assertEqual(args.beta, 7)
+        self.assertFalse(args.flag)

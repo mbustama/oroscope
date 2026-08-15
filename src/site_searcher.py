@@ -979,7 +979,7 @@ def separable_opening(chunk, structure):
     return binary_dilation(binary_dilation(shrunk, col), row)
 
 
-def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size):
+def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size, gap_close_km=None):
     """
     Step 4 Pipeline: Prunes spatial artifacts to ensure solid, block-like arrays.
     Applies closing to fill gaps and opening to prune unusable tendrils.
@@ -996,8 +996,13 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     Returns:
     - tuple(int, int): Set-pixel counts after closing and after pruning.
     """
-    close_r = max(1, int(antenna_spacing_km * 1000 / cell_size_y))
-    close_c = max(1, int(antenna_spacing_km * 1000 / cell_size_x))
+    # Gap closing is its own criterion, not a consequence of detector spacing. It used
+    # to be tied to antenna_spacing_km, which coupled two unrelated things and hid how
+    # much of the reported area it creates: measured at Colca, closing with a 1 km
+    # element more than doubles the accepted area (2.29x, §6.17). 0 disables it.
+    close_km = antenna_spacing_km if gap_close_km is None else gap_close_km
+    close_r = max(1, int(close_km * 1000 / cell_size_y))
+    close_c = max(1, int(close_km * 1000 / cell_size_x))
     tendril_r = max(1, int((min_width_km * 0.5 * 1000) / cell_size_y))
     tendril_c = max(1, int((min_width_km * 0.5 * 1000) / cell_size_x))
     n_closed = apply_morphology_pingpong(path_A, path_B, (rows, cols), bool, separable_closing, np.ones((close_r, close_c)), desc="Closing", tile_size=tile_size)
@@ -1402,6 +1407,29 @@ identify suitable deployment sites for the GRAND array.
 {C.HEADER}================================================================================{C.RESET}
     """)
 
+def explicitly_passed(parser, argv=None):
+    """
+    The set of options the user actually typed, as opposed to argparse's defaults.
+
+    argparse gives no way to distinguish ``--candidate_stride 5`` from the default of
+    5, which is why the configuration merge used to prefer a config file over the
+    command line: with no way to tell a typed flag from an untyped one, honouring the
+    command line would have let every default silently overwrite the config.
+
+    Re-parsing with every default suppressed answers the question directly --- with
+    ``SUPPRESS``, argparse only sets an attribute for an option that actually appeared.
+    The defaults are restored afterwards, so the original ``args`` is untouched.
+    """
+    saved = [(action, action.default) for action in parser._actions]
+    try:
+        for action, _ in saved:
+            action.default = argparse.SUPPRESS
+        return set(vars(parser.parse_args(argv)))
+    finally:
+        for action, default in saved:
+            action.default = default
+
+
 def parse_score_weights(value):
     """
     Normalises per-component score weights from either input form.
@@ -1533,6 +1561,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             min_target_slope_deg=None, max_target_slope_deg=None,
+                            decay_energy_pev=None, shower_development_m=3000.0,
+                            gap_close_km=None,
                             fresnel_frequency_mhz=None, refraction_k=None,
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
                             exclude_near_field=True,
@@ -1623,6 +1653,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         geomag_declination_deg=(geomag_declination_deg if use_geomagnetic else None),
         geomag_inclination_deg=(geomag_inclination_deg if use_geomagnetic else None),
         frequency_mhz=fresnel_frequency_mhz, bilinear=bilinear_sampling,
+        shower_offset_m=shower_development_m,
         antenna_height_m=antenna_height_m,
         near_field_m=(fresnel_near_field_m if exclude_near_field else 0.0),
         # Particle geometry is not refracted; only the radio path is
@@ -1652,6 +1683,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "geomag_declination_deg": geomag_declination_deg,
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
+        "decay_energy_pev": decay_energy_pev,
+        "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
         "use_geomagnetic": use_geomagnetic, "grammage_mode": grammage_mode,
@@ -1787,6 +1820,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "grammage_band_gcm2": grammage_band_gcm2,
                                   "grammage_maturity_gcm2": grammage_maturity_gcm2,
                                   "distance_band_m": distance_band_m,
+                                  "decay_energy_pev": decay_energy_pev,
+                                  "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
                                   "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
@@ -1804,7 +1839,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         # Step 4: Spatial Pruning
         print(f"\n{C.BOLD}[4/6]{C.RESET} {Icon.BROOM}Cleaning Shapes...")
         t0 = time.time()
-        n_closed, n_pruned = clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size)
+        n_closed, n_pruned = clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, antenna_spacing_km, min_width_km, tile_size, gap_close_km)
         funnel.add("after gap closing", n_closed)
         funnel.add(f"after pruning (< {min_width_km} km wide)", n_pruned)
         timings["morphology"] = time.time() - t0
@@ -1966,6 +2001,9 @@ if __name__ == "__main__":
     parser.add_argument("--grammage_mode", type=str, choices=['radio', 'particle'], default='radio', help="How atmospheric depth is scored. 'radio' is a maturity threshold, since emission comes from shower maximum and then propagates through transparent air. 'particle' is a band, since particle content dies after maximum (default: radio).")
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
+    parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--shower_development_m", type=float, default=3000.0, help="Path the shower needs after the tau decays, in metres (default: 3000). Used both by the decay term and as the far endpoint of the Fresnel clearance measurement.")
+    parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.")
     parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
     parser.add_argument("--max_target_slope_deg", type=float, default=None, help="Upper bound on the struck terrain's slope along the arrival azimuth. Unset by default. Note a ceiling does not empty the result: a flat valley floor passes any ceiling, so this removes walls rather than everything.")
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
@@ -2009,6 +2047,7 @@ if __name__ == "__main__":
     parser.add_argument("--config_preset", type=str, choices=['default', 'lima', 'arequipa'], default='default', help="Optional presets to inject when using --generate_config.")
 
     args = parser.parse_args()
+    explicit_cli = explicitly_passed(parser)
 
     # --- Tool Execution: Generate Config Template ---
     if args.generate_config:
@@ -2039,6 +2078,9 @@ if __name__ == "__main__":
             "elev_max_deg": 3.0,
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
+            "decay_energy_pev": None,
+            "shower_development_m": 3000.0,
+            "gap_close_km": None,
             "min_target_slope_deg": None,
             "max_target_slope_deg": None,
             "fresnel_frequency_mhz": None,
@@ -2162,7 +2204,15 @@ if __name__ == "__main__":
     param_names = [action.dest for action in parser._actions if action.dest not in ('help', 'config_path', 'generate_config', 'config_preset')]
     
     for param in param_names:
-        if param in config_params:
+        # An explicitly typed command-line option wins over everything. It used to lose
+        # to the config file, silently: since --generate_config writes all 67 keys, a
+        # generated config made every flag on the command line a no-op with no warning.
+        if param in explicit_cli:
+            final_params[param] = getattr(args, param)
+            if param in config_params and config_params[param] != final_params[param]:
+                print(f"{C.WARN}{Icon.WARN}Command line overrides config for '{param}': "
+                      f"{config_params[param]!r} -> {final_params[param]!r}{C.RESET}")
+        elif param in config_params:
             final_params[param] = config_params[param]
         elif param in fallback_params:
             final_params[param] = fallback_params[param]
@@ -2270,6 +2320,9 @@ if __name__ == "__main__":
         grammage_band_gcm2=(tuple(final_params['grammage_band_gcm2'])
                             if final_params.get('grammage_band_gcm2') else None),
         grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
+        decay_energy_pev=final_params.get('decay_energy_pev'),
+        shower_development_m=final_params.get('shower_development_m', 3000.0),
+        gap_close_km=final_params.get('gap_close_km'),
         min_target_slope_deg=final_params.get('min_target_slope_deg'),
         max_target_slope_deg=final_params.get('max_target_slope_deg'),
         grammage_band_fraction=final_params.get('grammage_band_fraction'),

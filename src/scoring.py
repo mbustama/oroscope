@@ -148,6 +148,12 @@ DEFAULT_SCORE_CONFIG = {
     # A floor, not a band: more rock is always better for background rejection.
     "muon_shielding_km": None,
     "distance_band_m": None,           # defaults to the configured decay-baseline window
+    # Tau decay. None leaves the term out, because the probability is strongly
+    # energy-dependent and a single number cannot stand in for a spectrum. Supplying an
+    # energy asks: given this site's baseline, how often does the tau actually decay in
+    # the gap with room left for a shower?
+    "decay_energy_pev": None,
+    "shower_development_m": 3000.0,
     "solid_angle_half_sr": 0.05,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
     "composition": "product",
@@ -166,6 +172,8 @@ def score_candidates(observables, config=None, distance_window_m=None):
                     decay-baseline window;
     - ``solid_angle`` saturating in accepted solid angle, since more acceptance is
                     better with diminishing returns;
+    - ``decay``     probability the tau decays in the gap with room left for a shower,
+                    present only when ``decay_energy_pev`` is supplied;
     - ``clearance`` present only when a Fresnel frequency was configured.
 
     Returns:
@@ -213,6 +221,23 @@ def score_candidates(observables, config=None, distance_window_m=None):
             components["shower"] = band_score(grammage, *cfg["grammage_band_gcm2"])
         else:
             components["shower"] = ramp_score(grammage, 0.0, cfg["grammage_maturity_gcm2"])
+
+    # Tau decay in the gap. The tau leaves the far surface at `dist` and travels toward
+    # the detector; it is only useful if it decays with enough path left for the shower
+    # to develop. So the usable stretch is (dist - shower_development), and
+    #
+    #     P = 1 - exp(-usable / L),   L = the boosted decay length
+    #
+    # For GRAND this is largely implicit already, since the distance window is derived
+    # from L. For a canyon it is not: TAMBO's window comes from the terrain, and at
+    # 1 EeV the decay length is ~49 km against a ~3 km crossing, so only a few per cent
+    # of taus decay in time. That suppression is invisible to every other term here.
+    decay_energy = cfg.get("decay_energy_pev")
+    if decay_energy:
+        length_m = physics.tau_decay_length_m(decay_energy)
+        if length_m > 0:
+            usable = np.clip(dist - cfg.get("shower_development_m", 0.0), 0.0, None)
+            components["decay"] = 1.0 - np.exp(-usable / length_m)
 
     # Earth-chord attenuation, only when an interaction length is supplied
     chord = observables.get("earth_chord_gcm2")

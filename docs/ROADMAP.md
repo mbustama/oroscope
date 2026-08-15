@@ -1419,6 +1419,88 @@ the *downsampled* map while capacity is measured at full resolution, so at
 `downsample_factor > 1` a feature only a few pixels wide loses area it keeps detectors
 on. Both Colca configs therefore run at `downsample_factor: 1`.
 
+### 6.17 What closing contributes, measured with a stride-1 run ✅ measured
+
+§2.1 has said since the physics review that "closing, not the physics, determines most
+of the reported site extent", but the size of the effect was never separated from the
+`candidate_stride` sampling that closing partly compensates for. A stride-1 GRAND run
+over the Colca crop settles it.
+
+| | stride 5 | stride 1 |
+| --- | --- | --- |
+| candidates screened | 770,652 | 3,853,258 |
+| directions accepted | 463,326 | 2,315,998 |
+| **acceptance** | **60.1%** | **60.1%** |
+| after closing | 5,080,873 | 5,296,905 |
+| reported area | 4580 km² | 4809 km² |
+| capacity | 5317 | 5610 |
+
+Two results.
+
+**Striding is unbiased.** The acceptance fraction is identical to three figures, and
+the stride-corrected area estimate (accepted × 5) comes to 2120 km² against the
+stride-1 truth of 2119 km² — agreement to 0.05%. `candidate_stride: 5` costs nothing
+in accuracy and saves five sixths of the scan. The final reported figures differ by
+only 5%, so stride-5 runs can be quoted directly.
+
+**Closing inflates the area by 2.29×**, measured at stride 1 where no reconstruction is
+needed. The 11× that a naive comparison suggests is an artefact of comparing against
+un-reconstructed set pixels; the honest figure is 2.29×, and the honest physics-accepted
+area at Colca is **~2120 km², not the reported 4580 km²**.
+
+The closing element was tied to `antenna_spacing_km`, coupling two unrelated things and
+hiding the effect. It is now `gap_close_km`, defaulting to the old behaviour, with 0 to
+disable. Reproduced by `config/grand_colca_stride1.json`.
+
+### 6.18 Tau decay probability in the score ✅ delivered
+
+`decay_probability` existed but only `aperture.py` used it, so the per-candidate score
+never asked whether the tau decays in the gap at all. GRAND gets this implicitly, since
+its distance window is derived from the decay length. A canyon search does not: TAMBO's
+window comes from the terrain.
+
+The term is `1 − exp(−(d − shower_development)/L)` on the mean exit distance, present
+only when `decay_energy_pev` is supplied — the probability is strongly energy-dependent
+and one number cannot stand in for a spectrum:
+
+| energy | decay length | P(decay within 3 km) |
+| --- | --- | --- |
+| 3 PeV | 147 m | 1.000 |
+| 50 PeV | 2449 m | 0.706 |
+| 100 PeV | 4898 m | 0.458 |
+| 1 EeV | 48980 m | 0.059 |
+
+At Colca with 55 PeV, the geometric midpoint of TAMBO's reach, this is the strongest
+cut of any single criterion: acceptance 18.9% → **7.9%**, sites 17 → 5, capacity
+10878 → **2056**, area 93.1 → 18.0 km².
+
+**That result is worth stating plainly: under the current assumptions Colca supplies
+about 2056 detector positions against TAMBO's 5000.** It is also the number most
+sensitive to an assumption — a spectrum-folded treatment would replace the single
+energy, and `min_score`, the far-wall floor and the shower band all move it. The right
+next step is a sensitivity table over those four knobs rather than another criterion.
+
+Note `shower_development_m` is set to 0 for TAMBO deliberately: the grammage band
+already carries the requirement that enough air was traversed, and subtracting it here
+too would count the same constraint twice.
+
+### 6.19 Command line no longer loses to the config file ✅ fixed
+
+The merge was `config > fallback > CLI`, and since `--generate_config` writes all 67
+keys, a generated config made **every** command-line flag a silent no-op — no warning,
+no error. The cause was that argparse cannot distinguish `--candidate_stride 5` from
+its own default of 5, so honouring the command line would have let every default
+overwrite the config.
+
+`explicitly_passed()` answers that directly by re-parsing with `argparse.SUPPRESS` as
+every default, so only options that actually appeared get set. An explicitly typed
+option now wins and says so:
+
+    Command line overrides config for 'min_slope_deg': 3.0 -> 44.0
+
+Pinned by `test_screening.py::TestExplicitCommandLineDetection`, including the case
+that made the old merge unfixable — a typed value that equals the default.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

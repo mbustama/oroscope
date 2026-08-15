@@ -31,6 +31,10 @@
 
     "_comment_physics": "Particle detection, not radio: no Fresnel clearance, no geomagnetic weighting, and grammage scored as a band because particle content dies after shower maximum whereas radio simply propagates.",
     "_comment_shower_band": "= physics.grammage_band_from_energy(3.0, 1000.0, fraction=0.1), i.e. TAMBO's 3 PeV - 1 EeV reach, taken as the depth range where the charged-particle content stays above a tenth of its own maximum. Stated explicitly rather than via energy_min/max_pev only because those also override the distance window. The default (700, 2800) is a GRAND-scale band and rejects every canyon.",
+    "_comment_decay": "Probability the tau decays inside the crossing rather than flying through it. Strongly energy-dependent: at 3 PeV the decay length is 147 m (P~1.0 across 3 km) but at 1 EeV it is 49 km (P~0.06). 55 PeV is the geometric midpoint of TAMBO's 3 PeV - 1 EeV reach -- ASSUMPTION, and the right long-term answer is to fold this over a spectrum rather than pick one energy. shower_development_m is 0 here on purpose: the grammage band above already carries the requirement that enough air was traversed, and subtracting it here too would count the same constraint twice.",
+    "decay_energy_pev": 55.0,
+    "shower_development_m": 0.0,
+
     "use_geomagnetic": false,
     "grammage_mode": "particle",
     "grammage_band_gcm2": [236.0, 1287.0],
