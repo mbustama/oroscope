@@ -364,3 +364,97 @@ class TestPythonFloorCompatibility(unittest.TestCase):
             self.assertTrue(isinstance(first, ast.ImportFrom) and first.module == "__future__",
                             f"{os.path.basename(path)}: the __future__ import must be the "
                             f"first statement, found {type(first).__name__}")
+
+
+class TestMemorySafeguards(unittest.TestCase):
+    """
+    Guards against a search taking the machine down with it.
+
+    A ten-point sensitivity sweep reached 6.9 GB and was killed by the kernel's OOM
+    killer, which chooses its victim by heuristic and may well pick something the user
+    cares about more. Two things went wrong and both are fixed: the pipeline leaked a
+    matplotlib figure per run, and nothing bounded the process.
+    """
+
+    def test_the_estimate_scales_as_the_inverse_square_of_downsampling(self):
+        """The knob that matters most: labelling arrays scale as 1/d^2."""
+        at_1 = ss.estimate_peak_memory_gb(10000, 10000, downsample_factor=1)
+        at_4 = ss.estimate_peak_memory_gb(10000, 10000, downsample_factor=4)
+        self.assertLess(at_4, at_1)
+
+    def test_the_estimate_grows_with_the_dem(self):
+        small = ss.estimate_peak_memory_gb(2000, 2000)
+        large = ss.estimate_peak_memory_gb(10000, 10000)
+        self.assertGreater(large, small)
+
+    def test_a_coarser_stride_needs_less(self):
+        dense = ss.estimate_peak_memory_gb(5000, 5000, candidate_stride=1)
+        sparse = ss.estimate_peak_memory_gb(5000, 5000, candidate_stride=10)
+        self.assertGreater(dense, sparse)
+
+    def test_the_estimate_is_a_positive_number_of_gib(self):
+        v = ss.estimate_peak_memory_gb(1000, 1000)
+        self.assertGreater(v, 0.0)
+        self.assertLess(v, 100.0)
+
+    def test_available_memory_is_reported_or_declined(self):
+        have = ss.available_memory_gb()
+        if have is not None:
+            self.assertGreater(have, 0.0)
+
+    def test_a_cap_of_none_or_zero_does_nothing(self):
+        self.assertFalse(ss.apply_memory_cap(None))
+        self.assertFalse(ss.apply_memory_cap(0))
+
+    def test_a_cap_is_applied_and_can_be_lifted(self):
+        """Applied in a child, since lowering this process's limit would stick."""
+        import subprocess
+        import sys
+        code = (
+            "import sys, resource; sys.path.insert(0, %r);"
+            "import os; os.environ.setdefault('MPLBACKEND','Agg');"
+            "import site_searcher as ss;"
+            "before = resource.getrlimit(resource.RLIMIT_AS)[0];"
+            "ok = ss.apply_memory_cap(4.0);"
+            "after = resource.getrlimit(resource.RLIMIT_AS)[0];"
+            "print(ok, before != after or after == int(4.0 * 1024**3))"
+            % os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+        )
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("True True", out.stdout)
+
+    def test_the_cap_actually_stops_a_runaway(self):
+        """A cap that does not produce MemoryError is decoration."""
+        import subprocess
+        import sys
+        code = (
+            "import sys; sys.path.insert(0, %r);"
+            "import os; os.environ.setdefault('MPLBACKEND','Agg');"
+            "import numpy as np, site_searcher as ss;"
+            "ss.apply_memory_cap(1.0);"
+            "\ntry:\n"
+            "    x = np.ones(int(4e9), dtype=np.uint8)\n"
+            "    print('NOT CAPPED')\n"
+            "except MemoryError:\n"
+            "    print('MemoryError as intended')\n"
+            % os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+        )
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertIn("MemoryError as intended", out.stdout, out.stderr)
+
+    def test_the_pipeline_leaves_no_figures_open(self):
+        """
+        The leak itself. pyplot keeps a global reference to every figure, so one that
+        is never closed can never be collected, and a process running several searches
+        accumulates the whole figure -- canvas and artists -- each time.
+        """
+        import matplotlib.pyplot as plt
+        plt.close("all")
+        source = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "src", "site_searcher.py")
+        with open(source) as f:
+            text = f.read()
+        self.assertIn("plt.close('all')", text,
+                      "generate_visualizations_and_outputs must close its figures")

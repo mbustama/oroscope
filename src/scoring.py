@@ -261,6 +261,12 @@ DEFAULT_SCORE_CONFIG = {
     # energy asks: given this site's baseline, how often does the tau actually decay in
     # the gap with room left for a shower?
     "decay_energy_pev": None,
+    # Spectrum-folded alternative to the single energy above. Preferred: the decay
+    # probability runs over three decades across one experiment's reach, so one
+    # representative energy chooses the answer rather than approximating it.
+    "decay_energy_min_pev": None,
+    "decay_energy_max_pev": None,
+    "decay_spectral_index": physics.DEFAULT_SPECTRAL_INDEX,
     "shower_development_m": 3000.0,
     "solid_angle_half_sr": 0.05,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
@@ -284,8 +290,10 @@ def score_candidates(observables: dict[str, np.ndarray],
                     decay-baseline window;
     - ``solid_angle`` saturating in accepted solid angle, since more acceptance is
                     better with diminishing returns;
-    - ``decay``     probability the tau decays in the gap with room left for a shower,
-                    present only when ``decay_energy_pev`` is supplied;
+    - ``decay``     probability the tau decays in the gap with room left for a shower.
+                    Present when either an energy range (``decay_energy_min_pev`` and
+                    ``decay_energy_max_pev``, folded over the spectrum -- preferred) or
+                    a single ``decay_energy_pev`` is supplied;
     - ``clearance`` present only when a Fresnel frequency was configured.
 
     Parameters
@@ -376,11 +384,21 @@ def score_candidates(observables: dict[str, np.ndarray],
     # from L. For a canyon it is not: TAMBO's window comes from the terrain, and at
     # 1 EeV the decay length is ~49 km against a ~3 km crossing, so only a few per cent
     # of taus decay in time. That suppression is invisible to every other term here.
+    shower_m = cfg.get("shower_development_m", 0.0)
+    e_lo, e_hi = cfg.get("decay_energy_min_pev"), cfg.get("decay_energy_max_pev")
     decay_energy = cfg.get("decay_energy_pev")
-    if decay_energy:
+    if e_lo and e_hi:
+        # Folded over the spectrum, which is the defensible form. A single energy is
+        # kept below for continuity and for asking what one energy would have said.
+        components["decay"] = physics.spectrum_weighted_decay_probability(
+            dist, e_lo, e_hi,
+            spectral_index=cfg.get("decay_spectral_index",
+                                   physics.DEFAULT_SPECTRAL_INDEX),
+            shower_development_m=shower_m)
+    elif decay_energy:
         length_m = physics.tau_decay_length_m(decay_energy)
         if length_m > 0:
-            usable = np.clip(dist - cfg.get("shower_development_m", 0.0), 0.0, None)
+            usable = np.clip(dist - shower_m, 0.0, None)
             components["decay"] = 1.0 - np.exp(-usable / length_m)
 
     # Earth-chord attenuation, only when an interaction length is supplied

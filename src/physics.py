@@ -959,6 +959,107 @@ def earth_absorption_cutoff_deg(energy_pev: float, fraction: float = 0.5,
     return -math.degrees(math.asin(sin_theta))
 
 
+# Tau flux spectral index. A power law dN/dE ~ E^-gamma; 2 is the canonical
+# cosmogenic/astrophysical slope, and the value is a knob because it is an input to the
+# search rather than a property of the terrain.
+DEFAULT_SPECTRAL_INDEX = 2.0
+
+
+def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_pev,
+                                        spectral_index=DEFAULT_SPECTRAL_INDEX,
+                                        shower_development_m=0.0, samples=96):
+    r"""
+    Probability the tau decays inside the usable gap, folded over a power-law spectrum.
+
+    A tau of energy :math:`E` decays within a usable path :math:`u` with probability
+    :math:`1 - e^{-u/L(E)}`, and :math:`L = (E/m_\tau)c\tau` runs over three decades
+    across a single experiment's reach. Evaluating that at one representative energy is
+    therefore not an approximation but a choice of answer: measured on a real canyon
+    search, the reported capacity ran from 10878 detector positions at 3 PeV to zero at
+    100 PeV. Weighting by the flux instead gives a number that is a property of the
+    terrain and the spectrum rather than of the energy someone picked.
+
+    .. math::
+
+        P(u) = \frac{\int E^{-\gamma}\left(1 - e^{-u/L(E)}\right)\,{\rm d}E}
+                    {\int E^{-\gamma}\,{\rm d}E}
+
+    integrated on a log-spaced grid, since the range spans decades.
+
+    Two things this deliberately is *not*. It is not an event rate: that needs the
+    detector's acceptance :math:`A(E)`, which no available table supplies, and the
+    weight here is the flux alone. And a steep spectrum weights low energies heavily,
+    where the tau decays readily -- so a soft spectrum drives :math:`P` toward 1 and the
+    term stops discriminating. That is the physics rather than a defect, but it means
+    the spectral index deserves the same scrutiny as any other assumption.
+
+    Parameters
+    ----------
+    distance_m : float or array_like
+        Distance from the exit point to the detector, in metres.
+    energy_min_pev, energy_max_pev : float
+        Ends of the tau energy range, in PeV.
+    spectral_index : float, optional
+        :math:`\gamma` in :math:`{\rm d}N/{\rm d}E \propto E^{-\gamma}`.
+    shower_development_m : float, optional
+        Path the shower needs after the decay, in metres. Subtracted from the gap, so
+        a target closer than this yields nothing usable.
+    samples : int, optional
+        Points on the log-spaced energy grid.
+
+    Returns
+    -------
+    ndarray
+        Flux-weighted decay probability, in [0, 1], matching the shape of
+        ``distance_m``.
+
+    See Also
+    --------
+    arrival_scan.decay_probability : the single-energy form, for one baseline window.
+
+    Examples
+    --------
+    >>> import physics
+    >>> p = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
+    >>> round(float(p), 3)
+    0.954
+
+    A harder spectrum puts more weight at high energy, where the tau outruns the gap:
+
+    >>> soft = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, 2.7)
+    >>> hard = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, 1.5)
+    >>> bool(hard < soft)
+    True
+    """
+    if energy_max_pev <= energy_min_pev:
+        raise ValueError("energy_max_pev must exceed energy_min_pev")
+
+    d = np.asarray(distance_m, dtype=np.float64)
+    usable = np.clip(d - float(shower_development_m), 0.0, None)
+
+    # Log-spaced, and integrated in ln E: with x = ln E, E^-gamma dE = E^(1-gamma) dx,
+    # which keeps the quadrature well conditioned over three decades.
+    ln_e = np.linspace(np.log(energy_min_pev), np.log(energy_max_pev), int(samples))
+    energies = np.exp(ln_e)
+    weights = energies ** (1.0 - spectral_index)
+    lengths = tau_decay_length_m(energies)
+    denominator = float(_trapezoid(weights, ln_e))
+
+    # Chunked over candidates rather than broadcast in one go. A real search carries
+    # hundreds of thousands of them, and the full (candidates x energies) outer product
+    # would be hundreds of megabytes for no gain; this bounds it to a few tens.
+    flat = np.atleast_1d(usable).reshape(-1)
+    out = np.empty(flat.size, dtype=np.float64)
+    chunk = 65536
+    for i in range(0, flat.size, chunk):
+        block = flat[i:i + chunk, None]
+        integrand = -np.expm1(-block / lengths) * weights
+        out[i:i + chunk] = _trapezoid(integrand, ln_e, axis=-1)
+
+    result = np.clip(out / denominator, 0.0, 1.0)
+    return result.reshape(usable.shape) if usable.ndim else result[0]
+
+
 # ---------------------------------------------------------------- geomagnetic
 
 # Default field for the Peruvian Andes. Provenance differs between the two, and it

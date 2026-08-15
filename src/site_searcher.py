@@ -1803,9 +1803,19 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         plt.savefig(img_name, format=output_image_format.strip('.'), dpi=150, bbox_inches='tight')
         generated_files.append(os.path.abspath(img_name))
         print(f"      {Icon.CHECK}Map saved.")
-        
+
     except Exception as e:
         print(f"      {C.FAIL}{Icon.CROSS}Viz Error: {e}{C.RESET}")
+    finally:
+        # pyplot holds a global reference to every figure it creates, so one that is
+        # never closed can never be collected. A single search does not notice; a
+        # process that runs several -- a parameter sweep, a notebook, a service --
+        # accumulates the whole figure each time, artists and canvas included. That is
+        # what took a 10-point sensitivity sweep to 6.9 GB and into the OOM killer.
+        #
+        # In the `finally` because the failure path leaks just as readily as the happy
+        # one, and an exception here is caught and reported rather than fatal.
+        plt.close('all')
 
     # Save JSON output log
     run_info = run_info or {}
@@ -1962,6 +1972,131 @@ def parse_score_weights(value):
     return weights or None
 
 
+def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
+                            survival_fraction=0.6, n_observables=12):
+    """
+    Rough estimate of the anonymous memory one search will need, in GiB.
+
+    Only the allocations that can exhaust RAM are counted. The DEM itself is
+    memory-mapped and file-backed, so the kernel can evict it under pressure and it is
+    excluded deliberately -- counting it would make every large search look impossible
+    when the streaming design exists precisely so that it is not.
+
+    This is an estimate and says so. ``survival_fraction`` in particular is the fraction
+    of pixels passing the topographic screen, which is terrain-dependent and not known
+    until the screen has run; 0.6 is typical of Andean terrain at a 3-25 degree band.
+    It is meant to catch the order-of-magnitude mistake -- a full DEM at
+    ``downsample_factor: 1`` -- rather than to predict a number.
+
+    Parameters
+    ----------
+    rows, cols : int
+        DEM dimensions in pixels.
+    downsample_factor : int, optional
+        Factor at which sites are labelled and areas measured. This one matters most:
+        the labelling arrays scale as its inverse square.
+    candidate_stride : int, optional
+        Keeps every Nth screened pixel.
+    survival_fraction : float, optional
+        Fraction of pixels expected to pass the topographic screen.
+    n_observables : int, optional
+        Per-candidate arrays the scan returns.
+
+    Returns
+    -------
+    float
+        Estimated peak anonymous memory, in GiB.
+
+    Examples
+    --------
+    >>> import site_searcher as ss
+    >>> round(ss.estimate_peak_memory_gb(1981, 3061, downsample_factor=1), 2)
+    0.64
+    >>> round(ss.estimate_peak_memory_gb(10204, 12603, downsample_factor=4), 2)
+    2.32
+    """
+    n_pixels = float(rows) * float(cols)
+    n_small = n_pixels / float(max(1, downsample_factor) ** 2)
+
+    # Labelling and per-site geometry, all on the downsampled map
+    labelling = n_small * (1 + 4 + 2)            # mask, int32 labels, viz
+    gradients = n_small * 4 * 3                  # d/dy, d/dx, aspect, float32
+
+    # Candidates and their observables, at full resolution
+    n_cand = n_pixels * survival_fraction / float(max(1, candidate_stride))
+    candidates = n_cand * 3 * 8
+    observables = n_cand * n_observables * 8
+
+    # Interpreter, numba, matplotlib and the tiled screening buffers
+    baseline = 0.45 * 1024 ** 3
+
+    total = labelling + gradients + candidates + observables + baseline
+    return total / 1024 ** 3
+
+
+def apply_memory_cap(max_memory_gb):
+    """
+    Caps this process's address space, so a runaway fails instead of taking the machine.
+
+    Without a cap, an over-large search does not fail: it grows until the kernel's OOM
+    killer chooses a victim, which may well be something else the user cares about. A
+    ``MemoryError`` inside this process is a far better outcome than a dead editor, and
+    it names the run that caused it.
+
+    Parameters
+    ----------
+    max_memory_gb : float or None
+        Ceiling in GiB. ``None`` or non-positive leaves the limit alone.
+
+    Returns
+    -------
+    bool
+        Whether a cap was applied. False on platforms without ``RLIMIT_AS``.
+
+    Notes
+    -----
+    ``RLIMIT_AS`` limits *virtual* address space, which is larger than resident memory:
+    numba and BLAS reserve address space they never touch. Set it generously -- a
+    little above physical RAM is usually right -- or it will refuse runs that would
+    have fit.
+    """
+    if not max_memory_gb or max_memory_gb <= 0:
+        return False
+    try:
+        import resource
+    except ImportError:                                  # pragma: no cover - Windows
+        return False
+    limit = int(max_memory_gb * 1024 ** 3)
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    if hard != resource.RLIM_INFINITY:
+        limit = min(limit, hard)
+    resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
+    return True
+
+
+def available_memory_gb():
+    """
+    Memory the system can give us right now, in GiB, or None if it cannot be told.
+
+    Reads ``MemAvailable`` from ``/proc/meminfo``, which accounts for reclaimable page
+    cache and so is the figure that matters; ``free`` alone understates it badly on a
+    machine that has been running a while.
+
+    Returns
+    -------
+    float or None
+        Available memory in GiB, or ``None`` on a platform without ``/proc/meminfo``.
+    """
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return float(line.split()[1]) / 1024 ** 2
+    except OSError:                                      # pragma: no cover - non-Linux
+        return None
+    return None                                          # pragma: no cover
+
+
 def validate_parameters(params):
     """
     Pre-flight validation checks to enforce 'Fail Fast' mechanisms. 
@@ -2076,7 +2211,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             min_target_slope_deg=None, max_target_slope_deg=None,
-                            decay_energy_pev=None, shower_development_m=3000.0,
+                            decay_energy_pev=None,
+                            decay_energy_min_pev=None, decay_energy_max_pev=None,
+                            decay_spectral_index=None,
+                            shower_development_m=3000.0,
                             gap_close_km=None,
                             fresnel_frequency_mhz=None, refraction_k=None,
                             antenna_height_m=2.0, fresnel_near_field_m=500.0,
@@ -2219,9 +2357,18 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         almost everywhere in mountainous terrain.
 
     decay_energy_pev : float, optional
-        Energy at which to score the probability the tau decays in the gap. Omitted by
-        default because the probability is strongly energy-dependent and one number
-        cannot stand in for a spectrum.
+        Single energy at which to score the probability the tau decays in the gap.
+        Superseded by the range below and kept for asking what one energy would have
+        said: measured, the answer ran from 10878 detector positions at 3 PeV to zero
+        at 100, so one number does not stand in for a spectrum.
+    decay_energy_min_pev, decay_energy_max_pev : float, optional
+        Tau energy range over which to fold the decay probability against the flux.
+        The defensible form, and what makes the result a property of the terrain rather
+        than of the energy someone picked.
+    decay_spectral_index : float, optional
+        Gamma in dN/dE ~ E^-gamma for that folding (default 2.0). A softer spectrum
+        weights low energies, where the tau decays readily, so it drives the term
+        toward 1 -- an assumption deserving the same scrutiny as any other.
 
     shower_development_m : float, optional
         Path the shower needs after the tau decays, in metres.
@@ -2412,6 +2559,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "geomag_inclination_deg": geomag_inclination_deg,
         "nu_interaction_length_gcm2": nu_interaction_length_gcm2,
         "decay_energy_pev": decay_energy_pev,
+        "decay_energy_min_pev": decay_energy_min_pev,
+        "decay_energy_max_pev": decay_energy_max_pev,
+        "decay_spectral_index": decay_spectral_index,
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -2549,6 +2699,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "grammage_maturity_gcm2": grammage_maturity_gcm2,
                                   "distance_band_m": distance_band_m,
                                   "decay_energy_pev": decay_energy_pev,
+                                  "decay_energy_min_pev": decay_energy_min_pev,
+                                  "decay_energy_max_pev": decay_energy_max_pev,
+                                  "decay_spectral_index": decay_spectral_index,
                                   "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
                                   "clearance_full_at": clearance_full_at,
@@ -2738,6 +2891,10 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--max_memory_gb", type=float, default=None, help="Ceiling on this process's address space, in GiB. Defaults to 80%% of what the system reports available, so a search that outgrows the machine fails with MemoryError instead of inviting the OOM killer to choose a victim. 0 disables the cap.")
+    parser.add_argument("--decay_energy_min_pev", type=float, default=None, help="Lower end of the tau energy range for the decay term. With --decay_energy_max_pev this folds the decay probability over a power-law spectrum, which is the defensible form: the probability runs over three decades across one experiment's reach, so a single energy chooses the answer rather than approximating it.")
+    parser.add_argument("--decay_energy_max_pev", type=float, default=None, help="Upper end of that range, in PeV.")
+    parser.add_argument("--decay_spectral_index", type=float, default=None, help="Spectral index gamma in dN/dE ~ E^-gamma for the folded decay term (default: 2.0). A softer spectrum weights low energies, where the tau decays readily, so it drives the term toward 1.")
     parser.add_argument("--shower_development_m", type=float, default=3000.0, help="Path the shower needs after the tau decays, in metres (default: 3000). Used both by the decay term and as the far endpoint of the Fresnel clearance measurement.")
     parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.")
     parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
@@ -2815,6 +2972,10 @@ def main():
             "n_elev_bins": 12,
             "min_column_depth_gcm2": 0.0,
             "decay_energy_pev": None,
+            "max_memory_gb": None,
+            "decay_energy_min_pev": None,
+            "decay_energy_max_pev": None,
+            "decay_spectral_index": None,
             "shower_development_m": 3000.0,
             "gap_close_km": None,
             "min_target_slope_deg": None,
@@ -2971,6 +3132,45 @@ def main():
     # 6. Run Pre-Flight Validation (Fail-Fast Mechanism)
     validate_parameters(final_params)
 
+    # Memory safeguard, before anything expensive is allocated.
+    #
+    # A search that outgrows the machine does not fail on its own: it grows until the
+    # kernel's OOM killer picks a victim, which may be the user's editor rather than
+    # this process. A 10-point sensitivity sweep did exactly that, reaching 6.9 GB.
+    # Capping our own address space converts that into a MemoryError that names the run.
+    rows_est = cols_est = None
+    try:
+        _, rows_est = read_dem_geometry(final_params['dem_path'])
+        with tiff.TiffFile(final_params['dem_path']) as _tf:
+            rows_est, cols_est = _tf.pages[0].shape[:2]
+    except Exception:
+        pass
+
+    if rows_est and cols_est:
+        need = estimate_peak_memory_gb(
+            rows_est, cols_est,
+            downsample_factor=final_params.get('downsample_factor', 1) or 1,
+            candidate_stride=final_params.get('candidate_stride', 5) or 5)
+        have = available_memory_gb()
+        print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
+              + (f", available {have:.1f} GiB" if have else ""))
+        if have and need > 0.8 * have:
+            print(f"{C.WARN}{Icon.WARN}This search is estimated to need {need:.1f} GiB "
+                  f"against {have:.1f} GiB available. Raise --downsample_factor "
+                  f"(memory scales as its inverse square) or crop the DEM. The estimate "
+                  f"is rough, so this is a warning rather than a refusal.{C.RESET}")
+
+    cap = final_params.get('max_memory_gb')
+    if cap is None:
+        have = available_memory_gb()
+        # 80% of what is available, so the cap bites before the kernel does while
+        # leaving room for the address space numba and BLAS reserve without touching.
+        cap = 0.8 * have if have else None
+    if cap and apply_memory_cap(cap):
+        print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
+              f" (--max_memory_gb 0 disables)")
+
+
     # Handle RFI Zone selection mapping (Checks Config-passed custom lists, or matches string presets)
     rfi_input = final_params.get('rfi_zones', 'none')
     selected_rfi = None
@@ -3057,6 +3257,9 @@ def main():
                             if final_params.get('grammage_band_gcm2') else None),
         grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
         decay_energy_pev=final_params.get('decay_energy_pev'),
+        decay_energy_min_pev=final_params.get('decay_energy_min_pev'),
+        decay_energy_max_pev=final_params.get('decay_energy_max_pev'),
+        decay_spectral_index=final_params.get('decay_spectral_index'),
         shower_development_m=final_params.get('shower_development_m', 3000.0),
         gap_close_km=final_params.get('gap_close_km'),
         min_target_slope_deg=final_params.get('min_target_slope_deg'),

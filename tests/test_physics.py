@@ -654,3 +654,90 @@ class TestShowerProfileAndGrammageBand(unittest.TestCase):
         self.assertLess(lo, 390.0, "a full-width crossing must be inside the band")
         self.assertGreater(lo, 170.0, "a 2 km crossing must not be")
         self.assertGreater(hi, lo)
+
+
+class TestSpectrumWeightedDecay(unittest.TestCase):
+    """
+    Folding the decay probability over a spectrum, rather than picking one energy.
+
+    A tau's decay length runs over three decades across a single experiment's reach, so
+    evaluating the probability at one representative energy is not an approximation but
+    a choice of answer: on a real canyon search the reported capacity ran from 10878
+    detector positions at 3 PeV to zero at 100 PeV. These tests pin the properties the
+    folded form must have for that to be an improvement rather than a different
+    arbitrary number.
+    """
+
+    LO, HI = 3.0, 1000.0
+
+    def test_is_a_probability(self):
+        for d in (0.0, 500.0, 3000.0, 50_000.0, 1.0e6):
+            p = float(physics.spectrum_weighted_decay_probability(d, self.LO, self.HI))
+            self.assertGreaterEqual(p, 0.0)
+            self.assertLessEqual(p, 1.0)
+
+    def test_rises_with_the_gap(self):
+        d = np.array([500.0, 1000.0, 3000.0, 10_000.0, 50_000.0])
+        p = physics.spectrum_weighted_decay_probability(d, self.LO, self.HI)
+        self.assertTrue(np.all(np.diff(p) > 0), "a longer gap can only help")
+
+    def test_lies_between_the_single_energy_extremes(self):
+        """
+        The whole point: the folded value sits inside the range one energy could give.
+
+        At the low end of the reach the tau decays almost at once; at the high end it
+        mostly flies through. A weighted average of the two must fall between them, and
+        a folded value outside that range would mean the quadrature was wrong.
+        """
+        d = 3000.0
+        at_lo = 1.0 - math.exp(-d / physics.tau_decay_length_m(self.LO))
+        at_hi = 1.0 - math.exp(-d / physics.tau_decay_length_m(self.HI))
+        folded = float(physics.spectrum_weighted_decay_probability(d, self.LO, self.HI))
+        self.assertLess(at_hi, folded)
+        self.assertLess(folded, at_lo)
+
+    def test_a_harder_spectrum_lowers_it(self):
+        """More weight at high energy, where the tau outruns the gap."""
+        d = 3000.0
+        soft = float(physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, 2.7))
+        mid = float(physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, 2.0))
+        hard = float(physics.spectrum_weighted_decay_probability(d, self.LO, self.HI, 1.0))
+        self.assertGreater(soft, mid)
+        self.assertGreater(mid, hard)
+
+    def test_a_narrow_range_reproduces_the_single_energy(self):
+        """Collapsing the range must recover the unfolded form, or the weighting is wrong."""
+        d = 3000.0
+        folded = float(physics.spectrum_weighted_decay_probability(d, 54.9, 55.1))
+        single = 1.0 - math.exp(-d / physics.tau_decay_length_m(55.0))
+        self.assertAlmostEqual(folded, single, places=3)
+
+    def test_the_shower_length_is_subtracted_from_the_gap(self):
+        with_room = physics.spectrum_weighted_decay_probability(
+            6000.0, self.LO, self.HI, shower_development_m=0.0)
+        less_room = physics.spectrum_weighted_decay_probability(
+            6000.0, self.LO, self.HI, shower_development_m=3000.0)
+        self.assertGreater(float(with_room), float(less_room))
+
+    def test_a_target_closer_than_the_shower_needs_yields_nothing(self):
+        p = physics.spectrum_weighted_decay_probability(
+            2000.0, self.LO, self.HI, shower_development_m=3000.0)
+        self.assertEqual(float(p), 0.0)
+
+    def test_shape_is_preserved(self):
+        d = np.array([[1000.0, 3000.0], [10_000.0, 30_000.0]])
+        p = physics.spectrum_weighted_decay_probability(d, self.LO, self.HI)
+        self.assertEqual(p.shape, d.shape)
+
+    def test_an_inverted_range_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(3000.0, 1000.0, 3.0)
+
+    def test_the_quadrature_has_converged(self):
+        """Doubling the grid must not move the answer, or the default is too coarse."""
+        d = 3000.0
+        coarse = float(physics.spectrum_weighted_decay_probability(
+            d, self.LO, self.HI, samples=96))
+        fine = float(physics.spectrum_weighted_decay_probability(
+            d, self.LO, self.HI, samples=384))
+        self.assertAlmostEqual(coarse, fine, places=4)

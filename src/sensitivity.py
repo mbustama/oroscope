@@ -22,12 +22,12 @@ interaction will not show up -- for that, sweep the pair explicitly.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import glob
-import io
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 
@@ -39,48 +39,88 @@ import site_searcher as ss                       # noqa: E402
 __all__ = ["run_once", "summarise", "main"]
 
 
-def _quiet():
-    """Silences the pipeline's console output, including tqdm's stderr bars."""
-    return contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())
+# The child process: reads a JSON of parameters, runs one search, exits. Kept as a
+# string rather than a separate file so the tool stays self-contained.
+_CHILD = r"""
+import json, os, sys
+os.environ.setdefault("MPLBACKEND", "Agg")
+sys.path.insert(0, sys.argv[3])
+import site_searcher as ss
+
+with open(sys.argv[1]) as f:
+    payload = json.load(f)
+
+cap = payload.pop("_max_memory_gb", None)
+if cap:
+    ss.apply_memory_cap(cap)
+
+params = {k: v for k, v in payload.items() if not k.startswith("_")}
+dem = params.pop("dem_path")
+lat = params.pop("origin_lat")
+lon = params.pop("origin_lon")
+ss.find_grand_regions_interactive(dem_path=dem, origin_lat=lat, origin_lon=lon,
+                                  run_output_dir=sys.argv[2], **params)
+"""
 
 
-def run_once(config, out_dir, verbose=False):
+def run_once(config, out_dir, verbose=False, max_memory_gb=None, timeout=3600):
     """
-    Runs the pipeline once for a fully-resolved configuration.
+    Runs the pipeline once, in a subprocess.
+
+    A subprocess rather than a function call, for two reasons that a sweep makes
+    unavoidable. Memory is reclaimed completely between points: running ten searches in
+    one process took 6.9 GB and was killed by the kernel, because matplotlib retains
+    every figure it is not explicitly asked to close and the leak compounded. And one
+    point that fails -- an impossible parameter, or a genuine out-of-memory -- reports
+    a failed row rather than ending the sweep.
+
+    The cost is a few seconds of Numba compilation per point, which is the right trade
+    for a sweep that otherwise cannot finish.
 
     Parameters
     ----------
     config : dict
         Parameters as they appear in a config file. Keys beginning with ``_`` are
-        treated as comments and dropped, matching the config files in ``config/``.
+        treated as comments and dropped.
     out_dir : str
-        Directory to write this run's outputs into.
-    verbose : bool
-        Leave the pipeline's own output on stdout rather than swallowing it.
+        Directory for this run's outputs.
+    verbose : bool, optional
+        Let the child's output through rather than capturing it.
+    max_memory_gb : float, optional
+        Address-space ceiling for the child.
+    timeout : float, optional
+        Seconds before the child is killed and the point reported as failed.
 
     Returns
     -------
-    dict
-        The parsed results JSON, or None when the run produced nothing.
+    dict or None
+        The parsed results JSON, or ``None`` when the run produced nothing.
     """
     params = {k: v for k, v in config.items() if not k.startswith("_")}
-    for drop in ("dem_path", "origin_lat", "origin_lon", "print_info",
-                 "output_directory_base_with_given_json", "output_image_format"):
+    for drop in ("print_info", "output_directory_base_with_given_json",
+                 "output_image_format"):
         params.pop(drop, None)
     params["generate_kml"] = False
     if params.get("score_weights") is not None:
         params["score_weights"] = ss.parse_score_weights(params["score_weights"])
-    for tup in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
-        if params.get(tup) is not None:
-            params[tup] = tuple(params[tup])
+    if max_memory_gb:
+        params["_max_memory_gb"] = max_memory_gb
 
     os.makedirs(out_dir, exist_ok=True)
-    ctx = _quiet() if not verbose else (contextlib.nullcontext(), contextlib.nullcontext())
-    with ctx[0], ctx[1]:
-        ss.find_grand_regions_interactive(
-            dem_path=config["dem_path"],
-            origin_lat=config["origin_lat"], origin_lon=config["origin_lon"],
-            run_output_dir=out_dir, **params)
+    payload = os.path.join(out_dir, "_params.json")
+    with open(payload, "w") as f:
+        json.dump(params, f)
+
+    src_dir = os.path.join(REPO_ROOT, "src")
+    proc = subprocess.run(
+        [sys.executable, "-c", _CHILD, payload, out_dir, src_dir],
+        cwd=src_dir, timeout=timeout,
+        capture_output=not verbose, text=True, check=False)
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()[-1:] if not verbose else []
+        print(f"      run failed (exit {proc.returncode})"
+              + (f": {detail[0][:120]}" if detail else ""))
+        return None
 
     matches = glob.glob(os.path.join(out_dir, "grand_search_results_*.json"))
     if not matches:
@@ -145,6 +185,9 @@ def main():
                     required=True,
                     help="a parameter and the values to try, repeatable")
     ap.add_argument("--out", default=None, help="where to write the report (default: alongside output/)")
+    ap.add_argument("--max_memory_gb", type=float, default=None,
+                    help="address-space ceiling for each child, in GiB "
+                         "(default: 70%% of what the system reports available)")
     ap.add_argument("--keep_runs", action="store_true",
                     help="keep each run's output directory instead of discarding it")
     args = ap.parse_args()
@@ -158,7 +201,14 @@ def main():
     try:
         t0 = time.perf_counter()
         print(f"baseline: {os.path.basename(args.config)}", flush=True)
-        baseline = summarise(run_once(base, os.path.join(tmp_root, "baseline")))
+        cap = args.max_memory_gb
+        if cap is None:
+            have = ss.available_memory_gb()
+            cap = 0.7 * have if have else None
+        if cap:
+            print(f"   each run capped at {cap:.1f} GiB of address space\n")
+        baseline = summarise(run_once(base, os.path.join(tmp_root, "baseline"),
+                                      max_memory_gb=cap))
         report["baseline"] = baseline
         print(f"   {baseline['sites']} sites, {baseline['capacity']:,} DUs, "
               f"{baseline['area_km2']:,} km², acceptance {baseline['acceptance']*100:.1f}%"
@@ -177,7 +227,7 @@ def main():
                 cfg = dict(base)
                 cfg[param] = value
                 out = os.path.join(tmp_root, f"{param}_{value}")
-                got = summarise(run_once(cfg, out))
+                got = summarise(run_once(cfg, out, max_memory_gb=cap))
                 ratio = (got["capacity"] / baseline["capacity"]) if baseline["capacity"] else 0.0
                 rows.append(dict(value=value, **got, capacity_ratio=ratio))
                 print(f"   {str(value):>12} {got['sites']:>7} {got['capacity']:>10,}"

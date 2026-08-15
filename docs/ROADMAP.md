@@ -1545,6 +1545,68 @@ far-wall slopes it recovers are Colca's real ones — but the *capacity* it repo
 dominated by two modelling choices rather than by terrain. Fixing the decay treatment
 is worth more than any further criterion.
 
+### 6.21 Tau decay folded over a spectrum ✅ delivered
+
+§6.20 found that the single-energy decay term *was* the answer rather than an
+approximation to it: across TAMBO's own 3 PeV – 1 EeV reach the reported capacity ran
+from 10878 to zero. `physics.spectrum_weighted_decay_probability` folds it instead,
+
+    P(u) = ∫ E^-γ (1 − exp(−u/L(E))) dE  /  ∫ E^-γ dE
+
+on a log-spaced grid, chunked over candidates so a 500k-candidate search costs about
+1.1 s and tens of megabytes rather than the hundreds the full outer product would take.
+
+**It worked.** The result is now robust where it was not:
+
+| | single energy | folded (γ swept) |
+| --- | --- | --- |
+| range of the assumption | 3 – 1000 PeV | γ = 1.5 – 2.7 |
+| capacity | 10878 → **0** | 7205 → **10495** |
+| ratio across the range | ∞ | **1.46×** |
+
+At the Colca baseline, γ = 2.0 over 3 PeV – 1 EeV: **15 sites, 9717 detector
+positions, 17.5% acceptance.** The energy-range endpoints matter little (1.07× and
+0.99× for the low and high edges), which is the point — the flux weighting is doing the
+work rather than the choice of endpoint.
+
+`min_score` is now the dominant remaining assumption, at 2.38× down to 0.20× across
+0.2–0.5, and it is a threshold on a product. That remains the thing to fix next, and
+§6.20's recommendation stands: rank sites and take the best N.
+
+### 6.22 A memory leak, and safeguards against the next one ⚠️ found the hard way
+
+Running the sweep killed the machine. The kernel's OOM killer took the process at
+**6.9 GB anon RSS**, on a box with 15 GB where 9 were already in use.
+
+**The leak was ours.** `generate_visualizations_and_outputs` created a 14×12-inch
+figure and saved it without closing it. pyplot holds a global reference to every figure
+it creates, so an unclosed one can never be collected — a single search never notices,
+but a process that runs several accumulates the entire figure, canvas and artists, each
+time. Reproduced in isolation at ~14 MB per iteration on a small image, far more on the
+real one. Fixed with `plt.close('all')` in a `finally`, since the failure path leaked
+as readily as the happy one.
+
+**Three safeguards, because the leak will not be the last one.**
+
+- `estimate_peak_memory_gb` predicts the anonymous allocations from the DEM size,
+  `downsample_factor` and `candidate_stride`, and the run prints it against available
+  memory and warns past 80%. The memory-mapped DEM is deliberately excluded: it is
+  file-backed and evictable, and counting it would make every large search look
+  impossible when the streaming design exists so that it is not.
+- `apply_memory_cap` bounds `RLIMIT_AS`, defaulting to 80% of available. A search that
+  outgrows the machine now fails with `MemoryError` naming itself, rather than letting
+  the kernel pick a victim that may be the user's editor.
+- **`sensitivity.py` runs each point in a subprocess.** Memory is reclaimed completely
+  between points, and one failed point reports a failed row instead of ending the
+  sweep. It costs a few seconds of JIT per point, which is the right trade for a sweep
+  that otherwise cannot finish.
+
+Measured after: the same sweep peaks at **1.2 GB**, against 6.9 GB before.
+
+For the full DEM the estimator says 4.5 GiB at `downsample_factor: 1` and 2.3 GiB at 4,
+against ~6 GiB typically available on this machine — so 4 is the right setting, which
+is what §6.12 already recommended for a different reason.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
