@@ -18,6 +18,8 @@ useful relative scoring is possible without the differential acceptance table th
 absolute apertures would need (see the roadmap, section 4.10).
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 import physics
@@ -27,7 +29,9 @@ import physics
 COMPOSITION_MODES = ("product", "mean", "min")
 
 
-def band_score(x, lo, hi, soft_lo=None, soft_hi=None):
+def band_score(x: float | np.ndarray, lo: float, hi: float,
+               soft_lo: float | None = None,
+               soft_hi: float | None = None) -> np.ndarray:
     """
     A plateau of 1 between ``lo`` and ``hi``, falling linearly to 0 outside it.
 
@@ -39,6 +43,29 @@ def band_score(x, lo, hi, soft_lo=None, soft_hi=None):
     Column depth is the motivating case: the tau must be produced, which needs rock,
     and must escape, which limits how much -- so its score is a band with an optimum,
     not a floor.
+
+    Parameters
+    ----------
+    x : float or array_like
+        Value or values to score.
+    lo, hi : float
+        Edges of the plateau. Swapped automatically if given the wrong way round.
+    soft_lo, soft_hi : float, optional
+        Widths of the falling flanks below ``lo`` and above ``hi``. Default to a
+        quarter of the band width each. Zero gives a hard cliff.
+
+    Returns
+    -------
+    ndarray
+        Scores in [0, 1].
+
+    Examples
+    --------
+    >>> import scoring
+    >>> float(scoring.band_score(5.0, 0.0, 10.0))          # inside the plateau
+    1.0
+    >>> float(scoring.band_score(-5.0, 0.0, 10.0))         # well below it
+    0.0
     """
     x = np.asarray(x, dtype=np.float64)
     if hi < lo:
@@ -61,38 +88,115 @@ def band_score(x, lo, hi, soft_lo=None, soft_hi=None):
     return np.clip(score, 0.0, 1.0)
 
 
-def saturating_score(x, half_value):
+def saturating_score(x: float | np.ndarray, half_value: float) -> np.ndarray:
     """
     ``x / (x + half_value)``: rises from 0, reaching 0.5 at ``half_value``.
 
     For quantities where more is better with diminishing returns and no natural
     maximum -- accepted solid angle being the case in hand.
+
+    Parameters
+    ----------
+    x : float or array_like
+        Value or values to score. Negative values are clipped to zero.
+    half_value : float
+        Value scoring 0.5. Choosing it far below the range actually observed saturates
+        the term so that it stops discriminating, which is a real failure mode: the
+        0.05 sr default suits GRAND and flattens completely against a canyon's
+        0.2-1.5 sr.
+
+    Returns
+    -------
+    ndarray
+        Scores in [0, 1).
+
+    Examples
+    --------
+    >>> import scoring
+    >>> float(scoring.saturating_score(0.05, 0.05))
+    0.5
+    >>> round(float(scoring.saturating_score(0.7, 0.05)), 3)   # saturated
+    0.933
     """
     x = np.clip(np.asarray(x, dtype=np.float64), 0.0, None)
     half_value = max(float(half_value), 1e-12)
     return x / (x + half_value)
 
 
-def ramp_score(x, zero_at, one_at):
-    """Linear ramp from 0 at ``zero_at`` to 1 at ``one_at``; either order."""
+def ramp_score(x: float | np.ndarray, zero_at: float,
+               one_at: float) -> np.ndarray:
+    """
+    Linear ramp from 0 at ``zero_at`` to 1 at ``one_at``; either order.
+
+    Parameters
+    ----------
+    x : float or array_like
+        Value or values to score.
+    zero_at : float
+        Value scoring 0.
+    one_at : float
+        Value scoring 1. May be below ``zero_at``, giving a falling ramp.
+
+    Returns
+    -------
+    ndarray
+        Scores in [0, 1].
+
+    Examples
+    --------
+    >>> import scoring
+    >>> [float(scoring.ramp_score(v, 0.0, 10.0)) for v in (-1.0, 5.0, 99.0)]
+    [0.0, 0.5, 1.0]
+    """
     x = np.asarray(x, dtype=np.float64)
     if one_at == zero_at:
         return np.where(x >= one_at, 1.0, 0.0)
     return np.clip((x - zero_at) / (one_at - zero_at), 0.0, 1.0)
 
 
-def compose(components, mode="product", weights=None):
+def compose(components: dict[str, np.ndarray], mode: str = "product",
+            weights: dict[str, float] | None = None) -> np.ndarray:
     """
     Combines named component scores into one value in [0, 1].
 
-    Parameters:
-    - components (dict): name -> array of scores in [0, 1].
-    - mode (str): one of COMPOSITION_MODES.
-    - weights (dict): optional per-component weights, used by 'product' as exponents
-      and by 'mean' as linear weights. Ignored by 'min'.
+    Parameters
+    ----------
+    components : dict
+        Component name to array of scores in [0, 1].
+    mode : {'product', 'mean', 'min'}, optional
+        How to combine them. ``product`` is unforgiving -- one bad component sinks the
+        site -- ``mean`` lets a strong component compensate, and ``min`` reports the
+        weakest link.
+    weights : dict, optional
+        Per-component weights, used by ``product`` as exponents and by ``mean`` as
+        linear weights. Ignored by ``min``. A weight of 0 excludes a component.
 
-    Returns:
-    - ndarray: the composed score.
+    Returns
+    -------
+    ndarray
+        The composed score, in [0, 1].
+
+    Raises
+    ------
+    ValueError
+        If no components are given, the mode is unknown, a weight is negative, or the
+        weights for ``mean`` do not sum to a positive value.
+
+    Notes
+    -----
+    A product of several components each in [0, 1] concentrates near zero, so a
+    threshold on the result sits on a cliff. Measured on a real search, a score cut of
+    0.0, 0.35 and 0.5 gave 45928, 2056 and 0 detector positions. Prefer ranking sites
+    over thresholding a product.
+
+    Examples
+    --------
+    >>> import numpy as np, scoring
+    >>> parts = {"a": np.array([0.5]), "b": np.array([0.5])}
+    >>> float(scoring.compose(parts, "product")[0])
+    0.25
+    >>> float(scoring.compose(parts, "mean")[0])
+    0.5
     """
     if not components:
         raise ValueError("compose() needs at least one component")
@@ -161,7 +265,10 @@ DEFAULT_SCORE_CONFIG = {
 }
 
 
-def score_candidates(observables, config=None, distance_window_m=None):
+def score_candidates(observables: dict[str, np.ndarray],
+                     config: dict | None = None,
+                     distance_window_m: tuple[float, float] | None = None
+                     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     """
     Scores candidates from their scan observables.
 
@@ -177,8 +284,40 @@ def score_candidates(observables, config=None, distance_window_m=None):
                     present only when ``decay_energy_pev`` is supplied;
     - ``clearance`` present only when a Fresnel frequency was configured.
 
-    Returns:
-    - tuple(ndarray, dict): the composed score and the per-component scores.
+    Parameters
+    ----------
+    observables : dict
+        Per-candidate arrays from :func:`arrival_scan.scan`. ``cells``,
+        ``solid_angle_sr``, ``mean_distance_m`` and ``max_depth_gcm2`` are required;
+        the rest enable their components when present.
+    config : dict, optional
+        Overrides for :data:`DEFAULT_SCORE_CONFIG`. ``None`` values are ignored, so a
+        sparse configuration leaves the remaining defaults alone.
+    distance_window_m : tuple of float, optional
+        Fallback distance band, used when the configuration does not set one. Normally
+        the decay-baseline window the scan was run with.
+
+    Returns
+    -------
+    total : ndarray
+        The composed score per candidate. Zero wherever no direction was accepted,
+        whatever the components say.
+    components : dict
+        The individual component scores, by name, so a site's weakness can be
+        attributed rather than disappearing into one number.
+
+    Examples
+    --------
+    >>> import numpy as np, scoring
+    >>> obs = {"cells": np.array([4, 0]),
+    ...        "solid_angle_sr": np.array([0.4, 0.4]),
+    ...        "mean_distance_m": np.array([2.0e4, 2.0e4]),
+    ...        "max_depth_gcm2": np.array([1.0e6, 1.0e6])}
+    >>> total, parts = scoring.score_candidates(obs)
+    >>> float(total[1])                      # no accepted direction scores zero
+    0.0
+    >>> sorted(parts)
+    ['depth', 'solid_angle']
     """
     cfg = dict(DEFAULT_SCORE_CONFIG)
     if config:
@@ -268,7 +407,8 @@ def score_candidates(observables, config=None, distance_window_m=None):
     return total, components
 
 
-def summarize_scores(scores, components):
+def summarize_scores(scores: np.ndarray,
+                     components: dict[str, np.ndarray]) -> dict:
     """Distribution summary of a score set, for reporting and per-site records."""
     if len(scores) == 0:
         return {}

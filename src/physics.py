@@ -12,9 +12,12 @@ literals buried in an expression. Where a default encodes a convention or an
 approximation, the docstring says so.
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np
+
 
 _trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
 
@@ -41,15 +44,44 @@ KGM2_TO_GCM2 = 0.1
 
 # ---------------------------------------------------------------- atmosphere
 
-def air_density_kgm3(altitude_m, sea_level_density=SEA_LEVEL_DENSITY_KGM3,
-                     scale_height_m=DENSITY_SCALE_HEIGHT_M):
-    """Exponential atmosphere, ``rho0 * exp(-h/H)``."""
+def air_density_kgm3(altitude_m: float,
+                     sea_level_density: float = SEA_LEVEL_DENSITY_KGM3,
+                     scale_height_m: float = DENSITY_SCALE_HEIGHT_M) -> float:
+    """
+    Exponential atmosphere, ``rho0 * exp(-h/H)``.
+
+    An isothermal approximation, adequate over the few kilometres of relief a site
+    search spans. It is not a substitute for a real profile at large zenith angles.
+
+    Parameters
+    ----------
+    altitude_m : float
+        Altitude above sea level, in metres.
+    sea_level_density : float, optional
+        Density at sea level, in kg/m^3.
+    scale_height_m : float, optional
+        Density scale height, in metres.
+
+    Returns
+    -------
+    float
+        Air density in kg/m^3.
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(physics.air_density_kgm3(0.0), 3)
+    1.225
+    >>> round(physics.air_density_kgm3(4000.0), 3)   # a third thinner at Andean altitude
+    0.761
+    """
     return sea_level_density * math.exp(-altitude_m / scale_height_m)
 
 
-def slant_grammage_gcm2(start_altitude_m, elevation_deg, distance_m,
-                        sea_level_density=SEA_LEVEL_DENSITY_KGM3,
-                        scale_height_m=DENSITY_SCALE_HEIGHT_M):
+def slant_grammage_gcm2(start_altitude_m: float, elevation_deg: float,
+                        distance_m: float,
+                        sea_level_density: float = SEA_LEVEL_DENSITY_KGM3,
+                        scale_height_m: float = DENSITY_SCALE_HEIGHT_M) -> float:
     """
     Atmospheric depth along a slanted path, in g/cm^2.
 
@@ -66,10 +98,31 @@ def slant_grammage_gcm2(start_altitude_m, elevation_deg, distance_m,
 
     with the horizontal-path limit ``rho0 exp(-z0/H) * D / cos(theta)`` as theta -> 0.
 
-    Parameters:
-    - start_altitude_m: altitude of the near end of the path.
-    - elevation_deg: elevation angle of the path, positive upward.
-    - distance_m: ground distance covered.
+    Parameters
+    ----------
+    start_altitude_m : float
+        Altitude of the near end of the path, in metres.
+    elevation_deg : float
+        Elevation angle of the path, in degrees, positive upward.
+    distance_m : float
+        Ground distance covered, in metres. Zero or less returns zero.
+    sea_level_density : float, optional
+        Density at sea level, in kg/m^3.
+    scale_height_m : float, optional
+        Density scale height, in metres.
+
+    Returns
+    -------
+    float
+        Atmospheric depth along the path, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> horizontal = physics.slant_grammage_gcm2(4000.0, 0.0, 20000.0)
+    >>> sea_level = physics.slant_grammage_gcm2(0.0, 0.0, 20000.0)
+    >>> f"{horizontal:.0f} vs {sea_level:.0f} g/cm^2"
+    '1522 vs 2450 g/cm^2'
     """
     if distance_m <= 0:
         return 0.0
@@ -87,7 +140,8 @@ def slant_grammage_gcm2(start_altitude_m, elevation_deg, distance_m,
     return kgm2 * KGM2_TO_GCM2
 
 
-def shower_maturity(grammage_gcm2, x_max_gcm2=X_MAX_GCM2):
+def shower_maturity(grammage_gcm2: float | np.ndarray,
+                    x_max_gcm2: float = X_MAX_GCM2) -> float | np.ndarray:
     """
     Path grammage as a fraction of the depth of shower maximum.
 
@@ -105,6 +159,28 @@ def shower_maturity(grammage_gcm2, x_max_gcm2=X_MAX_GCM2):
     genuinely is a band.
 
     This is one more reason criteria have to be per-channel rather than global.
+
+    Parameters
+    ----------
+    grammage_gcm2 : float or array_like
+        Atmospheric depth traversed, in g/cm^2.
+    x_max_gcm2 : float, optional
+        Depth of shower maximum, in g/cm^2.
+
+    Returns
+    -------
+    float or ndarray
+        Grammage as a fraction of shower maximum. Below 1 the shower is still growing.
+
+    See Also
+    --------
+    shower_size_fraction : the particle content itself, rather than this ratio.
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(physics.shower_maturity(750.0), 3)
+    1.071
     """
     return grammage_gcm2 / x_max_gcm2 if x_max_gcm2 > 0 else 0.0
 
@@ -119,9 +195,11 @@ ELONGATION_RATE_GCM2_PER_DECADE = 55.0
 SHOWER_PROFILE_LAMBDA_GCM2 = 70.0
 
 
-def shower_maximum_gcm2(energy_pev, x_max_ref_gcm2=X_MAX_GCM2,
-                        reference_energy_pev=X_MAX_REFERENCE_ENERGY_PEV,
-                        elongation_rate=ELONGATION_RATE_GCM2_PER_DECADE):
+def shower_maximum_gcm2(energy_pev: float | np.ndarray,
+                        x_max_ref_gcm2: float = X_MAX_GCM2,
+                        reference_energy_pev: float = X_MAX_REFERENCE_ENERGY_PEV,
+                        elongation_rate: float = ELONGATION_RATE_GCM2_PER_DECADE
+                        ) -> np.ndarray:
     """
     Depth of shower maximum at a given primary energy.
 
@@ -130,13 +208,37 @@ def shower_maximum_gcm2(energy_pev, x_max_ref_gcm2=X_MAX_GCM2,
     Over TAMBO's 3 PeV to 1 EeV this runs from about 560 to 700 g/cm^2, so the energy
     dependence is real but mild -- the band below is set far more by how much of the
     profile is being accepted than by where its peak sits.
+
+    Parameters
+    ----------
+    energy_pev : float or array_like
+        Primary energy, in PeV.
+    x_max_ref_gcm2 : float, optional
+        Depth of maximum at the reference energy, in g/cm^2.
+    reference_energy_pev : float, optional
+        Energy at which ``x_max_ref_gcm2`` is quoted, in PeV.
+    elongation_rate : float, optional
+        Deepening per decade of energy, in g/cm^2. About 55 for a hadronic cascade;
+        a purely electromagnetic one is nearer the Heitler value of 85.
+
+    Returns
+    -------
+    ndarray
+        Depth of shower maximum, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> [f"{float(physics.shower_maximum_gcm2(e)):.0f}" for e in (3.0, 1000.0)]
+    ['561', '700']
     """
     energy = np.asarray(energy_pev, dtype=np.float64)
     return x_max_ref_gcm2 + elongation_rate * np.log10(energy / reference_energy_pev)
 
 
-def shower_size_fraction(grammage_gcm2, x_max_gcm2,
-                         lambda_gcm2=SHOWER_PROFILE_LAMBDA_GCM2):
+def shower_size_fraction(grammage_gcm2: float | np.ndarray, x_max_gcm2: float,
+                         lambda_gcm2: float = SHOWER_PROFILE_LAMBDA_GCM2
+                         ) -> np.ndarray:
     """
     Charged-particle content at depth X, as a fraction of the content at maximum.
 
@@ -146,6 +248,29 @@ def shower_size_fraction(grammage_gcm2, x_max_gcm2,
 
     Zero at and below X = 0. This is what makes a particle array's criterion a band
     rather than a threshold: the content rises steeply, peaks, and then dies.
+
+    Parameters
+    ----------
+    grammage_gcm2 : float or array_like
+        Depth at which to evaluate the profile, in g/cm^2.
+    x_max_gcm2 : float
+        Depth of shower maximum, in g/cm^2.
+    lambda_gcm2 : float, optional
+        Gaisser-Hillas interaction length, in g/cm^2, setting how fast the profile
+        rises and falls.
+
+    Returns
+    -------
+    ndarray
+        Particle content as a fraction of the content at maximum, in [0, 1].
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(float(physics.shower_size_fraction(700.0, 700.0)), 3)   # at maximum
+    1.0
+    >>> round(float(physics.shower_size_fraction(172.0, 561.0)), 3)   # a 2 km crossing
+    0.02
     """
     x = np.asarray(grammage_gcm2, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -157,9 +282,11 @@ def shower_size_fraction(grammage_gcm2, x_max_gcm2,
     return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
 
-def grammage_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.1,
-                              lambda_gcm2=SHOWER_PROFILE_LAMBDA_GCM2, samples=4000,
-                              **x_max_kw):
+def grammage_band_from_energy(energy_min_pev: float, energy_max_pev: float,
+                              fraction: float = 0.1,
+                              lambda_gcm2: float = SHOWER_PROFILE_LAMBDA_GCM2,
+                              samples: int = 4000,
+                              **x_max_kw: float) -> tuple[float, float]:
     """
     Atmospheric-depth band over which a particle array still sees a usable shower.
 
@@ -175,7 +302,33 @@ def grammage_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.1,
     4.5 km rim to rim -- so the criterion selects the *widest* crossings, which is the
     physically right answer and not one the default (X_max, 4*X_max) band could express.
 
-    Returns (low_gcm2, high_gcm2).
+    Parameters
+    ----------
+    energy_min_pev, energy_max_pev : float
+        Ends of the primary-energy range, in PeV.
+    fraction : float, optional
+        Fraction of peak particle content that still counts as a usable shower. A
+        choice about detector capability rather than a property of the shower, and one
+        of the parameters a result is most sensitive to.
+    lambda_gcm2 : float, optional
+        Gaisser-Hillas interaction length, in g/cm^2.
+    samples : int, optional
+        Points on the depth grid searched for the band edges.
+    **x_max_kw
+        Passed through to :func:`shower_maximum_gcm2`.
+
+    Returns
+    -------
+    tuple of float
+        ``(low_gcm2, high_gcm2)``, the low edge taken at the lowest energy and the
+        high edge at the highest, so the band spans the whole requested range.
+
+    Examples
+    --------
+    >>> import physics
+    >>> lo, hi = physics.grammage_band_from_energy(3.0, 1000.0)
+    >>> f"{lo:.0f} - {hi:.0f} g/cm^2"
+    '236 - 1287 g/cm^2'
     """
     grid = np.linspace(1.0, 5000.0, samples)
 
@@ -194,7 +347,7 @@ def grammage_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.1,
 
 # ---------------------------------------------------------------- Earth chord
 
-def earth_chord_m(elevation_deg, radius_m=EARTH_RADIUS_M):
+def earth_chord_m(elevation_deg: float, radius_m: float = EARTH_RADIUS_M) -> float:
     """
     Chord length through the Earth for a ray arriving from below the horizontal.
 
@@ -212,14 +365,37 @@ def earth_chord_m(elevation_deg, radius_m=EARTH_RADIUS_M):
     return 2.0 * radius_m * math.sin(math.radians(-elevation_deg))
 
 
-def earth_chord_gcm2(elevation_deg, radius_m=EARTH_RADIUS_M,
-                     density_gcm3=CRUST_DENSITY_GCM3):
-    """Column depth of the Earth chord, in g/cm^2."""
+def earth_chord_gcm2(elevation_deg: float, radius_m: float = EARTH_RADIUS_M,
+                     density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
+    """
+    Column depth of the Earth chord, in g/cm^2.
+
+    Parameters
+    ----------
+    elevation_deg : float
+        Arrival elevation angle, in degrees.
+    radius_m : float, optional
+        Earth radius, in metres.
+    density_gcm3 : float, optional
+        Crust density, in g/cm^3.
+
+    Returns
+    -------
+    float
+        Column depth of the chord, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.earth_chord_gcm2(-3.0):.2e}"
+    '1.77e+08'
+    """
     return earth_chord_m(elevation_deg, radius_m) * 100.0 * density_gcm3
 
 
-def neutrino_survival(elevation_deg, interaction_length_gcm2,
-                      radius_m=EARTH_RADIUS_M, density_gcm3=CRUST_DENSITY_GCM3):
+def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
+                      radius_m: float = EARTH_RADIUS_M,
+                      density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
     """
     Fraction of neutrinos surviving the Earth chord to reach the exit region.
 
@@ -227,6 +403,30 @@ def neutrino_survival(elevation_deg, interaction_length_gcm2,
     on the cross-section at the energy of interest; around an EeV it is of order
     1e8 g/cm^2, which is the same order as the chord at -3 degrees, so the suppression
     across a +/-3 degree window is substantial rather than marginal.
+
+    Parameters
+    ----------
+    elevation_deg : float
+        Arrival elevation angle, in degrees.
+    interaction_length_gcm2 : float
+        Neutrino interaction length at the energy of interest, in g/cm^2. Zero or
+        less disables the attenuation and returns 1.
+    radius_m : float, optional
+        Earth radius, in metres.
+    density_gcm3 : float, optional
+        Crust density, in g/cm^3.
+
+    Returns
+    -------
+    float
+        Surviving fraction, in [0, 1].
+
+    Examples
+    --------
+    >>> import physics
+    >>> lam = physics.neutrino_interaction_length_gcm2(1000.0)
+    >>> round(physics.neutrino_survival(-1.0, lam), 3)
+    0.7
     """
     if interaction_length_gcm2 <= 0:
         return 1.0
@@ -241,7 +441,8 @@ def neutrino_survival(elevation_deg, interaction_length_gcm2,
 DEFAULT_MUON_SHIELDING_KM = 4.0
 
 
-def muon_shielding_gcm2(thickness_km, density_gcm3=CRUST_DENSITY_GCM3):
+def muon_shielding_gcm2(thickness_km: float,
+                        density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
     """
     Column depth corresponding to a rock thickness, for muon rejection.
 
@@ -254,14 +455,58 @@ def muon_shielding_gcm2(thickness_km, density_gcm3=CRUST_DENSITY_GCM3):
     better for background rejection, and only the signal side wants an upper limit.
 
     4 km of standard rock is about 1.06e6 g/cm^2.
+
+    Parameters
+    ----------
+    thickness_km : float
+        Rock thickness along the arrival direction, in km.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+
+    Returns
+    -------
+    float
+        Column depth, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.muon_shielding_gcm2(4.0):.2e}"
+    '1.06e+06'
     """
     return thickness_km * 1000.0 * 100.0 * density_gcm3
 
 
 # ---------------------------------------------------------------- tau range
 
-def tau_decay_length_m(energy_pev, mass_gev=1.77686, ctau_m=87.03e-6):
-    """Lorentz-boosted decay length, ``(E/m) c*tau``."""
+def tau_decay_length_m(energy_pev: float, mass_gev: float = 1.77686,
+                       ctau_m: float = 87.03e-6) -> float:
+    """
+    Lorentz-boosted tau decay length, ``(E/m) c*tau``.
+
+    The quantity that decides whether a tau decays inside a canyon crossing or flies
+    through it: 147 m at 3 PeV against 49 km at 1 EeV, over a gap of a few km.
+
+    Parameters
+    ----------
+    energy_pev : float
+        Tau energy, in PeV.
+    mass_gev : float, optional
+        Tau mass, in GeV.
+    ctau_m : float, optional
+        Proper decay length ``c * tau``, in metres.
+
+    Returns
+    -------
+    float
+        Decay length in the laboratory frame, in metres.
+
+    Examples
+    --------
+    >>> import physics
+    >>> [f"{physics.tau_decay_length_m(e):.0f}" for e in (3.0, 1000.0)]
+    ['147', '48980']
+    """
     return (energy_pev * 1.0e6 / mass_gev) * ctau_m
 
 
@@ -273,17 +518,55 @@ SIGMA_CC_INDEX = 0.358
 AVOGADRO = 6.022e23
 
 
-def cc_cross_section_cm2(energy_pev):
-    """Charged-current neutrino-nucleon cross-section."""
+def cc_cross_section_cm2(energy_pev: float | np.ndarray) -> float | np.ndarray:
+    """
+    Charged-current neutrino-nucleon cross-section.
+
+    A power-law fit to the standard parameterisations, good to tens of per cent over
+    1e8-1e10 GeV and an extrapolation above that, where no data constrain it.
+
+    Parameters
+    ----------
+    energy_pev : float or array_like
+        Neutrino energy, in PeV.
+
+    Returns
+    -------
+    float or ndarray
+        Cross-section, in cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.cc_cross_section_cm2(1000.0):.2e}"
+    '1.01e-32'
+    """
     return SIGMA_CC_COEFF_CM2 * (energy_pev * 1.0e6) ** SIGMA_CC_INDEX
 
 
-def neutrino_interaction_length_gcm2(energy_pev):
+def neutrino_interaction_length_gcm2(energy_pev: float | np.ndarray
+                                     ) -> float | np.ndarray:
     """
     Column depth over which a neutrino interacts once, ``1/(N_A sigma)``.
 
     Falls from about 3.8e8 g/cm^2 at 100 PeV to 7e7 at 10 EeV. Only charged-current
     attenuation is counted; neutral-current regeneration would soften it slightly.
+
+    Parameters
+    ----------
+    energy_pev : float or array_like
+        Neutrino energy, in PeV.
+
+    Returns
+    -------
+    float or ndarray
+        Interaction length, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.neutrino_interaction_length_gcm2(100.0):.2e}"
+    '3.76e+08'
     """
     return 1.0 / (AVOGADRO * cc_cross_section_cm2(energy_pev))
 
@@ -311,16 +594,45 @@ BETA_ENERGY_INDEX = 0.20
 CC_INELASTICITY = 0.2
 
 
-def tau_energy_loss_beta(energy_pev, reference=BETA_REFERENCE_CM2G,
-                         reference_energy_pev=BETA_REFERENCE_ENERGY_PEV,
-                         index=BETA_ENERGY_INDEX):
-    """Energy-loss coefficient beta(E), rising with energy as photonuclear does."""
+def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM2G,
+                         reference_energy_pev: float = BETA_REFERENCE_ENERGY_PEV,
+                         index: float = BETA_ENERGY_INDEX) -> float:
+    """
+    Energy-loss coefficient beta(E), rising with energy as photonuclear does.
+
+    An **estimate**, not a fit to published tables: see the module comments for how it
+    was arrived at. It is the least certain number in this module, and it moves the
+    production-and-escape optimum in proportion.
+
+    Parameters
+    ----------
+    energy_pev : float
+        Tau energy, in PeV.
+    reference : float, optional
+        Value of beta at ``reference_energy_pev``, in cm^2/g.
+    reference_energy_pev : float, optional
+        Energy at which ``reference`` applies, in PeV.
+    index : float, optional
+        Power-law index of the energy dependence. Zero recovers a constant beta.
+
+    Returns
+    -------
+    float
+        Energy-loss coefficient, in cm^2/g.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
+    '3.79e-07'
+    """
     if index == 0.0:
         return reference
     return reference * (energy_pev / reference_energy_pev) ** index
 
 
-def tau_range_gcm2(energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
+def tau_range_gcm2(energy_pev: float, beta_cm2g: float | None = None,
+                   density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
     """
     Column depth over which a tau's survival probability falls to 1/e.
 
@@ -338,6 +650,27 @@ def tau_range_gcm2(energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
     ``1/beta``. An earlier version of this module combined the two lengths
     harmonically, which saturates and underestimates the range by a factor of 2 at
     an EeV and 4 at 10 EeV.
+
+    Parameters
+    ----------
+    energy_pev : float
+        Tau energy on entering the rock, in PeV.
+    beta_cm2g : float, optional
+        Energy-loss coefficient, in cm^2/g. Defaults to :func:`tau_energy_loss_beta`
+        at this energy.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+
+    Returns
+    -------
+    float
+        Column depth at which survival falls to 1/e, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> f"{physics.tau_range_gcm2(1000.0) / physics.CRUST_DENSITY_GCM3 / 1e5:.1f} km"
+    '13.7 km'
     """
     beta = tau_energy_loss_beta(energy_pev) if beta_cm2g is None else beta_cm2g
     x_decay = tau_decay_length_m(energy_pev) * 100.0 * density_gcm3
@@ -345,13 +678,37 @@ def tau_range_gcm2(energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
     return x_loss * math.log1p(x_decay / x_loss)
 
 
-def tau_survival(depth_gcm2, energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3):
+def tau_survival(depth_gcm2: float | np.ndarray, energy_pev: float,
+                 beta_cm2g: float | None = None,
+                 density_gcm3: float = CRUST_DENSITY_GCM3) -> np.ndarray:
     """
     Probability a tau of the given energy crosses ``depth_gcm2`` of rock without decaying.
 
     The double-exponential form above, which falls far more sharply than a simple
     exponential once the depth exceeds ``1/beta``: the tau is losing energy, so its
     decay length shrinks as it goes.
+
+    Parameters
+    ----------
+    depth_gcm2 : float or array_like
+        Rock traversed, in g/cm^2.
+    energy_pev : float
+        Tau energy on entering the rock, in PeV.
+    beta_cm2g : float, optional
+        Energy-loss coefficient, in cm^2/g.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+
+    Returns
+    -------
+    ndarray
+        Survival probability, in [0, 1].
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(float(physics.tau_survival(0.0, 1000.0)), 3)
+    1.0
     """
     beta = tau_energy_loss_beta(energy_pev) if beta_cm2g is None else beta_cm2g
     x_decay = tau_decay_length_m(energy_pev) * 100.0 * density_gcm3
@@ -361,9 +718,11 @@ def tau_survival(depth_gcm2, energy_pev, beta_cm2g=None, density_gcm3=CRUST_DENS
     return np.exp(-(x_loss / x_decay) * np.expm1(np.clip(d / x_loss, 0.0, 700.0)))
 
 
-def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=None,
-                         density_gcm3=CRUST_DENSITY_GCM3,
-                         inelasticity=CC_INELASTICITY, samples=2000):
+def tau_exit_probability(column_depth_gcm2: float | np.ndarray, energy_pev: float,
+                         beta_cm2g: float | None = None,
+                         density_gcm3: float = CRUST_DENSITY_GCM3,
+                         inelasticity: float = CC_INELASTICITY,
+                         samples: int = 2000) -> float | np.ndarray:
     """
     Relative probability that a traversing neutrino yields a tau that escapes.
 
@@ -375,7 +734,35 @@ def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=None,
 
     Evaluated numerically, because ``S`` is a double exponential and the integral has
     no clean closed form. Relative, not absolute: normalisation needs the trigger
-    response (see aperture.py).
+    response (see :mod:`aperture`).
+
+    Parameters
+    ----------
+    column_depth_gcm2 : float or array_like
+        Rock along the arrival direction, in g/cm^2.
+    energy_pev : float
+        Neutrino energy, in PeV.
+    beta_cm2g : float, optional
+        Tau energy-loss coefficient, in cm^2/g.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+    inelasticity : float, optional
+        Mean inelasticity of the charged-current interaction; the tau carries away
+        ``1 - y`` of the neutrino energy.
+    samples : int, optional
+        Points used for the numerical integration over interaction depth.
+
+    Returns
+    -------
+    float or ndarray
+        Relative exit probability, matching the shape of ``column_depth_gcm2``.
+
+    Examples
+    --------
+    >>> import physics
+    >>> p = physics.tau_exit_probability(1.0e6, 1000.0)
+    >>> 0.0 <= p <= 1.0
+    True
     """
     e_tau = energy_pev * (1.0 - inelasticity)
     lam = neutrino_interaction_length_gcm2(energy_pev)
@@ -392,9 +779,10 @@ def tau_exit_probability(column_depth_gcm2, energy_pev, beta_cm2g=None,
     return np.array([one(v) for v in np.asarray(column_depth_gcm2)])
 
 
-def production_escape_optimum_gcm2(energy_pev, beta_cm2g=None,
-                                   density_gcm3=CRUST_DENSITY_GCM3,
-                                   inelasticity=CC_INELASTICITY, samples=400):
+def production_escape_optimum_gcm2(energy_pev: float, beta_cm2g: float | None = None,
+                                   density_gcm3: float = CRUST_DENSITY_GCM3,
+                                   inelasticity: float = CC_INELASTICITY,
+                                   samples: int = 400) -> float:
     """
     Column depth maximising :func:`tau_exit_probability`.
 
@@ -402,15 +790,42 @@ def production_escape_optimum_gcm2(energy_pev, beta_cm2g=None,
     Rises with energy and then flattens -- about 12 km of standard rock at 100 PeV,
     20 km at 1 EeV, 23 km at 10 EeV -- as the logarithmic growth of the tau range is
     tempered by beta rising.
+
+    Parameters
+    ----------
+    energy_pev : float
+        Neutrino energy, in PeV.
+    beta_cm2g : float, optional
+        Tau energy-loss coefficient, in cm^2/g.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+    inelasticity : float, optional
+        Mean charged-current inelasticity.
+    samples : int, optional
+        Points on the log-spaced depth grid searched for the peak.
+
+    Returns
+    -------
+    float
+        Column depth maximising the exit probability, in g/cm^2.
+
+    Examples
+    --------
+    >>> import physics
+    >>> km = physics.production_escape_optimum_gcm2(100.0) / physics.CRUST_DENSITY_GCM3 / 1e5
+    >>> 8.0 < km < 16.0
+    True
     """
     grid = np.logspace(4.0, 9.0, samples)
     p = tau_exit_probability(grid, energy_pev, beta_cm2g, density_gcm3, inelasticity)
     return float(grid[int(np.argmax(p))])
 
 
-def depth_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.5,
-                           beta_cm2g=None, density_gcm3=CRUST_DENSITY_GCM3,
-                           inelasticity=CC_INELASTICITY, samples=400):
+def depth_band_from_energy(energy_min_pev: float, energy_max_pev: float,
+                           fraction: float = 0.5, beta_cm2g: float | None = None,
+                           density_gcm3: float = CRUST_DENSITY_GCM3,
+                           inelasticity: float = CC_INELASTICITY,
+                           samples: int = 400) -> tuple[float, float]:
     """
     Column-depth band where the tau exit probability stays above ``fraction`` of peak.
 
@@ -418,8 +833,33 @@ def depth_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.5,
     some two and a half decades -- which is itself the result: column depth is an
     intrinsically weak discriminant and the criterion should not pretend otherwise.
 
-    Returns (low_gcm2, high_gcm2), the low edge taken at the lowest energy and the high
-    edge at the highest, so the band spans the whole requested range.
+    Parameters
+    ----------
+    energy_min_pev, energy_max_pev : float
+        Ends of the neutrino energy range, in PeV.
+    fraction : float, optional
+        Fraction of peak exit probability defining the band edges.
+    beta_cm2g : float, optional
+        Tau energy-loss coefficient, in cm^2/g.
+    density_gcm3 : float, optional
+        Rock density, in g/cm^3.
+    inelasticity : float, optional
+        Mean charged-current inelasticity.
+    samples : int, optional
+        Points on the log-spaced depth grid.
+
+    Returns
+    -------
+    tuple of float
+        ``(low_gcm2, high_gcm2)``, the low edge taken at the lowest energy and the high
+        edge at the highest, so the band spans the whole requested range.
+
+    Examples
+    --------
+    >>> import physics
+    >>> lo, hi = physics.depth_band_from_energy(100.0, 10000.0)
+    >>> lo < hi
+    True
     """
     grid = np.logspace(4.0, 9.0, samples)
 
@@ -433,8 +873,10 @@ def depth_band_from_energy(energy_min_pev, energy_max_pev, fraction=0.5,
     return (lo, hi) if lo <= hi else (hi, lo)
 
 
-def earth_absorption_cutoff_deg(energy_pev, fraction=0.5, radius_m=EARTH_RADIUS_M,
-                                density_gcm3=CRUST_DENSITY_GCM3, **kw):
+def earth_absorption_cutoff_deg(energy_pev: float, fraction: float = 0.5,
+                                radius_m: float = EARTH_RADIUS_M,
+                                density_gcm3: float = CRUST_DENSITY_GCM3,
+                                **kw: float) -> float | None:
     """
     Elevation below which the Earth chord itself exceeds the useful column depth.
 
@@ -448,7 +890,31 @@ def earth_absorption_cutoff_deg(energy_pev, fraction=0.5, radius_m=EARTH_RADIUS_
     1 EeV, -1.0 at 10 EeV -- so the *effective* arrival window is not a fixed +/-3
     degrees but an energy-dependent one whose lower edge climbs toward the horizon.
 
-    Returns a negative angle, or None when the cut lies below the horizon entirely.
+    Parameters
+    ----------
+    energy_pev : float
+        Neutrino energy, in PeV.
+    fraction : float, optional
+        Fraction of peak acceptance defining the cut.
+    radius_m : float, optional
+        Earth radius, in metres.
+    density_gcm3 : float, optional
+        Crust density, in g/cm^3.
+    **kw
+        Passed through to :func:`tau_exit_probability`.
+
+    Returns
+    -------
+    float or None
+        A negative elevation angle in degrees, or ``None`` when the cut lies below the
+        horizon entirely.
+
+    Examples
+    --------
+    >>> import physics
+    >>> cut = physics.earth_absorption_cutoff_deg(1000.0)
+    >>> -6.0 < cut < 0.0
+    True
     """
     X = np.logspace(4, 9, 400)
     P = tau_exit_probability(X, energy_pev, **kw)
@@ -482,10 +948,30 @@ GEOMAGNETIC_POLE_LAT_DEG = 80.7
 GEOMAGNETIC_POLE_LON_DEG = -72.7
 
 
-def geomagnetic_latitude_deg(latitude_deg, longitude_deg,
+def geomagnetic_latitude_deg(latitude_deg: float, longitude_deg: float,
                              pole_lat_deg=GEOMAGNETIC_POLE_LAT_DEG,
                              pole_lon_deg=GEOMAGNETIC_POLE_LON_DEG):
-    """Latitude in the centered-dipole frame."""
+    """
+    Latitude in the centered-dipole frame.
+
+    Parameters
+    ----------
+    latitude_deg, longitude_deg : float
+        Geographic coordinates of the site, in degrees.
+    pole_lat_deg, pole_lon_deg : float, optional
+        Geographic coordinates of the north geomagnetic pole, in degrees.
+
+    Returns
+    -------
+    float
+        Magnetic latitude, in degrees.
+
+    Examples
+    --------
+    >>> import physics
+    >>> round(physics.geomagnetic_latitude_deg(-16.4, -71.5), 1)
+    -7.1
+    """
     lat = math.radians(latitude_deg)
     plat = math.radians(pole_lat_deg)
     dlon = math.radians(longitude_deg - pole_lon_deg)
@@ -494,7 +980,8 @@ def geomagnetic_latitude_deg(latitude_deg, longitude_deg,
     return math.degrees(math.asin(max(-1.0, min(1.0, sin_mlat))))
 
 
-def centered_dipole_inclination(latitude_deg, longitude_deg, **kw):
+def centered_dipole_inclination(latitude_deg: float, longitude_deg: float,
+                                **kw: float) -> float:
     """
     Inclination from a centered dipole, ``tan(I) = 2 tan(magnetic latitude)``.
 
@@ -511,7 +998,7 @@ def centered_dipole_inclination(latitude_deg, longitude_deg, **kw):
     return math.degrees(math.atan(2.0 * math.tan(mlat)))
 
 
-def default_field_for_site(latitude_deg, longitude_deg,
+def default_field_for_site(latitude_deg: float, longitude_deg: float,
                            declination_deg=None, inclination_deg=None):
     """
     Geomagnetic field for an arbitrary site, falling back sensibly.
@@ -535,7 +1022,8 @@ def default_field_for_site(latitude_deg, longitude_deg,
     return float(declination_deg), float(inclination_deg)
 
 
-def geomagnetic_unit_vector(declination_deg, inclination_deg):
+def geomagnetic_unit_vector(declination_deg: float,
+                            inclination_deg: float) -> tuple[float, float, float]:
     """
     Unit geomagnetic field in local East-North-Up coordinates.
 
@@ -549,7 +1037,8 @@ def geomagnetic_unit_vector(declination_deg, inclination_deg):
             -math.sin(i))                   # up
 
 
-def geomagnetic_sin_alpha(azimuth_deg, elevation_deg, field_unit_vector):
+def geomagnetic_sin_alpha(azimuth_deg: float, elevation_deg: float,
+                          field_unit_vector: tuple[float, float, float]) -> float:
     """
     ``sin(alpha)`` between a shower axis and the geomagnetic field.
 
@@ -574,13 +1063,13 @@ def geomagnetic_sin_alpha(azimuth_deg, elevation_deg, field_unit_vector):
 
 # ---------------------------------------------------------------- footprint
 
-def refractivity(altitude_m, sea_level_value=SEA_LEVEL_REFRACTIVITY,
+def refractivity(altitude_m: float, sea_level_value: float = SEA_LEVEL_REFRACTIVITY,
                  scale_height_m=DENSITY_SCALE_HEIGHT_M):
     """``n - 1`` at altitude, falling with density."""
     return sea_level_value * math.exp(-altitude_m / scale_height_m)
 
 
-def cherenkov_angle_rad(altitude_m, **kw):
+def cherenkov_angle_rad(altitude_m: float, **kw: float) -> float:
     """
     Cherenkov angle in air, ``sqrt(2(n-1))`` for small angles.
 
@@ -590,7 +1079,8 @@ def cherenkov_angle_rad(altitude_m, **kw):
     return math.sqrt(2.0 * refractivity(altitude_m, **kw))
 
 
-def cherenkov_footprint_radius_m(altitude_m, distance_m, **kw):
+def cherenkov_footprint_radius_m(altitude_m: float, distance_m: float,
+                                 **kw: float) -> float:
     """
     Radius of the radio footprint on the ground, ``D * theta_C``.
 
@@ -602,7 +1092,8 @@ def cherenkov_footprint_radius_m(altitude_m, distance_m, **kw):
     return distance_m * cherenkov_angle_rad(altitude_m, **kw)
 
 
-def footprint_sampling(spacing_m, altitude_m, distance_m, **kw):
+def footprint_sampling(spacing_m: float, altitude_m: float, distance_m: float,
+                       **kw: float) -> float:
     """
     Antennas per footprint diameter: ``2 r / spacing``.
 

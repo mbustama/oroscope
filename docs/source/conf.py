@@ -99,6 +99,17 @@ autodoc_member_order = 'bysource'
 # signatures and docstrings, both of which survive the decorator.
 autodoc_mock_imports = []
 
+# Type annotations are rendered in the signature line, where they read as part of the
+# call. The docstrings state units and meaning, which the annotation cannot; the two
+# are complementary rather than duplicates -- `float` and "elevation angle in degrees,
+# positive upward" answer different questions.
+autodoc_typehints = 'signature'
+autodoc_typehints_format = 'short'
+
+# `from __future__ import annotations` makes every annotation a string, so autodoc
+# needs the module's globals to resolve them back into links.
+autodoc_type_aliases = {}
+
 master_doc = 'index'
 templates_path = ['_templates']
 exclude_patterns = ['_build']
