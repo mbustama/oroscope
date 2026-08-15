@@ -12,6 +12,7 @@ was a plausible hand-computed figure. The suite caught all five.
 """
 
 import doctest
+import importlib
 import unittest
 
 import _support  # noqa: F401  (path setup)
@@ -23,8 +24,8 @@ import _support  # noqa: F401  (path setup)
 # site_searcher is included for the routines that take plain arrays -- the terrain
 # derivatives, the slope band, the capacity lattice. Its pipeline stages need a DEM on
 # disk and are exercised by the regression tests instead.
-DOCTESTED = ("physics", "scoring", "arrival_scan", "aperture", "explain",
-             "site_searcher")
+DOCTESTED = ("oroscope.physics", "oroscope.scoring", "oroscope.arrival_scan",
+             "oroscope.aperture", "oroscope.explain", "oroscope.site_searcher")
 
 OPTIONS = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
 
@@ -32,7 +33,7 @@ OPTIONS = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
 def load_tests(loader, tests, ignore):
     """unittest hook: adds one DocTestSuite per module listed above."""
     for name in DOCTESTED:
-        module = __import__(name)
+        module = importlib.import_module(name)
         tests.addTests(doctest.DocTestSuite(module, optionflags=OPTIONS))
     return tests
 
@@ -42,11 +43,11 @@ class TestEveryModuleIsCovered(unittest.TestCase):
 
     def test_listed_modules_all_import(self):
         for name in DOCTESTED:
-            self.assertTrue(__import__(name), name)
+            self.assertTrue(importlib.import_module(name), name)
 
     def test_physics_examples_exist(self):
         """Guards against the list silently covering nothing."""
-        import physics
+        from oroscope import physics
         found = doctest.DocTestFinder().find(physics)
         with_examples = [t for t in found if t.examples]
         self.assertGreater(len(with_examples), 5,

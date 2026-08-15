@@ -38,13 +38,15 @@ __all__ = ["load_run", "check_alignment", "read_world_file",
            "pixel_area_km2", "capacity_of", "main"]
 import tifffile as tiff
 
-import explain as explain_mod
-import site_searcher as ss
+from oroscope import explain as explain_mod
+from oroscope import site_searcher as ss
 
-# Matplotlib is only needed for the overview image, and the searcher already forces a
-# headless backend when it is imported in a pipeline context
+# Matplotlib is only needed for the overview image. The backend is chosen in main(),
+# NOT here: this module is imported by `import oroscope`, and forcing Agg at import
+# reached into every caller's session -- it overrode the inline backend in a notebook,
+# so figures were captured as nothing at all. A library must not decide how its user's
+# figures are rendered. Trap 3, one level up from where it bit before.
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt                      # noqa: E402
 from matplotlib.patches import Patch                 # noqa: E402
 
@@ -222,6 +224,10 @@ def capacity_of(results):
 
 
 def main():
+    # Headless, because this is the command line and it writes a PNG to disk.
+    # Set here rather than at import, so importing the module leaves a
+    # notebook's own backend alone.
+    matplotlib.use("Agg")
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dirs", nargs="+", help="output directories of the searches to combine")
@@ -350,7 +356,7 @@ def main():
         ax.legend(handles=[
             Patch(facecolor="#2C6E8F", label=f"{a} only"),
             Patch(facecolor="#B0781E", label=f"{b} only"),
-            Patch(facecolor="#7B2D8E", label="both (co-located)"),
+            Patch(facecolor="#7B2D8E", label="Both (co-located)"),
         ], loc="lower right", framealpha=0.9)
         png = os.path.join(out_dir, "combined_overview.png")
         fig.savefig(png, dpi=140, bbox_inches="tight")

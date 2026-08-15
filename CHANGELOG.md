@@ -5,6 +5,13 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 ## Unreleased
 
 ### Added
+- **One import: `import oroscope`.** The modules moved from flat top-level names into a
+  real package, whose `__init__` re-exports the whole public surface — 131 names — while
+  the submodules stay importable when a narrower namespace reads better. The notebooks'
+  `sys.path` insert is gone; `pip install -e .` is the only setup step.
+- **A dedicated CLI page** in the documentation, with the complete option reference —
+  all 82, with types and defaults, generated from the parser so it cannot drift. The
+  README and the quickstart now lead with code, since that is how most people use this.
 - **Every run explains itself.** A plain-language summary — what was found, which
   funnel stage set the size of the answer and the parameter behind it, which named
   score component held each site back, and which numbers are assumptions with their
@@ -50,7 +57,7 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 - Memory safeguards: a pre-flight estimate, an address-space cap, and subprocess
   isolation per sweep point.
 - Documentation: physics and assumptions pages, eight tutorial notebooks, and
-  reproducible figures in `src/figures.py`.
+  reproducible figures in `src/oroscope/figures.py`.
 - **Two more notebooks.** **7** drives the pipeline from Python and reads what it
   says, about a run that finds ground and one that finds none — the empty result being
   the case a bare results file serves worst. **8** is the full Arequipa DEM: it *reads*
@@ -61,6 +68,14 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   the full DEM are in `config/`.
 
 ### Fixed
+- **`import oroscope` forced the matplotlib backend.** `combine_experiments` called
+  `matplotlib.use("Agg")` at module level — harmless for a standalone module, not for a
+  package front door: it reached into every caller's session and overrode the inline
+  backend, so notebooks captured no figures at all. Chosen in `main()` now, where the
+  command line actually needs it. A library must not decide how its user's figures are
+  rendered.
+- **The map title said "GRAND site search" on every run**, including TAMBO's, as did the
+  console banner and the KML placemark names.
 - **A `geomagnetic` score component appeared in runs that had switched the weighting
   off.** Whether it was applied is judged by comparing the weighted solid angle with
   the plain one, and a candidate that accepted no directions has a ratio of zero by
@@ -117,8 +132,10 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 - Documentation figures rendered as text, not images.
 
 ### Changed
+- **Figure labels capitalise their first word** — axis labels, titles, legend entries
+  and annotations, everywhere. Stated at the top of `figures.py` so it holds.
 - Renamed to **oroscope**; outputs are `oroscope_results_*` (the old prefix still reads).
-- `src/setup.py` → `src/fetch_dem.py`, so `pip install` no longer runs the downloader.
+- `src/setup.py` → `src/oroscope/fetch_dem.py`, so `pip install` no longer runs the downloader.
 - Packaged: `pip install -e .`, five console scripts, CI on Python 3.9–3.13.
 - Every criterion is a configuration knob; nothing that shapes a result is hard-coded.
 

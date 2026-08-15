@@ -50,8 +50,8 @@ REPO = os.path.dirname(HERE)
 SRC = os.path.join(REPO, "src")
 sys.path.insert(0, SRC)
 
-import combine_experiments as ce     # noqa: E402
-import site_searcher as ss           # noqa: E402
+from oroscope import combine_experiments as ce  # noqa: E402
+from oroscope import site_searcher as ss  # noqa: E402
 
 DEM = os.path.join(REPO, "input", "dem", "arequipa_SRTMGL1.tif")
 STORE = os.path.join(REPO, "results", "arequipa_full")

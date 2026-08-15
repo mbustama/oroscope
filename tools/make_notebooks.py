@@ -27,32 +27,20 @@ import nbformat as nbf
 HERE = pathlib.Path(__file__).resolve().parents[1]
 OUT = HERE / "notebooks"
 
-# Put src/ on the path, so the notebooks work in a clone whether or not the package has
-# been installed. Repeated verbatim at the top of every notebook so each one stands
-# alone, which is how people actually open them.
+# One import, the way a reader will actually use the library. Repeated verbatim at the
+# top of every notebook so each one stands alone, which is how people open them.
 #
-# This goes at the release. The layout underneath is flat -- ten top-level py-modules
-# rather than a package -- so there is no `import oroscope` to write yet, and an
-# unconditional path insert also shadows an installed copy with whatever is in the
-# source tree. Both are fixed by the same change: src/oroscope/ as a real package, and
-# `import oroscope` here with this deleted rather than made conditional. Roadmap 6.33.
-PREAMBLE = """import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
-
-import numpy as np
+# This used to be a sys.path insert pointing at src/, because the modules were flat and
+# there was no package to import. Worse than ugly: an unconditional insert shadows an
+# installed copy with whatever happens to be in the source tree. Both went with the
+# package (roadmap 6.33); `pip install -e .` from a clone is now the only setup step.
+PREAMBLE = """import numpy as np
 import matplotlib.pyplot as plt
 """
 
 # Notebooks 7 and 8 draw nothing -- tables and prose -- so they must not import pyplot.
 # `ruff check .` lints notebooks, and an unused import there fails CI like any other.
-PREAMBLE_NO_PLOT = """import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
-
-import numpy as np
+PREAMBLE_NO_PLOT = """import numpy as np
 """
 
 FOOTER = """---
@@ -99,15 +87,13 @@ differ in their *numbers*, not in their *structure*.
 This notebook builds a piece of terrain, scans it, and reads the result. Nothing here
 needs a real DEM."""),
 ("code", PREAMBLE + """
-import arrival_scan
-import site_searcher as ss
+import oroscope
 
-print("modules loaded")"""),
-("md", """> **A note on the import above.** The notebooks put `../src` on the path rather than
-> importing an installed package. That is so they run in a fresh clone, but it is
-> temporary: at the release this becomes `import oroscope`, and the path insert goes.
-> Don't copy the pattern into your own code — `pip install oroscope` and import the
-> modules directly.
+print(f"oroscope {oroscope.__version__}")"""),
+("md", """> **One import.** `import oroscope` is the whole setup — every function these notebooks
+> use is on it, and the submodules stay available when a narrower namespace reads better
+> (`from oroscope import physics`). Install it first, with `pip install oroscope`, or
+> `pip install -e .` from a clone.
 
 ## A piece of terrain
 
@@ -119,7 +105,7 @@ cell_deg = 1 / 3600.0        # 1 arc-second, as SRTM and AW3D30 supply
 
 # Metric pixel sizes differ on each axis away from the equator, because a degree of
 # longitude shrinks with the cosine of the latitude. resolve_grid_geometry does that.
-grid = ss.resolve_grid_geometry("no-such-file.tif", -15.6, cell_size_deg=cell_deg)
+grid = oroscope.resolve_grid_geometry("no-such-file.tif", -15.6, cell_size_deg=cell_deg)
 print(f"pixel: {grid.cell_size_y:.1f} m north-south, {grid.cell_size_x:.1f} m east-west")
 print(f"resolution source: {grid.source}")
 
@@ -132,9 +118,9 @@ z = (2000.0 + 1200.0 * np.exp(-((x_m - 6500.0) / 700.0) ** 2)).astype(np.float32
 fig, ax = plt.subplots(figsize=(7, 2.6))
 ax.plot(x_m / 1000, z[0], color="#7A6A4F")
 ax.fill_between(x_m[0] / 1000, 1900, z[0], color="#D9CDB8")
-ax.set_xlabel("east (km)")
-ax.set_ylabel("elevation (m)")
-ax.set_title("a ridge to look at")
+ax.set_xlabel("East (km)")
+ax.set_ylabel("Elevation (m)")
+ax.set_title("A ridge to look at")
 ax.set_ylim(1900, 3400)
 ax.spines[["top", "right"]].set_visible(False)
 plt.show()"""),
@@ -146,7 +132,7 @@ The aspect is the downhill direction, and the scan fans its azimuths around it.
 Put a detector on the plain west of the ridge, facing east."""),
 ("code", """candidate = np.array([[200.0, 60.0, 90.0]])     # row, col, aspect: due east
 
-out = arrival_scan.scan(
+out = oroscope.scan(
     candidate, z, grid,
     n_azimuths=1, half_width_deg=0.0, use_aspect=True,   # look along the aspect only
     elev_min_deg=-3.0, elev_max_deg=3.0, n_elev_bins=12,
@@ -176,10 +162,10 @@ Move the detector and the accepted geometry changes. The scan only accepts a dir
 whose first intersection falls inside the distance window."""),
 ("code", """for col in (20, 60, 120, 180):
     cand = np.array([[200.0, float(col), 90.0]])
-    r = arrival_scan.scan(cand, z, grid, n_azimuths=1, half_width_deg=0.0,
-                          use_aspect=True, elev_min_deg=-3.0, elev_max_deg=3.0,
-                          n_elev_bins=12, min_dist_km=1.0, max_dist_km=10.0,
-                          max_range_m=10000.0)
+    r = oroscope.scan(cand, z, grid, n_azimuths=1, half_width_deg=0.0,
+                      use_aspect=True, elev_min_deg=-3.0, elev_max_deg=3.0,
+                      n_elev_bins=12, min_dist_km=1.0, max_dist_km=10.0,
+                      max_range_m=10000.0)
     gap_km = (6500.0 - col * grid.cell_size_x) / 1000.0
     print(f"col {col:>4}  {gap_km:5.2f} km from the ridge   "
           f"cells {int(r['cells'][0]):>3}   Omega {r['solid_angle_sr'][0]:.3f} sr   "
@@ -208,9 +194,9 @@ Trace a ray **backwards** from a candidate along an arrival direction — azimut
 elevation θ. Rays above the local horizon escape to the sky. Rays below it strike
 terrain, and that first intersection is where the tau left the rock."""),
 ("code", PREAMBLE + """
-import arrival_scan
-import figures
-import site_searcher as ss
+from oroscope import arrival_scan
+from oroscope import figures
+from oroscope import site_searcher as ss
 
 grid = ss.resolve_grid_geometry("no-such-file.tif", -15.6, cell_size_deg=1/3600)"""),
 ("md", """## One walk fills every elevation bin
@@ -328,8 +314,8 @@ neutrino crossed, how far a tau travels before it decays.
 
 It is usable entirely on its own, which is the point of this notebook."""),
 ("code", PREAMBLE + """
-import physics
-import figures"""),
+from oroscope import physics
+from oroscope import figures"""),
 ("md", """## The tau decay length
 
 $L = (E/m_\\tau)\\,c\\tau$. This sets the scale of every useful detector-to-target
@@ -372,8 +358,8 @@ for e, c in ((3.0, "#C8901A"), (55.0, "#B02A25"), (1000.0, "#7B2D6B")):
 ax.axvspan(170, 390, color="#2C6E8F", alpha=0.12, lw=0)
 ax.text(280, 0.92, "what a Colca\\ncrossing supplies", ha="center", fontsize=8,
         color="#2C6E8F")
-ax.set_xlabel("atmospheric depth traversed (g/cm$^2$)")
-ax.set_ylabel("particle content / peak")
+ax.set_xlabel("Atmospheric depth traversed (g/cm$^2$)")
+ax.set_ylabel("Particle content / peak")
 ax.legend(frameon=False, fontsize=8)
 ax.spines[["top", "right"]].set_visible(False)
 plt.show()
@@ -436,7 +422,7 @@ ramp — and the components are composed into one number.
 This notebook covers the shapes, the composition, and **two traps that are easy to fall
 into and hard to notice**."""),
 ("code", PREAMBLE + """
-import scoring"""),
+from oroscope import scoring"""),
 ("md", """## The three shapes"""),
 ("code", """x = np.linspace(0, 20, 400)
 fig, axes = plt.subplots(1, 3, figsize=(10, 2.7))
@@ -474,8 +460,8 @@ for half, c, lbl in ((0.05, "#B02A25", "0.05 sr (GRAND default)"),
     ax.plot(omega, scoring.saturating_score(omega, half), color=c, label=lbl)
 ax.axvspan(0.2, 1.5, color="#999", alpha=0.15, lw=0)
 ax.text(0.85, 0.25, "range actually observed\\nacross a canyon", ha="center", fontsize=8)
-ax.set_xlabel("accepted solid angle (sr)")
-ax.set_ylabel("score")
+ax.set_xlabel("Accepted solid angle (sr)")
+ax.set_ylabel("Score")
 ax.legend(frameon=False, fontsize=8, loc="lower right")
 ax.spines[["top", "right"]].set_visible(False)
 plt.show()
@@ -497,7 +483,7 @@ for ax, mode in zip(axes, ("product", "mean")):
     total = scoring.compose(parts, mode)
     ax.hist(total, bins=60, color="#2C6E8F", alpha=0.75)
     ax.set_title(f"composition = '{mode}'", fontsize=9)
-    ax.set_xlabel("score")
+    ax.set_xlabel("Score")
     ax.set_xlim(0, 1)
     ax.spines[["top", "right"]].set_visible(False)
 plt.tight_layout()
@@ -545,9 +531,9 @@ The claim this project rests on is that GRAND and TAMBO ask the **same structura
 question** and differ only in their numbers. This notebook shows what those numbers are
 and why each one is what it is."""),
 ("code", PREAMBLE + """
-import arrival_scan
-import figures
-import site_searcher as ss
+from oroscope import arrival_scan
+from oroscope import figures
+from oroscope import site_searcher as ss
 
 grid = ss.resolve_grid_geometry("no-such-file.tif", -15.6, cell_size_deg=1/3600)"""),
 ("md", """## What differs
@@ -657,15 +643,9 @@ Two things that matter once a search produces numbers someone might act on: **wh
 experiments can share ground**, and **how much the answer depends on assumptions**.
 
 The second is the more important, and it is the one most easily skipped."""),
-("code", """import os
-import sys
+("code", """import numpy as np
 
-sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
-
-import numpy as np
-
-import combine_experiments as combine
-import physics"""),
+from oroscope import combine_experiments as combine, physics"""),
 ("md", """## Combining is an overlay, and alignment is not optional
 
 Each experiment is one run of the searcher with its own configuration, so combining them
@@ -821,10 +801,10 @@ Three things are worth knowing before the first call:
 ("code", PREAMBLE_NO_PLOT + """
 import contextlib
 import io
+import os
 import tempfile
 
-import explain
-import site_searcher as ss
+from oroscope import explain, site_searcher as ss
 
 WORK = tempfile.mkdtemp(prefix="oroscope_nb07_")
 print("working in", WORK)"""),
@@ -1143,11 +1123,8 @@ what it says. This one is about one specific run, at a scale the crops cannot sp
 for."""),
 ("code", """import json
 import os
-import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
-
-import explain"""),
+from oroscope import explain"""),
 ("md", """**Read, not run.** The cells below open results that were produced locally and stored in
 `results/arequipa_full/`. They do not start a search. Each of these searches takes about
 half an hour, CI executes notebooks on every push, and a tutorial costing ninety minutes

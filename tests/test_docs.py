@@ -17,7 +17,7 @@ from contextlib import redirect_stdout
 
 from _support import REPO_ROOT  # noqa: F401  (also sets up sys.path)
 
-import site_searcher as ss
+from oroscope import site_searcher as ss
 
 
 def cli_flags():
@@ -50,35 +50,62 @@ def read(*parts):
         return f.read()
 
 
-class TestReadmeDocumentsTheCli(unittest.TestCase):
-    """The option tables are the reference; drift in either direction is a defect."""
+class TestTheCliPageDocumentsTheCli(unittest.TestCase):
+    """
+    ``docs/source/cli.rst`` is the canonical option reference; drift in either
+    direction is a defect. It moved there from the README, which is now
+    library-first — but the reference still has to be complete wherever it lives.
+    """
 
     @classmethod
     def setUpClass(cls):
         cls.flags = cli_flags()
-        cls.readme = read("README.md")
-        cls.documented = set(re.findall(r"`(--[a-z_0-9]+)`", cls.readme))
+        cls.page = read("docs", "source", "cli.rst")
+        cls.documented = set(re.findall(r"``(--[a-z_0-9]+)``", cls.page))
 
     def test_every_option_is_documented(self):
         missing = sorted(self.flags - self.documented)
-        self.assertEqual(missing, [], f"README does not document: {missing}")
+        self.assertEqual(missing, [], f"cli.rst does not document: {missing}")
+
+    # Options belonging to the other console scripts and to the repository's own
+    # full-DEM runner, which this page documents too.
+    OTHER_TOOLS = {"--only", "--dry-run", "--north", "--south", "--west", "--east",
+                   "--labels", "--out", "--mode", "--require", "--no_image", "--sweep",
+                   "--keep_runs", "--open_topography_api_key"}
 
     def test_no_option_is_documented_that_does_not_exist(self):
         """``--fresnel_buffer`` outlived the code by some months."""
-        phantom = sorted(self.documented - self.flags)
-        self.assertEqual(phantom, [], f"README documents non-existent flags: {phantom}")
+        phantom = sorted(self.documented - self.flags - self.OTHER_TOOLS)
+        self.assertEqual(phantom, [], f"cli.rst documents non-existent flags: {phantom}")
+
+    def test_the_option_table_carries_types_and_defaults(self):
+        """A reference without defaults sends the reader to the source anyway."""
+        self.assertIn("- Default", self.page)
+        self.assertIn("- What it does", self.page)
 
     def test_the_precedence_order_is_stated_the_way_the_code_resolves_it(self):
         """
         The command line wins. It used to lose to the config file, silently, and the
-        README described the losing behaviour long after it was fixed.
+        documentation described the losing behaviour long after it was fixed.
         """
-        section = self.readme[self.readme.index("## 4."):]
-        section = section[:section.index("### Complete List")]
-        cli = section.lower().index("command line")
-        config = section.lower().index("config file")
+        section = self.page[self.page.index("Where things are resolved from"):]
+        cli = section.lower().index("option you actually typed")
+        config = section.lower().index("configuration file")
         self.assertLess(cli, config,
-                        "the README must state that the command line beats the config")
+                        "the page must state that a typed option beats the config")
+
+    def test_the_readme_leads_with_code_rather_than_the_command_line(self):
+        """
+        Most people use this as a library, so the README's first example should be a
+        call rather than a shell line.
+        """
+        readme = read("README.md")
+        body = readme[readme.index("# Oroscope"):]
+        first_python = body.index("```python")
+        first_usage = body.index("oroscope --config_path")
+        self.assertLess(first_python, first_usage,
+                        "the README should show a call before a command line "
+                        "(a `pip install` line before either is fine)")
 
 
 class TestEveryModuleIntroducesItself(unittest.TestCase):
@@ -88,23 +115,27 @@ class TestEveryModuleIntroducesItself(unittest.TestCase):
     bare list of functions to the published API reference.
     """
 
-    MODULES = ("site_searcher", "arrival_scan", "physics", "scoring", "aperture",
-               "explain", "combine_experiments", "crop_dem", "sensitivity",
-               "figures", "fetch_dem", "generate_env")
+    MODULES = ("oroscope", "oroscope.site_searcher", "oroscope.arrival_scan",
+               "oroscope.physics", "oroscope.scoring", "oroscope.aperture",
+               "oroscope.explain", "oroscope.combine_experiments",
+               "oroscope.crop_dem", "oroscope.sensitivity", "oroscope.figures",
+               "oroscope.fetch_dem", "oroscope.generate_env")
 
     def test_all_modules_have_a_docstring(self):
+        import importlib
         bare = []
         for name in self.MODULES:
-            module = __import__(name)
+            module = importlib.import_module(name)
             if not (module.__doc__ or "").strip():
                 bare.append(name)
         self.assertEqual(bare, [], f"modules with no docstring: {bare}")
 
     def test_the_docstrings_say_something(self):
         """A one-word docstring satisfies the check above and helps nobody."""
+        import importlib
         thin = []
         for name in self.MODULES:
-            module = __import__(name)
+            module = importlib.import_module(name)
             if len((module.__doc__ or "").split()) < 8:
                 thin.append(name)
         self.assertEqual(thin, [], f"modules with a near-empty docstring: {thin}")
@@ -136,7 +167,7 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
                          f"notebooks call site_searcher names that do not exist: {missing}")
 
     def test_every_explain_name_exists(self):
-        import explain
+        from oroscope import explain
         missing = sorted(n for n in self.attributes("explain") if not hasattr(explain, n))
         self.assertEqual(missing, [],
                          f"notebooks call explain names that do not exist: {missing}")
@@ -170,7 +201,7 @@ class TestTheDocumentedPublicSurfaceIsReal(unittest.TestCase):
                                                f"which does not exist")
 
     def test_explain_all_exists(self):
-        import explain
+        from oroscope import explain
         for name in explain.__all__:
             self.assertTrue(hasattr(explain, name), f"explain.__all__ names {name}")
 

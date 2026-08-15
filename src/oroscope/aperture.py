@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import arrival_scan
+from oroscope import arrival_scan
 
 __all__ = ["unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
            "aperture_vs_energy", "peak_energy_pev", "infer_response",
@@ -53,7 +53,7 @@ def unit_response(energy_pev: float | np.ndarray) -> np.ndarray:
 
     Examples
     --------
-    >>> import aperture
+    >>> from oroscope import aperture
     >>> aperture.unit_response([1.0, 10.0]).tolist()
     [1.0, 1.0]
     """
@@ -85,7 +85,7 @@ class TabulatedResponse:
 
     Examples
     --------
-    >>> import aperture
+    >>> from oroscope import aperture
     >>> r = aperture.TabulatedResponse([1.0, 10.0, 100.0], [0.1, 1.0, 0.5])
     >>> round(float(r(10.0)), 3)
     1.0
@@ -150,7 +150,7 @@ def geometric_aperture_m2sr(area_km2: float | np.ndarray,
 
     Examples
     --------
-    >>> import aperture
+    >>> from oroscope import aperture
     >>> f"{float(aperture.geometric_aperture_m2sr(100.0, 0.5)):.2e}"
     '5.00e+07'
     """
@@ -192,7 +192,8 @@ def aperture_vs_energy(area_km2: float, solid_angle_sr: float, min_dist_m: float
 
     Examples
     --------
-    >>> import numpy as np, aperture
+    >>> import numpy as np
+    >>> from oroscope import aperture
     >>> a = aperture.aperture_vs_energy(100.0, 0.5, 1.0e4, 8.0e4, [1.0, 100.0])
     >>> bool(a[1] > a[0])          # a long baseline favours higher energies
     True
@@ -227,7 +228,7 @@ def peak_energy_pev(min_dist_m: float, max_dist_m: float,
 
     Examples
     --------
-    >>> import aperture
+    >>> from oroscope import aperture
     >>> near = aperture.peak_energy_pev(1.0e3, 5.0e3)
     >>> far = aperture.peak_energy_pev(1.0e4, 8.0e4)
     >>> bool(far > near)           # longer baselines peak at higher energy

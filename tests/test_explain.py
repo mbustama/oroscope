@@ -21,8 +21,8 @@ import unittest
 from _support import quiet, run_pipeline   # noqa: F401  (also sets up sys.path)
 import synthetic
 
-import explain
-import site_searcher as ss
+from oroscope import explain
+from oroscope import site_searcher as ss
 
 ORIGIN_LAT, ORIGIN_LON = -15.6, -72.3
 
@@ -522,7 +522,7 @@ class TestExplainIsWiredIntoThePipeline(unittest.TestCase):
         up must be the area of the raster the run actually wrote -- that raster is
         what `oroscope-combine` measures and what anyone opens in a GIS.
         """
-        import combine_experiments as ce
+        from oroscope import combine_experiments as ce
         for label, kw in (("plain", {}),
                           ("stop_at_target", dict(stop_at_target=True,
                                                   target_antennas=50,

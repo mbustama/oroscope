@@ -322,7 +322,7 @@ result exactly, at every tile size, with and without a slope baseline.
 
 *Supersedes the original §4.2 sweep plan, §4.5 column depth and §4.2 engine geometry.*
 
-`src/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
+`src/oroscope/arrival_scan.py`, with 25 tests against terrain whose answer is known in closed
 form. Not yet wired into the pipeline — that is the next step.
 
 For each candidate and azimuth, one profile walk yields **every elevation bin at
@@ -487,7 +487,7 @@ this tool does not model.
 
 ### 4.8 Scores ✅ delivered
 
-`src/scoring.py`. Every component returns [0, 1] with a documented shape, and the
+`src/oroscope/scoring.py`. Every component returns [0, 1] with a documented shape, and the
 components are reported separately so a site's weakness can be attributed rather than
 disappearing into one opaque number.
 
@@ -517,7 +517,7 @@ without pretending to encode physics the tool has not been given.
 
 ### 4.9 Validation ✅ delivered, within what is checkable
 
-`src/aperture.py` separates the estimate into three parts: the **geometric aperture**
+`src/oroscope/aperture.py` separates the estimate into three parts: the **geometric aperture**
 (area × solid angle, fully determined by terrain), the **analytic decay factor**
 (`exp(-d_min/L) - exp(-d_max/L)`, no free parameters), and a **pluggable response**
 defaulting to unity, replaceable by a table via `TabulatedResponse`. Under that split
@@ -578,7 +578,7 @@ Effect at 25 km is small (median column depth 1.989e6 → 1.981e6 g/cm², accept
 ### 4.12 Physics accounted for ✅ delivered
 
 The sweep of §4.12 below identified seven omissions; six are now implemented in
-`src/physics.py` and the scan kernel, with 44 tests. All the analytic pieces are
+`src/oroscope/physics.py` and the scan kernel, with 44 tests. All the analytic pieces are
 closed-form and checkable by hand, which is why they live apart from the terrain code.
 
 **Measured on the Arequipa crop** (4335 m median site altitude, 10.1 km median
@@ -1503,7 +1503,7 @@ that made the old merge unfixable — a typed value that equals the default.
 
 ### 6.20 Sensitivity of the TAMBO result ⚠️ the result is not robust
 
-`src/sensitivity.py` varies one parameter at a time about the Colca baseline. The
+`src/oroscope/sensitivity.py` varies one parameter at a time about the Colca baseline. The
 answer is that **2056 detector positions is not a number to quote.** Every criterion
 sits near a cliff:
 
@@ -1932,46 +1932,49 @@ or to give the signature no defaults at all for these five and require them expl
 Until then the safe habit, and the one notebook 7 teaches, is to start from
 `ss.default_config()` and override.
 
-### 6.33 ⚠️ Open, for the release: a package, not a path insert
+### 6.33 A package, not a path insert ✅ delivered
 
-Every notebook opens with
+Every notebook used to open with ``sys.path.insert(0, '../src')`` and then
+`import site_searcher`, `import physics`, `import explain`. That worked in a clone, and
+it was the wrong thing to teach: an unconditional path insert *shadows* an installed
+copy with whatever happens to be in the source tree, and the layout underneath it was
+flat — ten top-level `py-modules`, so there was no `import oroscope` to write and a
+dozen generic names like `physics` and `explain` landed on any installing user's path.
+
+`src/oroscope/` is a real package now. `__init__.py` re-exports the whole public
+surface — **131 names** — so `import oroscope` is the only setup step, while the
+submodules stay importable when a narrower namespace reads better:
 
 ```python
-sys.path.insert(0, os.path.abspath(os.path.join('..', 'src')))
+import oroscope
+results = oroscope.find_grand_regions_interactive(...)
+print(oroscope.explain_results(results))
+
+from oroscope import physics          # when that reads better
 ```
 
-and then `import site_searcher`, `import physics`, `import explain`. That works, and it
-is deliberate — the notebooks run in a clone that has never been installed — but it is
-the wrong thing to teach once the package is on PyPI, and worse, an unconditional path
-insert *shadows* an installed copy with whatever happens to be in the source tree.
+The move touched the intra-package imports (11 of them), `pyproject.toml`'s
+`packages`/entry points/coverage source, every test, the notebooks' preamble, the
+documentation examples, and **67 docstring examples**, which are executed by
+`test_doctests` and so failed loudly until each said where its module came from.
 
-The layout underneath it is flat: `pyproject.toml` declares ten top-level `py-modules`
-rather than a package, so there is no `import oroscope` and no namespace. That was the
-right call while the module names were still moving; it is the wrong one to publish.
+**One real defect fell out of it, and it is the interesting part.** `import oroscope`
+imports `combine_experiments`, which called `matplotlib.use("Agg")` at module level.
+Harmless while it was a standalone module someone imported deliberately; not harmless
+as a package front door, where it reached into every caller's session and overrode the
+inline backend — so notebooks captured no figures at all. Trap 3, one level up from
+where it bit twice before. The backend is chosen in `main()` now, where the command
+line actually needs it. **A library must not decide how its user's figures are
+rendered.** The same applied to `sensitivity`, which set `MPLBACKEND` at import for the
+benefit of its subprocesses.
 
-**What the release should look like:**
-
-- `src/oroscope/` as a real package, with `__init__.py` re-exporting the surface people
-  actually use — `find_grand_regions_interactive`, `load_config`, `default_config`,
-  `explain_results`, `crop`, and the physics helpers.
-- `import oroscope` in every notebook and every documentation example, with the
-  `sys.path` insert deleted rather than made conditional.
-- The internal imports updated (`import physics` → `from . import physics`), which is
-  mechanical but touches every module and both test suites.
-
-**Not done now**, because it is a rename across the whole tree and this branch has
-already changed a great deal; doing it in its own commit, against a green suite, is how
-it should happen. Until then the path insert stays, and the notebooks say why.
-
-Two smaller things belong in the same release pass: the README is also the PyPI
-`long_description`, so its logo uses an absolute raw URL rather than a relative path —
-and **PyPI does not render SVG at all**, so a PNG of the logo will be needed for the
-project page even though GitHub and Sphinx are happy with the vector.
+Still open for the release: PyPI does not render SVG, so the project page will need a
+PNG of the logo even though GitHub and Sphinx are happy with the vector.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
-matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/fetch_dem.py`), which is not a packaging
+matching current configs to ~1e-4°); ~~rename `src/setup.py`~~ (done: `src/oroscope/fetch_dem.py`), which is not a packaging
 file and whose name hijacks `pip install`; real packaging; rasterio/pyproj for CRS and
 outputs; ~~`--explain` funnel report~~ (done, §6.23); parameter sweeps.
 

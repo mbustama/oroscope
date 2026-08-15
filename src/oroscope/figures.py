@@ -13,7 +13,7 @@ else's plots.
 
 Examples
 --------
->>> import figures
+>>> from oroscope import figures
 >>> fig = figures.walk_mechanism()
 >>> fig.savefig("walk.pdf", bbox_inches="tight")   # doctest: +SKIP
 """
@@ -27,6 +27,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 __all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower"]
+
+# House style for anything a reader sees on a figure: **the first word of every axis
+# label, title, legend entry and annotation is capitalised.** Applies to the notebooks
+# and to the maps the pipeline writes, not only to this module. Units stay as they are
+# ("Elevation (km)", not "Elevation (KM)"), and a label that starts with a function
+# name or a symbol is left alone -- `band_score(x, 6, 14)` and `$d$` are code and
+# mathematics, not prose.
 
 # A restrained palette, fixed here so every figure in a set matches.
 INK, MUTED, RULE = "#1A1A1A", "#6B6B6B", "#C9CCC8"
@@ -108,7 +115,7 @@ def walk_mechanism(earth_radius_km=6371.0, detector_elevation_km=1.05,
 
     Examples
     --------
-    >>> import figures
+    >>> from oroscope import figures
     >>> fig = figures.walk_mechanism()
     >>> len(fig.axes)
     2
@@ -149,8 +156,8 @@ def walk_mechanism(earth_radius_km=6371.0, detector_elevation_km=1.05,
         ax0.text(1.6, z0 + 0.30, "detector", color=DETECTOR, fontsize=9, weight="bold")
         ax0.text(46, 2.72, "first terrain met, per elevation bin",
                  fontsize=8.4, color=INK, ha="center")
-        ax0.set_xlabel("ground distance  $d$  (km)")
-        ax0.set_ylabel("elevation (km)")
+        ax0.set_xlabel("Ground distance  $d$  (km)")
+        ax0.set_ylabel("Elevation (km)")
         ax0.set_title("(a)  one profile walk", loc="left", weight="bold")
         ax0.set_xlim(0, 90)
         ax0.set_ylim(-0.35, 3.0)
@@ -169,7 +176,7 @@ def walk_mechanism(earth_radius_km=6371.0, detector_elevation_km=1.05,
         ax1.plot(d[keep], theta[keep], color=MUTED, lw=0.85, zorder=2,
                  label=r"$\theta_{\rm terrain}(d)$")
         ax1.plot(d[keep], running[keep], color=INK, lw=1.9, zorder=3,
-                 label="running maximum")
+                 label="Running maximum")
         for edge, i, colour in zip(edges, first, SEQUENCE):
             ax1.axhline(edge, color=colour, lw=0.8, ls=(0, (4, 3)), zorder=1)
             ax1.plot(d[i], edge, "o", color=colour, ms=5.0, zorder=5,
@@ -179,13 +186,13 @@ def walk_mechanism(earth_radius_km=6371.0, detector_elevation_km=1.05,
                                          alpha=0.5))
         ax1.text(88, edges[-1] + 0.10, "accepted elevation window", ha="right",
                  va="bottom", fontsize=8.2, color=WINDOW)
-        ax1.annotate("each new maximum claims\nthe bins it has risen past",
+        ax1.annotate("Each new maximum claims\nthe bins it has risen past",
                      (d[first[2]], running[first[2]]), (41, -0.55), fontsize=8.4,
                      color=INK, ha="left",
                      arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.8,
                                      connectionstyle="arc3,rad=0.25"))
-        ax1.set_xlabel("ground distance  $d$  (km)")
-        ax1.set_ylabel("apparent elevation angle  (deg)")
+        ax1.set_xlabel("Ground distance  $d$  (km)")
+        ax1.set_ylabel("Apparent elevation angle  (deg)")
         ax1.set_title("(b)  why it fills every bin at once", loc="left", weight="bold")
         ax1.set_xlim(6, 90)
         ax1.set_ylim(-2.05, 1.95)
@@ -229,7 +236,7 @@ def canyon_geometry(depth_m=1500.0, floor_width_m=1000.0, wall_slope_deg=40.6,
 
     Examples
     --------
-    >>> import figures
+    >>> from oroscope import figures
     >>> fig = figures.canyon_geometry()
     >>> round(fig.get_figwidth(), 1)
     7.6
@@ -265,12 +272,12 @@ def canyon_geometry(depth_m=1500.0, floor_width_m=1000.0, wall_slope_deg=40.6,
 
         ax.plot(x_det, z_det, "^", color=DETECTOR, ms=11, zorder=6, mec="white", mew=0.9)
         # Every label sits in the void or outside the rock, so nothing overlaps a ray
-        ax.annotate("array on the near wall\n(must be deployable)", (x_det, z_det),
+        ax.annotate("Array on the near wall\n(must be deployable)", (x_det, z_det),
                     (-rim * 1.30, depth_m * 1.13), fontsize=8.4,
                     color=DETECTOR, ha="left", va="center",
                     arrowprops=dict(arrowstyle="->", color=DETECTOR, lw=0.9,
                                     connectionstyle="arc3,rad=0.25"))
-        ax.annotate("far wall:\nwhere the tau exits\n(must be steep)",
+        ax.annotate("Far wall:\nwhere the tau exits\n(must be steep)",
                     (targets[-1], float(np.interp(targets[-1], x, z))),
                     (rim * 0.98, depth_m * 0.52), fontsize=8.4, color=INK, ha="right",
                     va="center",
@@ -285,8 +292,8 @@ def canyon_geometry(depth_m=1500.0, floor_width_m=1000.0, wall_slope_deg=40.6,
                 f"to {hi:+.0f}$\\degree$",
                 ha="center", fontsize=8.6, color=WINDOW, weight="bold")
 
-        ax.set_xlabel("horizontal distance (m)")
-        ax.set_ylabel("elevation above the valley floor (m)")
+        ax.set_xlabel("Horizontal distance (m)")
+        ax.set_ylabel("Elevation above the valley floor (m)")
         ax.set_title(f"Across a canyon: {wall_slope_deg:.0f}$\\degree$ walls, "
                      f"{depth_m / 1000:.1f} km deep, drawn to scale",
                      loc="left", weight="bold")
@@ -324,12 +331,12 @@ def decay_and_shower(energies_pev=(3.0, 10.0, 55.0, 100.0, 1000.0),
 
     Examples
     --------
-    >>> import figures
+    >>> from oroscope import figures
     >>> fig = figures.decay_and_shower()
     >>> len(fig.axes)
     1
     """
-    import physics
+    from oroscope import physics
 
     grid = np.logspace(np.log10(1.0), np.log10(3000.0), 400)
     lengths = np.array([physics.tau_decay_length_m(e) for e in grid])
@@ -349,7 +356,7 @@ def decay_and_shower(energies_pev=(3.0, 10.0, 55.0, 100.0, 1000.0),
         ax.axvspan(3.0, 1000.0, color=MUTED, alpha=0.07, lw=0, zorder=0)
         ax.text(55, 1.04, "TAMBO's energy reach", ha="center", fontsize=8.4,
                 color=MUTED)
-        ax.set_xlabel("tau energy (PeV)")
+        ax.set_xlabel("Tau energy (PeV)")
         ax.set_ylabel(f"P(decays within {crossing_m / 1000:.0f} km)")
         ax.set_title("A single energy cannot stand in for a spectrum",
                      loc="left", weight="bold")

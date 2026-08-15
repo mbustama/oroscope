@@ -42,7 +42,7 @@ Tracing backwards from the detector
 .. jupyter-execute::
    :hide-code:
 
-   import figures
+   from oroscope import figures
    _ = figures.walk_mechanism()
 
 
@@ -122,18 +122,19 @@ resolution.
 
 .. jupyter-execute::
 
-   import physics, numpy as np
+   import numpy as np
+   from oroscope import physics
 
    # Slope enters the screen as a band on the squared gradient, which needs neither
    # a square root nor an arctangent
-   import site_searcher as ss
+   from oroscope import site_searcher as ss
    lo, hi = ss.slope_band_gradient_sq(3.0, 25.0)
    print(f"3-25 deg is  {lo:.4f} <= dx^2+dy^2 <= {hi:.4f}")
 
 .. jupyter-execute::
    :hide-code:
 
-   import figures
+   from oroscope import figures
    _ = figures.canyon_geometry()
 
 The band is **per experiment, and probably per role**. GRAND wants ground it can
@@ -191,7 +192,7 @@ The band follows from the primary energy through the shower profile:
 
 .. jupyter-execute::
 
-   import physics
+   from oroscope import physics
 
    for e in (3.0, 55.0, 1000.0):
        print(f"{e:>7.0f} PeV:  X_max = {float(physics.shower_maximum_gcm2(e)):.0f} g/cm^2")
@@ -218,7 +219,8 @@ decay length,
 
 .. jupyter-execute::
 
-   import physics, math
+   import math
+   from oroscope import physics
 
    for e in (3.0, 55.0, 100.0, 1000.0):
        L = physics.tau_decay_length_m(e)
@@ -228,7 +230,7 @@ decay length,
 .. jupyter-execute::
    :hide-code:
 
-   import figures
+   from oroscope import figures
    _ = figures.decay_and_shower()
 
 For GRAND this is largely implicit, because its distance window is *derived* from the
@@ -268,7 +270,7 @@ range, which is the honest form when the index is not known.
 
 .. jupyter-execute::
 
-   import physics
+   from oroscope import physics
 
    pinned = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, 2.0)
    spread = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0, (1.5, 2.7))
@@ -355,7 +357,8 @@ asked — 7.4% high at 1 km spacing and 58% at 100 m.
 
 .. jupyter-execute::
 
-   import numpy as np, site_searcher as ss
+   import numpy as np
+   from oroscope import site_searcher as ss
 
    # 3 km x 3 km of usable ground, 30 m pixels, 1 km triangular spacing
    mask = np.ones((100, 100), dtype=bool)

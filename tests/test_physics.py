@@ -11,8 +11,8 @@ import unittest
 import numpy as np
 
 import _support  # noqa: F401  (path setup)
-import arrival_scan as scan_mod
-import physics
+from oroscope import arrival_scan as scan_mod
+from oroscope import physics
 import synthetic
 from _support import ss
 
@@ -391,7 +391,7 @@ class TestShowerMaturityIsAThresholdForRadio(unittest.TestCase):
                     path_grammage_gcm2=np.array([float(grammage)]))
 
     def shower_score(self, grammage, mode="radio"):
-        import scoring
+        from oroscope import scoring
         _, comps = scoring.score_candidates(self.observables(grammage),
                                             {"grammage_mode": mode})
         return float(comps["shower"][0])

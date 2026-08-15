@@ -146,17 +146,17 @@ images are actually produced**, don't trust a green build.
 
 | path | what |
 | --- | --- |
-| `src/site_searcher.py` | 3875 lines. Pipeline, CLI, config files, screening, morphology, capacity, outputs, memory guards. |
-| `src/arrival_scan.py` | The scan kernel: profile walking, column depth, Fresnel, RFI line-of-sight. Numba. |
-| `src/physics.py` | Closed-form physics, no terrain: atmosphere, shower profile, Earth chord, tau range and decay, geomagnetic, Cherenkov. |
-| `src/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
-| `src/explain.py` | The run summary: binding constraint, per-site attribution, closing factor, assumptions. Pure function of the results dict. |
-| `src/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
-| `src/combine_experiments.py` | Overlays two or more runs: joint, union, co-location. |
-| `src/crop_dem.py` | Cuts a lat/lon window out of a DEM. |
-| `src/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
-| `src/figures.py` | The publication figures, as functions returning `Figure`. |
-| `src/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
+| `src/oroscope/site_searcher.py` | 3875 lines. Pipeline, CLI, config files, screening, morphology, capacity, outputs, memory guards. |
+| `src/oroscope/arrival_scan.py` | The scan kernel: profile walking, column depth, Fresnel, RFI line-of-sight. Numba. |
+| `src/oroscope/physics.py` | Closed-form physics, no terrain: atmosphere, shower profile, Earth chord, tau range and decay, geomagnetic, Cherenkov. |
+| `src/oroscope/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
+| `src/oroscope/explain.py` | The run summary: binding constraint, per-site attribution, closing factor, assumptions. Pure function of the results dict. |
+| `src/oroscope/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
+| `src/oroscope/combine_experiments.py` | Overlays two or more runs: joint, union, co-location. |
+| `src/oroscope/crop_dem.py` | Cuts a lat/lon window out of a DEM. |
+| `src/oroscope/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
+| `src/oroscope/figures.py` | The publication figures, as functions returning `Figure`. |
+| `src/oroscope/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
 | `tests/` | 370 tests. `synthetic.py` builds terrain with closed-form answers. |
 | `tools/make_notebooks.py` | Generates the seven tutorials. Edit here, not the `.ipynb`. |
 | `docs/source/` | Sphinx. `physics.rst` derives the criteria; `assumptions.rst` is the blunt list of what the numbers rest on. |
@@ -247,6 +247,10 @@ traffic*, not flops.
 3. **Negative results go in `docs/ROADMAP.md`** so they are not retried.
 4. **Fixtures are verified before the code that uses them** (`tests/test_fixtures.py`).
 5. Regenerate goldens deliberately: `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
+5a. **Figure labels: capitalise the first word.** Axis labels, titles, legend entries
+   and annotations, in the notebooks and in the maps the pipeline writes. Labels that
+   begin with a function name or a symbol are left alone. The convention is stated at
+   the top of `src/oroscope/figures.py`.
 5b. **Lint the way CI does: `ruff check .`, from the repository root.** It lints the
    notebooks too, and `ruff check src/ tests/` does not — an unused `plt` import in a
    notebook that draws nothing failed CI after a local check had passed.

@@ -18,7 +18,7 @@ import pathlib
 import re
 import sys
 
-sys.path.insert(0, os.path.abspath('../../src'))
+sys.path.insert(0, os.path.abspath('../../src'))   # so `import oroscope` works uninstalled
 
 # Importing site_searcher pulls in matplotlib.pyplot, so Sphinx's own process needs a
 # non-interactive backend before autodoc imports anything.

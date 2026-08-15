@@ -203,7 +203,7 @@ def main():
 
     # Dependency check using generate_env.py
     try:
-        import generate_env
+        from oroscope import generate_env
         print(f"\n{C.HEADER}===================================================={C.RESET}")
         print(f"{C.BOLD}   DEPENDENCY CHECK{C.RESET}")
         print(f"{C.HEADER}===================================================={C.RESET}")

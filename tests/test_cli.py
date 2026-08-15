@@ -25,7 +25,7 @@ import numpy as np
 from _support import quiet  # noqa: F401  (also sets up sys.path)
 import synthetic
 
-import site_searcher as ss
+from oroscope import site_searcher as ss
 
 
 @contextlib.contextmanager

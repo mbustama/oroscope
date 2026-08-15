@@ -41,7 +41,7 @@ pip install oroscope
 ```
 
 ```python
-import site_searcher as ss, explain
+from oroscope import site_searcher as ss, explain
 
 results = ss.find_grand_regions_interactive(
     dem_path="input/dem/colca.tif", run_output_dir="output/colca",
@@ -169,7 +169,7 @@ can reach that the library cannot is a bug.
 ### Run a search
 
 ```python
-import site_searcher as ss
+from oroscope import site_searcher as ss
 
 results = ss.find_grand_regions_interactive(
     dem_path="input/dem/colca.tif",
@@ -216,7 +216,7 @@ results = ss.find_grand_regions_interactive(
 ### Read what came back
 
 ```python
-import explain
+from oroscope import explain
 
 chosen, shortlisted = explain.selected_sites(results)   # `sites` can exceed the selection
 for site in chosen:
@@ -243,7 +243,7 @@ with open("output/colca/oroscope_results_colca.json") as f:
 ### Cut a DEM, combine experiments, test an assumption
 
 ```python
-import crop_dem, combine_experiments as combine, sensitivity
+from oroscope import crop_dem, combine_experiments as combine, sensitivity
 
 info = crop_dem.crop("input/dem/arequipa_SRTMGL1.tif", "input/dem/colca.tif",
                      north=-15.30, south=-15.85, west=-72.40, east=-71.55)

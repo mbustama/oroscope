@@ -413,7 +413,7 @@ class TestMemorySafeguards(unittest.TestCase):
         code = (
             "import sys, resource; sys.path.insert(0, %r);"
             "import os; os.environ.setdefault('MPLBACKEND','Agg');"
-            "import site_searcher as ss;"
+            "from oroscope import site_searcher as ss;"
             "before = resource.getrlimit(resource.RLIMIT_AS)[0];"
             "ok = ss.apply_memory_cap(4.0);"
             "after = resource.getrlimit(resource.RLIMIT_AS)[0];"
@@ -431,7 +431,8 @@ class TestMemorySafeguards(unittest.TestCase):
         code = (
             "import sys; sys.path.insert(0, %r);"
             "import os; os.environ.setdefault('MPLBACKEND','Agg');"
-            "import numpy as np, site_searcher as ss;"
+            "import numpy as np;"
+            "from oroscope import site_searcher as ss;"
             "ss.apply_memory_cap(1.0);"
             "\ntry:\n"
             "    x = np.ones(int(4e9), dtype=np.uint8)\n"
@@ -453,7 +454,7 @@ class TestMemorySafeguards(unittest.TestCase):
         plt.close("all")
         source = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "site_searcher.py")
+            "src", "oroscope", "site_searcher.py")
         with open(source) as f:
             text = f.read()
         self.assertIn("plt.close('all')", text,

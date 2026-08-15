@@ -12,10 +12,10 @@ import unittest
 import numpy as np
 
 import _support  # noqa: F401  (path setup)
-import aperture
-import arrival_scan
-import physics
-import scoring
+from oroscope import aperture
+from oroscope import arrival_scan
+from oroscope import physics
+from oroscope import scoring
 
 
 class TestBandScore(unittest.TestCase):
