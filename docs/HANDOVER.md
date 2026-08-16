@@ -18,31 +18,50 @@ yourself — open a PR from `dev`, wait for the checks, merge — but you cannot
 
 ---
 
-## 1. The immediate task: run the full Arequipa DEM
+## 1. The full Arequipa DEM ✅ done
 
-**Every number this project has published comes from crops.** The full DEM has never
-been run. Everything it needs is in place; what is missing is about an hour and a half
-of machine time.
+**Run on 2026-08-16.** The store is populated, notebook 8 shows the real numbers, and the
+findings are in `docs/ROADMAP.md` §6.26. Headline: GRAND 88,527.5 km² in one region with
+101,948 detectors; TAMBO 111.9 km² across 26 sites spread over 310 km; joint 50.2 km²,
+which is the same 50 km² the Colca crop already had. Both experiments are bound by the
+same funnel stage the crops were, so the crops were representative — but TAMBO's
+acceptance halves at full scale (9.7% against 17.5%), which says Colca is exceptional
+canyon rather than typical.
+
+Read §6.26 before re-running anything here. What follows is how to reproduce it.
+
+**It cost 26 minutes, not ninety:** GRAND 24.2 min, TAMBO 1.2 min. TAMBO is cheap because
+its targets are 2-5 km away against GRAND's 10-40.
+
+**It needs `--max-memory-gb`.** The first attempt died 23 minutes in against the default
+cap, because the memory estimator under-predicted by 2.5×. That is fixed (§6.26a), but
+the default ceiling is still 80% of available, which is not enough on this machine when
+the desktop holds half of RAM. Pass the flag.
 
 ### 1.1 How to run it
 
 ```bash
 conda activate sssearch
 cd ~/Research/GRAND/oroscope
-python tools/run_arequipa_full.py --dry-run     # costs nothing, starts nothing
-python tools/run_arequipa_full.py               # GRAND, then TAMBO, then the combination
+python tools/run_arequipa_full.py --dry-run                  # costs nothing, starts nothing
+python tools/run_arequipa_full.py --max-memory-gb 7.0        # GRAND, TAMBO, then the combination
 ```
 
 The dry run printed this on 2026-08-16, and is the check to repeat first:
 
 ```text
 DEM:       input/dem/arequipa_SRTMGL1.tif
-estimate:  2.32 GiB at downsample_factor 4
-available: 7.2 GiB
+estimate:  5.08 GiB at downsample_factor 4
+available: 6.4 GiB
 would run: grand, tambo, then combine
-expected:  ~25-30 minutes each
+expected:  ~25 min for grand, ~1 min for tambo
 store:     results/arequipa_full
 ```
+
+**Set the cap deliberately.** 7.0 GiB worked against ~7.9 GiB free and a measured
+5.68 GiB peak. Do not pass 0 — that disables the cap and invites the OOM killer, which
+is trap 1. And note that `conda activate` may need `conda init` first; calling
+`~/anaconda3/envs/sssearch/bin/python` directly is equivalent and avoids it.
 
 `--only grand` or `--only tambo` runs one search and skips the combination, if you would
 rather do them separately.
@@ -189,6 +208,24 @@ notebook that draws nothing failed CI after a local check had passed.
 **Trap 5 — `pgrep -f "some/script.py"` matches its own command line.** A wait loop built
 on it never exits, because it is waiting for itself. Two zombie tasks this session.
 
+**Trap 6 — notebooks 7 and 8 cannot be executed locally with the repo's kernelspec.**
+The `python3` kernel registered on this machine points at `~/anaconda3/bin/python3`,
+which is base and has no `oroscope`, so `jupyter nbconvert --execute` fails with
+`ModuleNotFoundError` on the import cell. CI does not hit this because it installs the
+package into the runner's default python — and notebooks 7 and 8 are the two CI never
+executes, so nothing catches it. This appeared when the flat modules became a package
+and the notebooks' `sys.path` insert was removed. Either register a kernelspec for
+`sssearch`, or point `JUPYTER_PATH` at one:
+
+```bash
+mkdir -p /tmp/k/kernels/python3 && cat > /tmp/k/kernels/python3/kernel.json <<'JSON'
+{"argv": ["/home/mbustamante/anaconda3/envs/sssearch/bin/python", "-m",
+          "ipykernel_launcher", "-f", "{connection_file}"],
+ "display_name": "Python 3", "language": "python"}
+JSON
+cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 08_the_full_dem.ipynb
+```
+
 ---
 
 ## 4. Repo map
@@ -224,6 +261,15 @@ on it never exits, because it is waiting for itself. Two zombie tasks this sessi
 | TAMBO, Colca crop | 83.6 km² | 15 | 9717 |
 | **joint** | 50.1 km² | | Jaccard 0.0109 |
 | **union** | 4613.7 km² | | |
+| GRAND, full DEM | 88,527.5 km² | 1 | 101,948 |
+| TAMBO, full DEM | 111.9 km² | 26 | 9024 |
+| **joint, full DEM** | 50.2 km² | | Jaccard 0.0006 |
+| **union, full DEM** | 88,589.2 km² | | |
+
+The crop rows are measured at `downsample_factor: 1` and the full-DEM rows at 4, so
+**TAMBO's two areas are not commensurable** — a canyon strip loses ~30% of its area to
+downsampling while keeping its detectors. Compare the acceptance rates instead, which are
+measured on the same grid in both. §6.26 of the roadmap does this properly.
 
 **Co-location is decided by slope, not arrival geometry.** GRAND's 3–25° deployable band
 against Colca's ~40° walls leaves only a 20–25° sliver — 23% of the narrower band. What
@@ -319,7 +365,7 @@ obstacle: a pixel has one slope and both must accept it.
 **Verification**
 7. **Nothing has been checked against an external simulation.** The Earth-absorption
    prediction in §6 is the cheapest such test and is ready for someone to run.
-8. **The full Arequipa DEM.** §1. This is the immediate task.
+8. ~~**The full Arequipa DEM.**~~ ✅ done, 2026-08-16. §1 and roadmap §6.26.
 
 **Software**
 9. **A stride-1 control at TAMBO settings.** Cheap, and it settles whether TAMBO's area is

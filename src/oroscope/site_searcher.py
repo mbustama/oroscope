@@ -2286,7 +2286,8 @@ def parse_score_weights(value):
 
 
 def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
-                            survival_fraction=0.6, n_observables=12):
+                            survival_fraction=0.6, n_observables=12,
+                            n_scoring_arrays=24):
     """
     Rough estimate of the anonymous memory one search will need, in GiB.
 
@@ -2301,19 +2302,44 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     It is meant to catch the order-of-magnitude mistake -- a full DEM at
     ``downsample_factor: 1`` -- rather than to predict a number.
 
+    Notes
+    -----
+    **The peak is in the scoring, not in the scan.** This counted only the arrays
+    ``arrival_scan.scan`` returns, which is not where the high-water mark is: by the
+    time :func:`scoring.compose` runs, the scan's arrays are still live, a score
+    component has been built alongside them for each criterion, ``compose`` has clipped
+    a float64 *copy* of every component, and the composition and the scoring
+    intermediates need several more. About three times the scan's own count is live at
+    once, all of it ``n_cand`` long.
+
+    Under-counting that term is not academic: it advertised 2.32 GiB for the full
+    Arequipa DEM, which then peaked at **5.68 GiB measured RSS** and died against its
+    own cap 23 minutes in. ``n_scoring_arrays`` is calibrated on that run -- 15.1M
+    candidates, 7 components -- where the anonymous share of the peak implies ~36
+    live per-candidate arrays against the 12 this modelled.
+
+    Note also which knob moves it. ``downsample_factor`` scales only the labelling and
+    gradient terms, because candidates are taken on the *native* grid; at full-DEM
+    scale the per-candidate terms dominate, so going from 1 to 4 cuts the estimate by
+    about 1.4x rather than the 16x the inverse-square scaling suggests. To move the
+    dominant term, raise ``candidate_stride`` or crop the DEM.
+
     Parameters
     ----------
     rows, cols : int
         DEM dimensions in pixels.
     downsample_factor : int, optional
-        Factor at which sites are labelled and areas measured. This one matters most:
-        the labelling arrays scale as its inverse square.
+        Factor at which sites are labelled and areas measured. Scales the labelling
+        arrays as its inverse square, and nothing else -- see the note above.
     candidate_stride : int, optional
-        Keeps every Nth screened pixel.
+        Keeps every Nth screened pixel. Scales the dominant term directly.
     survival_fraction : float, optional
         Fraction of pixels expected to pass the topographic screen.
     n_observables : int, optional
         Per-candidate arrays the scan returns.
+    n_scoring_arrays : int, optional
+        Further per-candidate arrays live at the peak, inside ``compose``: the score
+        components, the float64 copy made of each, and the temporaries.
 
     Returns
     -------
@@ -2324,9 +2350,18 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     --------
     >>> from oroscope import site_searcher as ss
     >>> round(ss.estimate_peak_memory_gb(1981, 3061, downsample_factor=1), 2)
-    0.64
+    0.77
     >>> round(ss.estimate_peak_memory_gb(10204, 12603, downsample_factor=4), 2)
-    2.32
+    5.08
+
+    Downsampling is the weaker of the two levers at this scale, and striding the
+    stronger, because the candidates are taken on the native grid either way:
+
+    >>> round(ss.estimate_peak_memory_gb(10204, 12603, downsample_factor=1), 2)
+    7.21
+    >>> round(ss.estimate_peak_memory_gb(10204, 12603, downsample_factor=4,
+    ...                                  candidate_stride=10), 2)
+    2.83
     """
     n_pixels = float(rows) * float(cols)
     n_small = n_pixels / float(max(1, downsample_factor) ** 2)
@@ -2335,15 +2370,21 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     labelling = n_small * (1 + 4 + 2)            # mask, int32 labels, viz
     gradients = n_small * 4 * 3                  # d/dy, d/dx, aspect, float32
 
-    # Candidates and their observables, at full resolution
+    # Candidates and their observables, at full resolution. Candidates are taken on the
+    # native grid -- the stride subsamples the surviving-pixel list, not the map -- so
+    # downsample_factor does not touch these two terms at all.
     n_cand = n_pixels * survival_fraction / float(max(1, candidate_stride))
     candidates = n_cand * 3 * 8
     observables = n_cand * n_observables * 8
 
+    # The high-water mark, inside compose(): components, their clipped copies, and the
+    # temporaries, all still holding the scan's arrays above. See the notes.
+    scoring = n_cand * n_scoring_arrays * 8
+
     # Interpreter, numba, matplotlib and the tiled screening buffers
     baseline = 0.45 * 1024 ** 3
 
-    total = labelling + gradients + candidates + observables + baseline
+    total = labelling + gradients + candidates + observables + scoring + baseline
     return total / 1024 ** 3
 
 

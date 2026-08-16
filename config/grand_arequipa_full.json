@@ -39,7 +39,7 @@
     "grid_type": "hex",
     "min_width_km": 2.0,
     "search_mode": "distributed",
-    "_comment_downsample": "4, not 1. The estimator puts this DEM at 4.5 GiB of anonymous memory at 1 and 2.3 GiB at 4, against ~6 GiB typically free. Note the cost: area is measured on the downsampled mask while capacity is measured at full resolution, so a feature a few pixels wide loses area while keeping its detectors. That matters more for TAMBO's canyon strips than for GRAND's blobs, and it is the reason the crop configs use 1. Read areas from these runs as lower bounds.",
+    "_comment_downsample": "4, not 1. The estimator puts this DEM at 7.2 GiB of anonymous memory at 1 and 5.1 GiB at 4, against ~6-7 GiB typically free; the run measured 5.68 GiB peak RSS. Downsampling is the weaker of the two memory levers -- it scales the labelling arrays as its inverse square but not the candidates, which are taken on the native grid -- so pass --max-memory-gb rather than expecting a higher factor to rescue a small machine. Note the cost: area is measured on the downsampled mask while capacity is measured at full resolution, so a feature a few pixels wide loses area while keeping its detectors. That matters more for TAMBO's canyon strips than for GRAND's blobs, and it is the reason the crop configs use 1. Read areas from these runs as lower bounds.",
     "downsample_factor": 4,
     "candidate_stride": 5,
     "tile_size": 2048,

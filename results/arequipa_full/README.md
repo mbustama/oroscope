@@ -24,15 +24,17 @@ prints the five things worth knowing before committing an hour of a machine:
 
 ```text
 DEM:       input/dem/arequipa_SRTMGL1.tif     which file, and whether it is even there
-estimate:  2.32 GiB at downsample_factor 4    the pre-flight memory estimate
-available: 5.4 GiB                            against what the system reports free
+estimate:  5.08 GiB at downsample_factor 4    the pre-flight memory estimate
+available: 6.4 GiB                            against what the system reports free
 would run: grand, tambo, then combine         honouring --only
-expected:  ~25-30 minutes each                so you do not start it before you need the machine
+expected:  ~25 min for grand, ~1 min for tambo  so you do not start it before you need the machine
 store:     results/arequipa_full              where the artefacts land
 ```
 
-The estimate is what decides `downsample_factor`: the same DEM needs 4.5 GiB at 1 and
-2.3 GiB at 4, because the labelling arrays scale as its inverse square. It deliberately
+The estimate is what decides `downsample_factor` and `candidate_stride`: the same DEM
+needs 7.2 GiB at 1 and 5.1 GiB at 4. Downsampling scales the labelling arrays as its
+inverse square but not the candidates, which are taken on the native grid and dominate
+at this scale, so striding is the stronger lever. It deliberately
 excludes the memory-mapped DEM, which is file-backed and evictable — counting it would
 make every large search look impossible when the streaming design exists precisely so
 that it is not. No memory cap is applied during a dry run, since nothing is allocated.
@@ -63,8 +65,10 @@ log — stay in `output/`, which is gitignored.
 `config/grand_arequipa_full.json` and `config/tambo_arequipa_full.json`. They are the
 Colca crop configs with three changes: the full DEM, the origin read from the file's own
 tiepoint rather than the crop's corner, and `downsample_factor: 4` instead of 1 — the
-estimator puts this DEM at 4.5 GiB of anonymous memory at 1 against ~6 GiB typically
-free, and 2.3 GiB at 4.
+estimator puts this DEM at 7.2 GiB of anonymous memory at 1 against ~6-7 GiB typically
+free, and 5.1 GiB at 4. Even at 4 it needs a machine whose desktop is not holding half
+of RAM: the run measured **5.68 GiB peak RSS**, and wants `--max-memory-gb` set
+explicitly rather than the default 80%-of-available cap.
 
 Every criterion is otherwise unchanged from the crop, deliberately: the point of this
 run is **scale**, not a different question. A crop is chosen because it is interesting,

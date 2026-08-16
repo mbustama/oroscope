@@ -1,0 +1,33 @@
+{
+    "timestamp": "2026-08-16T02:17:14.049541",
+    "git": {
+        "commit": "1fa8810fee9b757b6082e41d429d2fc03493ae97",
+        "branch": "dev",
+        "dirty": true
+    },
+    "dem": {
+        "path": "/home/mbustamante/Research/GRAND/oroscope/input/dem/arequipa_SRTMGL1.tif",
+        "sha256": "f2831c9f69e54d214b7b53ad4d62af45661c722482ce2c4ca44ec87329bcb29e",
+        "bytes": 147905296,
+        "cell_size_deg": 0.0002777777777778146,
+        "cell_size_y_m": 30.722222222226293,
+        "cell_size_x_m": 29.728455877759973,
+        "cell_size_source": "auto-detected from GeoTIFF"
+    },
+    "platform": {
+        "python": "3.12.12",
+        "system": "Linux 7.0.0-28-generic",
+        "cpu_count": 12
+    },
+    "packages": {
+        "numpy": "2.3.4",
+        "scipy": "1.16.3",
+        "numba": "0.62.1",
+        "tifffile": "2021.7.2",
+        "matplotlib": "3.10.6",
+        "tqdm": "4.67.1",
+        "psutil": "7.0.0",
+        "imagecodecs": "2024.9.22"
+    },
+    "command": "tools/run_arequipa_full.py --only grand --max-memory-gb 7.0"
+}
