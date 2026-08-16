@@ -1,16 +1,13 @@
 {
-    "generated": "2026-08-16T07:48:37",
-    "generated_by": "tools/run_arequipa_full.py",
+    "generated": "2026-08-16T22:28:58",
+    "generated_by": "tools/run_full_dem.py",
+    "region": "arequipa",
     "dem": "input/dem/arequipa_SRTMGL1.tif",
     "configs": {
         "grand": "config/grand_arequipa_full.json",
         "tambo": "config/tambo_arequipa_full.json"
     },
     "files": [
-        "combined_report.json",
-        "grand_explanation.txt",
-        "grand_provenance.json",
-        "grand_results.json",
         "tambo_explanation.txt",
         "tambo_provenance.json",
         "tambo_results.json"

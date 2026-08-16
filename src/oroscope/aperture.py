@@ -31,7 +31,218 @@ from oroscope import arrival_scan
 
 __all__ = ["unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
            "aperture_vs_energy", "peak_energy_pev", "infer_response",
-           "load_curve_csv", "summarize_sites"]
+           "load_curve_csv", "summarize_sites", "PUBLISHED_ARRAYS",
+           "array_scale_factor", "scale_published_curve"]
+
+# The array each published curve in ``data/`` was simulated for. A published aperture
+# is a property of *that* array at *that* site, and neither factor is separable from
+# the other by any operation on the curve. What can be corrected is the array size --
+# see :func:`array_scale_factor`, and the assumptions page for what cannot.
+#
+# ``units`` is the detector count the simulation used; ``spacing_km`` the lattice
+# spacing it used them at. Both are needed: a count alone does not say how much ground
+# was instrumented, and it is ground that the aperture scales with.
+PUBLISHED_ARRAYS = {
+    "tambo_aperture_fig3": {
+        "units": 5000, "spacing_km": 0.15, "grid_type": "hex",
+        "site": "Colca Canyon",
+        "source": "TAMBO Collaboration, Nature Astronomy (2026), Fig. 3",
+    },
+    "grand_effective_area_fig25": {
+        "units": 10000, "spacing_km": 1.0, "grid_type": "hex",
+        "site": "HotSpot1 (a prototypical site, not a surveyed one)",
+        "source": "GRAND Collaboration, arXiv:1810.09994, Fig. 25",
+    },
+}
+
+
+def array_scale_factor(target_units, published, target_spacing_km=None):
+    """
+    How much larger this array is than the one a published curve was simulated for.
+
+    A published aperture or effective area belongs to a specific array at a specific
+    site. Oroscope changes both, and only one of them can be corrected for by
+    arithmetic. This is that one: the array **size**.
+
+    Aperture scales with **instrumented ground**, not with detector count as such, so
+    the factor is
+
+        (N_target * s_target^2) / (N_published * s_published^2)
+
+    which collapses to the ratio of counts when the two spacings agree. Both terms are
+    carried because they must be: doubling the count at fixed spacing doubles the
+    ground and roughly doubles the aperture, while doubling it at fixed ground only
+    makes the array denser, and a denser array past the point where it already samples
+    the Cherenkov footprint adds very little. Scaling a densified array by its count
+    alone would inflate the answer by exactly the factor by which it was densified.
+
+    Parameters
+    ----------
+    target_units : int
+        Detectors oroscope fits on this ground.
+    published : dict or str
+        An entry of :data:`PUBLISHED_ARRAYS`, or its key.
+    target_spacing_km : float, optional
+        Lattice spacing oroscope used. Defaults to the published spacing, which makes
+        the factor a plain ratio of counts.
+
+    Returns
+    -------
+    float
+        Multiplier to apply to the published curve.
+
+    Raises
+    ------
+    ValueError
+        If the published entry is unknown or either count is not positive.
+
+    Notes
+    -----
+    **This corrects the array and not the site.** The published simulation carries its
+    own terrain -- Colca's walls for TAMBO, a prototypical site for GRAND -- with its
+    own distribution of column depth, arrival elevation and target distance, and no
+    operation on an integral curve can remove them. A scaled curve therefore reads:
+    *"what this many detectors would have achieved on the ground the simulation
+    assumed"*, not *"what they will achieve on this ground"*. See
+    :doc:`assumptions`.
+
+    Examples
+    --------
+    >>> from oroscope import aperture
+    >>> round(aperture.array_scale_factor(10000, "tambo_aperture_fig3"), 3)
+    2.0
+
+    Same detector count, spread twice as far apart, is four times the ground:
+
+    >>> round(aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+    ...                                   target_spacing_km=0.30), 3)
+    4.0
+    """
+    if isinstance(published, str):
+        if published not in PUBLISHED_ARRAYS:
+            raise ValueError(
+                f"unknown published array {published!r}; "
+                f"expected one of {sorted(PUBLISHED_ARRAYS)}")
+        published = PUBLISHED_ARRAYS[published]
+    n_pub = float(published["units"])
+    s_pub = float(published["spacing_km"])
+    n_target = float(target_units)
+    # `None` means "the published spacing"; 0 does not, and must not be swallowed by a
+    # truthiness test into meaning it. A zero spacing is a nonsensical array, and
+    # quietly reading it as "same as published" would return a factor of 1 for it.
+    s_target = float(s_pub if target_spacing_km is None else target_spacing_km)
+    if n_pub <= 0 or n_target <= 0:
+        raise ValueError("detector counts must be positive")
+    if s_pub <= 0 or s_target <= 0:
+        raise ValueError("spacings must be positive")
+    return (n_target * s_target ** 2) / (n_pub * s_pub ** 2)
+
+
+def scale_published_curve(values, target_units, published, target_spacing_km=None):
+    """
+    A published curve rescaled to the array oroscope actually found room for.
+
+    Parameters
+    ----------
+    values : array_like
+        The published curve, in whatever units it came in -- m^2 sr for an aperture,
+        cm^2 for an effective area. The scaling is dimensionless, so the units survive.
+    target_units : int
+        Detectors oroscope fits on this ground.
+    published : dict or str
+        As :func:`array_scale_factor`.
+    target_spacing_km : float, optional
+        As :func:`array_scale_factor`.
+
+    Returns
+    -------
+    ndarray
+        The curve, scaled.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import aperture
+    >>> e, a = aperture.load_curve_csv("data/tambo_aperture_fig3.csv")
+    >>> scaled = aperture.scale_published_curve(a, 2500, "tambo_aperture_fig3")
+    >>> round(float(scaled.max() / a.max()), 3)
+    0.5
+    """
+    factor = array_scale_factor(target_units, published, target_spacing_km)
+    return np.asarray(values, dtype=np.float64) * factor
+
+
+def absolute_from_published(results, curve_path, published, target_spacing_km=None):
+    """
+    A run's absolute aperture, by scaling a published curve to the array it found room for.
+
+    This is post-processing, exactly as roadmap §4.10 step 4 intends: the search stores
+    what terrain determines, and folding a published curve against it needs no re-run.
+
+    Parameters
+    ----------
+    results : dict
+        A results dictionary, or one loaded from a run's JSON.
+    curve_path : str
+        Two-column digitized curve, as in ``data/``.
+    published : dict or str
+        The array that curve was simulated for -- an entry of :data:`PUBLISHED_ARRAYS`
+        or its key.
+    target_spacing_km : float, optional
+        Spacing this run used. Read from the run's own parameters when omitted, which
+        is what makes the answer honest: reading it from anywhere else invites the
+        density error :func:`array_scale_factor` exists to prevent.
+
+    Returns
+    -------
+    dict
+        ``{"energies_pev", "aperture", "units", "scale_factor", "detectors",
+        "published", "caveat"}``. ``aperture`` carries the published curve's own units.
+
+    Notes
+    -----
+    **This corrects the array, not the site**, and the returned ``caveat`` says so in
+    the artefact itself rather than only here. The published simulation carries its own
+    terrain -- its column depths, its target distances, its trigger geometry -- and no
+    operation on an integral curve separates those from it. Read the result as *what
+    this many detectors would have achieved on the ground that simulation assumed*.
+
+    Examples
+    --------
+    >>> import json
+    >>> from oroscope import aperture
+    >>> with open("results/huaylas_full/tambo_results.json") as f:
+    ...     res = json.load(f)
+    >>> out = aperture.absolute_from_published(
+    ...     res, "data/tambo_aperture_fig3.csv", "tambo_aperture_fig3")
+    >>> out["units"]
+    'm^2 sr'
+    >>> out["scale_factor"] > 0
+    True
+    """
+    if isinstance(published, str):
+        published = PUBLISHED_ARRAYS[published]
+    params = results.get("parameters", {}) or {}
+    detectors = int((results.get("results", {}) or {}).get("total_capacity", 0))
+    if target_spacing_km is None:
+        target_spacing_km = params.get("antenna_spacing_km")
+    energies, values = load_curve_csv(curve_path)
+    factor = array_scale_factor(detectors, published, target_spacing_km)
+    units = "m^2 sr" if "aperture" in str(curve_path) else "cm^2"
+    return {
+        "energies_pev": [float(e) for e in energies],
+        "aperture": [float(v) for v in np.asarray(values) * factor],
+        "units": units,
+        "scale_factor": float(factor),
+        "detectors": detectors,
+        "published": dict(published),
+        "caveat": ("Scaled for array size only. The published simulation's own site -- "
+                   f"{published.get('site', 'unknown')} -- is folded into this curve and "
+                   "cannot be divided out: its column depths, target distances and "
+                   "trigger geometry all remain. Read as what this many detectors would "
+                   "have achieved on the ground that simulation assumed, not on this "
+                   "ground."),
+    }
 
 
 def unit_response(energy_pev: float | np.ndarray) -> np.ndarray:

@@ -324,7 +324,11 @@ def main():
 
     labels = [args.only] if args.only else list(EXPERIMENTS)
 
-    sampling = [ss.load_config(c) for c in paths["configs"].values()]
+    # Only the searches that will actually run. With --only, pre-flighting the pair
+    # sizes the estimate against a configuration this invocation is not going to
+    # execute -- too high when the skipped run is the dearer one, which needlessly
+    # refuses work that fits.
+    sampling = [ss.load_config(paths["configs"][label]) for label in labels]
     downsample, stride = costliest_sampling(sampling)
     # refuse=True on the real run: this file has taken the machine down twice by
     # warning and proceeding. A dry run allocates nothing, so it only reports.

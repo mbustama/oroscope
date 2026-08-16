@@ -2,23 +2,23 @@
   "runs": [
     {
       "label": "GRAND",
-      "dir": "output/huaylas_full_grand",
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/huaylas_full_grand",
       "pixels": 8849036,
       "area_km2": 8294.892904374776,
       "reported_capacity": 9609,
       "reported_sites": 1,
-      "area_in_joint_km2": 637.1302973279924,
-      "fraction_of_own_area_in_joint": 0.07680994856388877
+      "area_in_joint_km2": 177.9884238000363,
+      "fraction_of_own_area_in_joint": 0.021457591538784564
     },
     {
       "label": "TAMBO",
-      "dir": "output/huaylas_full_tambo",
-      "pixels": 912320,
-      "area_km2": 855.1888244684726,
-      "reported_capacity": 98696,
-      "reported_sites": 109,
-      "area_in_joint_km2": 637.1302973279924,
-      "fraction_of_own_area_in_joint": 0.7450170992634163
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/huaylas_full_tambo",
+      "pixels": 233471,
+      "area_km2": 218.85061166857986,
+      "reported_capacity": 11280,
+      "reported_sites": 23,
+      "area_in_joint_km2": 177.9884238000363,
+      "fraction_of_own_area_in_joint": 0.8132873033481675
     }
   ],
   "pixel_area_km2": 0.0009373781397628821,
@@ -27,19 +27,19 @@
     "TAMBO"
   ],
   "joint": {
-    "pixels": 679694,
-    "area_km2": 637.1302973279924
+    "pixels": 189879,
+    "area_km2": 177.9884238000363
   },
   "union": {
-    "pixels": 9081662,
-    "area_km2": 8512.951431515256
+    "pixels": 8892628,
+    "area_km2": 8335.755092243318
   },
   "pairwise_overlap": {
     "GRAND & TAMBO": {
-      "area_km2": 637.1302973279924,
-      "jaccard": 0.07484246826186661,
-      "fraction_of_GRAND": 0.07680994856388877,
-      "fraction_of_TAMBO": 0.7450170992634163
+      "area_km2": 177.9884238000363,
+      "jaccard": 0.02135240561057991,
+      "fraction_of_GRAND": 0.021457591538784564,
+      "fraction_of_TAMBO": 0.8132873033481675
     }
   },
   "membership_encoding": {

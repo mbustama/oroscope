@@ -1639,7 +1639,7 @@ each one moves a reported number.
 
 | | |
 |---|---|
-| **Detector acceptance `A(E)`** | An event rate is ∫Φ·A·P dE. `decay_weight_by` now selects flux, acceptance, or both — **these numbers used `flux`**. No real differential table exists; one inferred from a published curve is not a safe substitute. |
+| **Detector acceptance `A(E)`** | An event rate is ∫Φ·A·P dE. `decay_weight_by` selects flux, acceptance, or both — **these numbers used `flux`**. Two published integral curves are supplied in `data/`, and what can and cannot be done with them is spelled out below. |
 | **Tau production and escape through rock** | Not modelled, so β does not enter. The search weights by the decay length E/m·cτ, which is kinematics. |
 | **Neutral-current regeneration** | Available (`nc_regeneration=True`) but **off here**, so Earth-chord suppression is overstated — by 1.06× at −0.5° rising to 1.56× at −5°. |
 | **Shower simulation, detector response, trigger** | None of it. The scores rank sites; they are not apertures. |
@@ -1647,7 +1647,61 @@ each one moves a reported number.
 | **Geomagnetic declination** | Constant at Arequipa's −6.9° across the whole DEM. Inclination does follow the site. Right for southern Peru, and this DEM is southern Peru. |
 | **External validation** | **Nothing here has been checked against an external simulation.** The Earth-absorption prediction — the window's lower edge climbing from −4.4° at 100 PeV to −0.9° at 10 EeV — is the cheapest such test and is ready for someone to run. |
 
-### 4. And the one that is not an assumption at all
+### 4. The published effective areas: what we correct, and what we cannot
+
+`data/` holds two curves from the collaborations. They are the closest thing to a real
+`A(E)` this project has, and it is worth being exact about what they can carry.
+
+| file | quantity | array it was simulated for |
+|---|---|---|
+| `tambo_aperture_fig3` | aperture, m² sr | 5,000 units at 150 m, **in Colca Canyon** |
+| `grand_effective_area_fig25` | effective area, cm² (direction-averaged) | 10,000 antennas at 1 km, **at "HotSpot1"** |
+
+Each is the output of a simulation of **one array at one site**. Oroscope changes both,
+and only one of those can be fixed by arithmetic.
+
+**The array size can be corrected.** An aperture scales with instrumented *ground*, so
+`aperture.array_scale_factor` uses (N·s²)ₜₐᵣ𝒷ₑₜ / (N·s²)ₚᵤ𝒷ₗᵢₛₕₑ𝒹 — detector count *and*
+spacing. Both matter: adding detectors at fixed spacing adds ground and scales the
+aperture; adding them at fixed ground only makes the array denser, and past the point
+where it already samples the Cherenkov cone that buys almost nothing. **TAMBO now runs
+at 150 m to match the published simulation**, so the factor is a plain ratio of counts.
+
+The linearity is checked rather than assumed: the GRAND paper states its 200k curve is
+exactly 20× the 10k one, and tracing both independently from the figure gave 19.9–20.1×.
+
+**The site cannot be corrected.** Folded into each curve, and inseparable from it, is
+that site's distribution of column depth, target distance and arrival elevation, and its
+trigger geometry. For TAMBO that terrain is Colca's walls. So a scaled curve says *"what
+this many detectors would have achieved on the ground the simulation assumed"* — **not**
+*"what they will achieve on this ground"*. Applying the TAMBO curve to an Ancash canyon
+imports Colca's rock.
+
+**Where this does and does not matter.** In the *score* it does not enter at all:
+`spectrum_weighted_decay_probability` normalises its weights, so any constant on `A(E)`
+cancels exactly, and only the shape in energy survives. Site *ranking* therefore does not
+depend on any of this being right. It is only an absolute aperture that the scaling
+normalises — and that is the number to treat with care.
+
+**This is a workaround, not a simulation.** The right calculation is a full detector
+simulation at the candidate site with the candidate layout. Everything above stands in
+for that, and is defensible only for array size, only at fixed spacing, and only while
+the candidate terrain is not wildly unlike the simulated terrain."""),
+("code", """from oroscope import aperture
+
+pub = aperture.PUBLISHED_ARRAYS["tambo_aperture_fig3"]
+print(f"published: {pub['units']:,} units at {pub['spacing_km']*1000:.0f} m, {pub['site']}")
+
+for units in (1000, 5000, 20000):
+    f = aperture.array_scale_factor(units, "tambo_aperture_fig3")
+    print(f"  {units:>6,} units at 150 m -> scale the published curve by {f:>5.2f}x")
+
+# The trap the spacing term exists to avoid: the same ground, counted two ways.
+same = aperture.array_scale_factor(11250, "tambo_aperture_fig3", target_spacing_km=0.10)
+print(f"\\n11,250 units at 100 m cover the same ground as 5,000 at 150 m.")
+print(f"  correct factor          : {same:.2f}x")
+print(f"  by detector count alone : {11250/5000:.2f}x   <- wrong by the density ratio")"""),
+("md", """### 5. And the one that is not an assumption at all
 
 The layout is **anchored, not fitted**: detectors are placed from each site's bounding-box
 corner rather than optimised. Capacity is an estimate for an arbitrarily placed array, and

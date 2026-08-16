@@ -44,11 +44,11 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 
 | region | ds / stride | sites | area km² | capacity | acceptance | area /px | capacity /px |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| arequipa | 4 / 5 | 26 | 111.9 | 9,024 | 9.7% | 1.00× | 1.00× |
-| ancash | 4 / 5 | 35 | 174.9 | 14,290 | 15.1% | 2.93× | 2.97× |
-| cajatambo | 1 / 1 | 97 | 1,119.2 | 129,359 | 21.0% | — | — |
-| huaylas | 1 / 1 | 109 | 855.1 | 98,696 | 14.0% | — | — |
-| lima | 4 / 5 | 40 | 190.9 | 15,775 | 12.9% | 2.09× | 2.14× |
+| arequipa | 4 / 5 | 85 | 991.6 | 47,136 | 63.0% | 1.00× | 1.00× |
+| ancash | 4 / 5 | 58 | 673.1 | 31,249 | 82.9% | 1.27× | 1.24× |
+| cajatambo | 1 / 1 | 42 | 735.4 | 37,749 | 85.5% | — | — |
+| huaylas | 1 / 1 | 23 | 218.8 | 11,280 | 82.9% | — | — |
+| lima | 4 / 5 | 73 | 842.7 | 39,115 | 81.0% | 1.04× | 1.02× |
 
 *Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions. Per-pixel ratios are shown only where the sampling matches the baseline — otherwise they would measure the sampling rather than the ground.*
 
@@ -57,11 +57,11 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 
 | region | joint km² | Jaccard | share of TAMBO's mask | joint /px |
 | --- | --- | --- | --- | --- |
-| arequipa | 50.2 | 0.00057 | 44.9% | 1.00× |
-| ancash | 75.2 | 0.00174 | 43.0% | 2.81× |
-| cajatambo | 805.1 | 0.13751 | 71.9% | — |
-| huaylas | 637.1 | 0.07484 | 74.5% | — |
-| lima | 88.3 | 0.00170 | 46.2% | 2.16× |
+| arequipa | 597.9 | 0.00672 | 60.3% | 1.00× |
+| ancash | 366.1 | 0.00844 | 54.4% | 1.15× |
+| cajatambo | 534.7 | 0.09312 | 72.7% | — |
+| huaylas | 178.0 | 0.02135 | 81.3% | — |
+| lima | 463.7 | 0.00891 | 55.0% | 0.95× |
 
 **The share of TAMBO's mask is the number to watch, and it depends on the sampling.** At 4 / 5 it sits near 44% across regions whose terrain could hardly differ more; at 1 / 1 it is near 73%. **The unbiased value is the true one** -- striding fragments TAMBO's mask and leaves GRAND's untouched (ROADMAP 6.49), so what survives a strided run is the scattered remainder, which overlaps GRAND's blob less. Roughly three quarters of TAMBO-viable ground is also GRAND-viable. The invariance itself holds at fixed sampling, which is 6.47's point: the joint region is TAMBO-limited and co-location costs GRAND almost nothing. **Never mix the two rows.**
 

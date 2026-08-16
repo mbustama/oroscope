@@ -3467,6 +3467,95 @@ byte-identical, which is the check. Fixed now rather than after the first
 `stop_at_target` run lands, since by then the wrong number would already be published
 and would look exactly like the right one.
 
+### 6.62 TAMBO at the published 150 m, and the published curves made usable ✅ delivered
+
+**Why.** `data/` holds two curves the collaborations produced: TAMBO's aperture (Fig. 3,
+5,000 units at **150 m**, Colca) and GRAND's direction-averaged effective area (Fig. 25,
+10,000 antennas at 1 km, "HotSpot1"). Neither was consumed by any config, module or doc —
+only by tests. Using them requires matching the array they were simulated for, and
+TAMBO ran at **100 m** per §1.1 against a published 150 m: a 2.25× density difference.
+
+**The scaling, and what it can and cannot fix.** `aperture.array_scale_factor` applies
+
+    f = (N_target · s_target²) / (N_published · s_published²)
+
+Both terms are needed. Detectors added at fixed spacing add ground and scale the
+aperture; added at fixed ground they only densify, and past the point where the array
+already samples the Cherenkov cone that buys almost nothing. Scaling by count alone
+would have inflated TAMBO by exactly its 2.25× density excess. The linearity is checked
+rather than assumed: the GRAND paper states its 200k curve is exactly 20× the 10k one,
+and the digitization note records 19.9–20.1× from tracing both.
+
+**What cannot be corrected is the site.** Each curve carries its own terrain — Colca's
+column depths, target distances, arrival elevations, trigger geometry — and no operation
+on an integral curve separates them. A scaled curve reads *"what this many detectors
+would have achieved on the ground the simulation assumed"*. `absolute_from_published`
+returns that with the caveat embedded in the artefact, not only in the docs. Documented
+at length in `assumptions.rst` and notebook 09.
+
+**Where it matters, and where it does not.** In the score it does not enter at all:
+`spectrum_weighted_decay_probability` normalises its weights, so any constant on `A(E)`
+cancels and only the shape survives. **Site ranking does not depend on this scaling.**
+Only an absolute aperture does.
+
+**The rerun moved two things, not one — and this is the part to read carefully.**
+`gap_close_km` is null in every TAMBO config, so the closing element *defaults to the
+detector spacing*. Changing 100 → 150 m therefore changed the morphology as well as the
+array. The two effects pull in opposite directions and the split falls exactly along the
+striding line:
+
+| | sites | area km² | capacity |
+| --- | --- | --- | --- |
+| Arequipa (4/5) | 26 → **85** | 111.9 → **991.6** | 9,024 → **47,136** |
+| Ancash (4/5) | 35 → **58** | 174.9 → **673.1** | 14,290 → **31,249** |
+| Lima (4/5) | 40 → **73** | 190.9 → **842.7** | 15,775 → **39,115** |
+| **Huaylas (1/1)** | 109 → **23** | 855.1 → **218.8** | 98,696 → **11,280** |
+| **Cajatambo (1/1)** | 97 → **42** | 1,119.2 → **735.4** | 129,359 → **37,749** |
+
+**The crops fell and the departments rose, and only the crops are physical.** Two
+mechanisms, both visible in the funnels:
+
+1. *The score cut tightened everywhere*, which is correct physics. `spacing_m` enters the
+   `footprint` component, so a sparser array samples the Cherenkov footprint worse and
+   fewer candidates clear `min_score`: Arequipa 517,312 → 370,200 (0.72×), Huaylas
+   991,099 → 438,138 (0.44×).
+2. *The closing element grew by half*, and a larger element does far more to a **sparse**
+   mask than a dense one. At stride 5 the mask is a lattice of isolated marks and a 1.5×
+   element inflates it: Arequipa's closed count rose 1.32× on 0.72× the input, and the
+   merging of fragments that follows took selected pixels up **8.86×**. At stride 1 the
+   mask is already contiguous, so closing merely tracks its input: Huaylas 0.51× on
+   0.44×.
+
+§6.49 measured that a strided TAMBO mask fragments into 7,954 regions of which one
+clears `min_sub_array_size`. Widening the closing element merges those fragments, so the
+department numbers rose for a reason that is entirely an artefact of striding.
+
+**So: quote the crops, never the departments, for TAMBO** — the standing instruction,
+now with a second independent reason. And note the coupling itself, which is the general
+lesson: `antenna_spacing_km` is not one knob. It sets the lattice, the `footprint` score
+*and* the closing element, and a reader changing it to match a published design will
+move all three. Setting `gap_close_km` explicitly decouples the third.
+
+**The joint share moved, and it is less of a constant than §6.51 concluded.** TAMBO's
+mask that GRAND can also stand on:
+
+| | sampling | 100 m | 150 m |
+| --- | --- | --- | --- |
+| Arequipa | 4/5 | 44.9% | 60.3% |
+| Ancash | 4/5 | 43.0% | 54.4% |
+| Lima | 4/5 | 46.2% | 55.0% |
+| **Huaylas** | **1/1** | **74.5%** | **81.3%** |
+| **Cajatambo** | **1/1** | **71.9%** | **72.7%** |
+
+§6.51 found ~44–46% strided and ~72–75% unbiased, and read the second as a constant of
+the two experiments. It is not that stable: Cajatambo barely moved (71.9 → 72.7%) but
+Huaylas moved seven points. **Quote ~73–81%, not ~72–75%**, and quote it as a range that
+depends on the array design rather than as a property of the two experiments alone. The
+strided figures remain artefacts and should not be quoted at all.
+
+**Still to redo at 150 m:** the §6.51 three-department comparison, the §6.49 striding
+control, and every notebook that quotes a TAMBO number.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

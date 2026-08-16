@@ -414,6 +414,86 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestScalingAPublishedCurveToOurArray(unittest.TestCase):
+    """
+    A published curve belongs to one array at one site. Only the array is correctable.
+
+    Aperture scales with instrumented *ground*, so the factor carries both the detector
+    count and the spacing. Scaling by count alone would inflate a densified array by
+    exactly the factor it was densified — which is what this project would have done,
+    running TAMBO at 100 m against a curve simulated at 150 m.
+    """
+
+    def test_twice_the_detectors_at_the_same_spacing_is_twice_the_ground(self):
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(10000, "tambo_aperture_fig3"), 2.0, places=9)
+
+    def test_the_published_array_itself_scales_by_one(self):
+        for name, spec in aperture.PUBLISHED_ARRAYS.items():
+            self.assertAlmostEqual(
+                aperture.array_scale_factor(spec["units"], name), 1.0, places=9,
+                msg=name)
+
+    def test_spacing_enters_as_its_square(self):
+        """The same detectors spread twice as far apart instrument four times the ground."""
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                        target_spacing_km=0.30),
+            4.0, places=9)
+
+    def test_a_densified_array_is_not_credited_for_its_density(self):
+        """
+        The trap this exists to avoid. 11,250 units at 100 m and 5,000 at 150 m cover
+        the same ground, so they must scale identically -- counting units alone would
+        claim 2.25x.
+        """
+        same_ground = aperture.array_scale_factor(11250, "tambo_aperture_fig3",
+                                                  target_spacing_km=0.10)
+        self.assertAlmostEqual(same_ground, 1.0, places=6)
+        by_count_alone = 11250 / 5000
+        self.assertAlmostEqual(by_count_alone, 2.25, places=9)
+
+    def test_the_shipped_tambo_config_now_matches_the_published_spacing(self):
+        """
+        With the spacings equal the factor is a plain ratio of counts, which is the
+        whole reason for matching them.
+        """
+        import json
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "config", "tambo_colca_config.json")
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["antenna_spacing_km"],
+                         aperture.PUBLISHED_ARRAYS["tambo_aperture_fig3"]["spacing_km"])
+
+    def test_the_curve_is_scaled_and_its_units_survive(self):
+        data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "tambo_aperture_fig3.csv")
+        _, a = aperture.load_curve_csv(data)
+        half = aperture.scale_published_curve(a, 2500, "tambo_aperture_fig3")
+        np.testing.assert_allclose(half, a * 0.5, rtol=1e-12)
+
+    def test_an_unknown_array_is_refused(self):
+        with self.assertRaises(ValueError):
+            aperture.array_scale_factor(1000, "grand_effective_area_fig99")
+
+    def test_nonsense_sizes_are_refused(self):
+        for units, spacing in ((0, None), (-5, None), (100, 0.0), (100, -1.0)):
+            with self.assertRaises(ValueError):
+                aperture.array_scale_factor(units, "tambo_aperture_fig3",
+                                            target_spacing_km=spacing)
+
+    def test_the_grand_linearity_claim_the_scaling_rests_on(self):
+        """
+        The paper states GRAND200k is exactly 20x GRAND10k, and the digitization note
+        records 19.9-20.1x from tracing both. That is the evidence that aperture is
+        linear in array size at fixed spacing, so it is asserted rather than trusted.
+        """
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(200000, "grand_effective_area_fig25"),
+            20.0, places=9)
+
+
 class TestDigitizedCurves(unittest.TestCase):
     """
     The published curves, hand-digitized from the figures into data/.

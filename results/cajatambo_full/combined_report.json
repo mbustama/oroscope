@@ -2,23 +2,23 @@
   "runs": [
     {
       "label": "GRAND",
-      "dir": "output/cajatambo_full_grand",
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/cajatambo_full_grand",
       "pixels": 5935984,
       "area_km2": 5541.132432072892,
       "reported_capacity": 6424,
       "reported_sites": 1,
-      "area_in_joint_km2": 805.1223648628899,
-      "fraction_of_own_area_in_joint": 0.1452992460896121
+      "area_in_joint_km2": 534.6936500214947,
+      "fraction_of_own_area_in_joint": 0.09649537465060552
     },
     {
       "label": "TAMBO",
-      "dir": "output/cajatambo_full_tambo",
-      "pixels": 1198948,
-      "area_km2": 1119.1960165608482,
-      "reported_capacity": 129359,
-      "reported_sites": 97,
-      "area_in_joint_km2": 805.1223648628899,
-      "fraction_of_own_area_in_joint": 0.7193756526554946
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/cajatambo_full_tambo",
+      "pixels": 787849,
+      "area_km2": 735.4426234093952,
+      "reported_capacity": 37749,
+      "reported_sites": 42,
+      "area_in_joint_km2": 534.6936500214947,
+      "fraction_of_own_area_in_joint": 0.7270365260348113
     }
   ],
   "pixel_area_km2": 0.0009334816994238683,
@@ -27,19 +27,19 @@
     "TAMBO"
   ],
   "joint": {
-    "pixels": 862494,
-    "area_km2": 805.1223648628899
+    "pixels": 572795,
+    "area_km2": 534.6936500214947
   },
   "union": {
-    "pixels": 6272438,
-    "area_km2": 5855.20608377085
+    "pixels": 6151038,
+    "area_km2": 5741.881405460792
   },
   "pairwise_overlap": {
     "GRAND & TAMBO": {
-      "area_km2": 805.1223648628899,
-      "jaccard": 0.13750538466860893,
-      "fraction_of_GRAND": 0.1452992460896121,
-      "fraction_of_TAMBO": 0.7193756526554946
+      "area_km2": 534.6936500214947,
+      "jaccard": 0.09312168125119695,
+      "fraction_of_GRAND": 0.09649537465060552,
+      "fraction_of_TAMBO": 0.7270365260348113
     }
   },
   "membership_encoding": {

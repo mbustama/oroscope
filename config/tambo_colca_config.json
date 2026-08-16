@@ -51,7 +51,7 @@
     "_comment_layout": "5000 units at 100 m on a triangular grid. min_width_km is 0 because the array is a strip along a wall, not a blob, and the opening would delete it.",
     "target_antennas": 5000,
     "min_sub_array_size": 250,
-    "antenna_spacing_km": 0.1,
+    "antenna_spacing_km": 0.15,
     "grid_type": "hex",
     "min_width_km": 0.0,
     "search_mode": "distributed",

@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-08-16T18:33:52.936051",
+    "timestamp": "2026-08-16T22:20:53.513151",
     "git": {
-        "commit": "da54705ddce2fffce7f22669605e71e84a944522",
+        "commit": "84d4d3eb84a44344d2f2f5693312f04df00d1487",
         "branch": "dev",
         "dirty": true
     },
@@ -29,5 +29,5 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_full_dem.py --region cajatambo --max-memory-gb 6.0"
+    "command": "tools/run_full_dem.py --region cajatambo --only tambo"
 }

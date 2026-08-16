@@ -205,6 +205,127 @@ a canyon strip that is a ~30% discrepancy. Use ``downsample_factor: 1`` for thin
 features, or read the two as measuring different things.
 
 
+.. _published-curve-scaling:
+
+Using published effective areas: what is corrected, and what is not
+-------------------------------------------------------------------
+
+``data/`` holds two curves supplied by the collaborations and hand-digitized from their
+figures:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 18 14 20 26
+
+   * - file
+     - quantity
+     - units
+     - energy range
+     - array simulated
+   * - ``tambo_aperture_fig3``
+     - aperture (:math:`A\Omega`)
+     - m² sr
+     - 0.35 PeV – 8.8 EeV
+     - 5 000 units at 150 m, **Colca Canyon**
+   * - ``grand_effective_area_fig25``
+     - effective area
+     - cm²
+     - 0.1 – 100 EeV
+     - 10 000 antennas at 1 km, **HotSpot1**
+
+They are different quantities. TAMBO's has the solid angle folded in; GRAND's has been
+direction-*averaged*, so the solid angle is gone rather than included. They cannot be
+compared with one another without supplying a solid angle, and the GRAND file says so in
+its own header.
+
+**Each was produced by a simulation of one array at one site.** Oroscope changes both.
+Only one of those two differences can be corrected by arithmetic, and it is important to
+be exact about which.
+
+What is corrected: the size of the array
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An aperture scales with **instrumented ground**, so
+:func:`oroscope.aperture.array_scale_factor` applies
+
+.. math::
+
+   f = \frac{N_{\rm target}\, s_{\rm target}^2}{N_{\rm published}\, s_{\rm published}^2}
+
+Both terms are carried deliberately. Adding detectors at a fixed spacing adds ground and
+scales the aperture roughly linearly; adding them at a fixed footprint only makes the
+array denser, and past the point where it already samples the Cherenkov cone a denser
+array collects very little more. Scaling a densified array by its detector count alone
+would inflate the answer by exactly the factor by which it was densified — which is the
+error this project would have made, since ``antenna_spacing_km`` for TAMBO was 100 m
+against the published 150 m, a 2.25× density difference.
+
+**TAMBO now runs at 150 m to match the published simulation**, so the factor reduces to a
+plain ratio of detector counts. GRAND already matched at 1 km.
+
+The linearity is not assumed — it is checked against the source. The GRAND paper states
+that its 200 000-antenna curve is exactly 20× the 10 000-antenna one, and tracing both
+independently from the figure gives 19.9–20.1× across the resolved range. That is a
+direct confirmation, in the supplied data, that effective area is linear in array size at
+fixed spacing.
+
+What is **not** corrected: the site
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The published simulation carries its own terrain, and no operation on an integral curve
+can remove it. Folded into each curve and inseparable from it are that site's
+
+* distribution of **column depth** along accepted arrival directions,
+* distribution of **target distance** and **arrival elevation**,
+* **trigger geometry** — how the shower presents to that particular array on that
+  particular ground.
+
+For TAMBO that terrain is Colca's walls. For GRAND it is "HotSpot1", a prototypical
+site rather than a surveyed one.
+
+So a scaled curve answers: *"what this many detectors would have achieved on the ground
+the simulation assumed"* — **not** *"what they will achieve on this ground"*. Applying
+the TAMBO curve to a canyon in Ancash imports Colca's rock, not Ancash's.
+
+There is a second, subtler trap in going further. Dividing a published curve by our
+geometric model to recover a response (:func:`oroscope.aperture.infer_response`) leaves a
+residual containing the tau exit probability — which oroscope **already scores
+separately**, through the ``depth`` component and
+:func:`oroscope.physics.tau_exit_probability`. Multiplying that residual back in would
+count the same physics twice.
+
+Where the scaling does and does not enter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The distinction matters for reading any number in this project:
+
+* **In the score, it does not enter at all.**
+  :func:`oroscope.physics.spectrum_weighted_decay_probability` normalises its weights,
+  so any constant multiplying :math:`A(E)` cancels exactly — ``flux_times_acceptance``
+  with a flat response reproduces ``flux`` to twelve decimal places. Only the *shape* of
+  :math:`A(E)` in energy survives. Array size is therefore irrelevant to site ranking,
+  which is the reassuring half: **ranking does not depend on this scaling being right.**
+* **In an absolute aperture, it is the whole of the normalisation.** That is the only
+  place the array size, and hence the scaling, changes an answer.
+
+This is a workaround, not a simulation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stated plainly, because it would be easy to read a scaled curve as more than it is. The
+right calculation is a full detector simulation at the candidate site with the candidate
+layout, producing :math:`A(E)` — ideally differential in arrival elevation and distance
+as well as energy — for *that* geometry. Everything above is a stand-in for that, and it
+is defensible only for the array-size factor, only at fixed spacing, and only while the
+candidate terrain is not wildly unlike the simulated terrain.
+
+What oroscope contributes in the meantime is the part that *is* determined by terrain and
+needs no simulation: usable area, accepted solid angle, and the analytic decay
+probability. Section 4.10 of the roadmap is the decision to proceed on that basis, and it
+rests on a real argument — a factor that depends on energy but not on site cancels when
+two sites are compared for the same experiment. The rankings stand on that. The absolute
+apertures wait on a differential table.
+
+
 Physics that is not modelled
 ----------------------------
 

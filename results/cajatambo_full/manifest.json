@@ -1,11 +1,11 @@
 {
-    "generated": "2026-08-16T22:25:50",
+    "generated": "2026-08-16T22:22:14",
     "generated_by": "tools/run_full_dem.py",
-    "region": "ancash",
-    "dem": "input/dem/ancash_SRTMGL1.tif",
+    "region": "cajatambo",
+    "dem": "input/dem/cajatambo.tif",
     "configs": {
-        "grand": "config/grand_ancash_full.json",
-        "tambo": "config/tambo_ancash_full.json"
+        "grand": "config/grand_cajatambo.json",
+        "tambo": "config/tambo_cajatambo.json"
     },
     "files": [
         "tambo_explanation.txt",

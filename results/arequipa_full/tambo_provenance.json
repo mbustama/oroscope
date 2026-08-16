@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-08-16T07:46:53.477597",
+    "timestamp": "2026-08-16T22:27:38.831039",
     "git": {
-        "commit": "ea5fd9450c470e19fa61379cce28eec947e84c16",
+        "commit": "84d4d3eb84a44344d2f2f5693312f04df00d1487",
         "branch": "dev",
         "dirty": true
     },
@@ -29,5 +29,5 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_arequipa_full.py --max-memory-gb 7.0"
+    "command": "tools/run_full_dem.py --region arequipa --only tambo"
 }
