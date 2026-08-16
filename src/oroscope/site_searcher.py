@@ -2790,6 +2790,11 @@ def default_config(preset="default"):
         "require_sky": False,
         "decay_energy_pev": None,
         "max_range_km": None,
+        # What weights the spectrum-folded decay probability: "flux" (the default, and
+        # what every published number used), "acceptance", or "flux_times_acceptance".
+        # The latter two need decay_response_csv, a two-column A(E) table.
+        "decay_weight_by": "flux",
+        "decay_response_csv": None,
         "score_percentile": None,
         "stop_at_target": False,
         "max_memory_gb": None,
@@ -3269,6 +3274,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             min_target_slope_deg=None, max_target_slope_deg=None,
                             max_range_km=None, score_percentile=None,
+                            decay_weight_by='flux', decay_response_csv=None,
                             stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
@@ -3623,6 +3629,18 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
 
     # Field for this site: inclination follows from its own coordinates, so moving
     # the search elsewhere gets that right automatically (roadmap 4.12b)
+    # A(E) for the acceptance weightings. A config carries a path rather than a
+    # callable, since JSON cannot hold a function; a library caller may pass either.
+    _decay_response = decay_response_csv
+    if isinstance(_decay_response, str):
+        _decay_response = aperture_mod.TabulatedResponse.from_csv(_decay_response)
+    if decay_weight_by != "flux" and _decay_response is None:
+        raise ValueError(
+            f"decay_weight_by={decay_weight_by!r} needs decay_response_csv: a two-column "
+            f"CSV of energy in PeV against relative response. See data/ for the "
+            f"published curves and aperture.infer_response() for recovering A(E) from "
+            f"one of them.")
+
     geomag_declination_deg, geomag_inclination_deg = physics.default_field_for_site(
         map_grid.center_lat, origin_lon, geomag_declination_deg, geomag_inclination_deg)
 
@@ -3692,6 +3710,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "decay_spectral_index": decay_spectral_index,
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "max_range_km": max_range_km, "score_percentile": score_percentile,
+        "decay_weight_by": decay_weight_by, "decay_response_csv": decay_response_csv,
         "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -3860,6 +3879,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "decay_energy_min_pev": decay_energy_min_pev,
                                   "decay_energy_max_pev": decay_energy_max_pev,
                                   "decay_spectral_index": decay_spectral_index,
+                                  "decay_weight_by": decay_weight_by,
+                                  "decay_response": _decay_response,
                                   "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
                                   "clearance_full_at": clearance_full_at,
@@ -4074,6 +4095,22 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--decay_weight_by", type=str, default="flux",
+                        choices=list(physics.DECAY_WEIGHTINGS),
+                        help="What weights the spectrum-folded decay probability. "
+                             "'flux' (default) asks what fraction of arriving neutrinos "
+                             "decay usefully, and is what every published number here "
+                             "used. 'acceptance' asks the same over the energies the "
+                             "detector responds to, with no assumed spectrum -- useful "
+                             "precisely because the spectral index is an assumption. "
+                             "'flux_times_acceptance' is the event-rate integrand. The "
+                             "latter two need --decay_response_csv.")
+    parser.add_argument("--decay_response_csv", type=str, default=None,
+                        help="Two-column CSV of energy in PeV against relative detector "
+                             "response A(E), for the acceptance weightings. data/ holds "
+                             "the published integral curves; aperture.infer_response() "
+                             "recovers A(E) from one by dividing out the geometric "
+                             "model.")
     parser.add_argument("--max_range_km", type=float, default=None, help="How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.")
     parser.add_argument("--score_percentile", type=float, default=None, help="Keep this percentage of viable candidates, ranked by score, instead of cutting at an absolute --min_score. Preferred: the default score is a product whose distribution piles up near zero, so an absolute threshold sits on a cliff, while a percentile is scale-free.")
     parser.add_argument("--stop_at_target", action="store_true", help="In distributed mode, stop selecting sites once target_antennas is reached. Sites are ranked by capacity, so this reports the best sites for the array actually wanted rather than every patch of qualifying ground.")

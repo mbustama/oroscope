@@ -363,10 +363,13 @@ obstacle: a pixel has one slope and both must accept it.
 ## 9. Remaining work, ranked
 
 **Physics**
-1. **The detector acceptance `A(E)` is not modelled.** An event rate is
-   ∫Φ(E)·A(E)·P(E)dE; the weight used is the flux alone. *Partially doable now*: both
-   published curves are in `data/` and `aperture.infer_response()` divides one by our
-   geometric model to recover everything else.
+1. ~~**The detector acceptance `A(E)` is not modelled.**~~ ✅ selectable, 2026-08-16.
+   `--decay_weight_by {flux,acceptance,flux_times_acceptance}` with
+   `--decay_response_csv`. `flux` stays the default so no published number moves;
+   `flux_times_acceptance` costs ~6% of TAMBO's capacity. **Do not use `acceptance`
+   alone with an inferred response** — `A(E)` from `infer_response` absorbs everything
+   our geometric model fails to reproduce at high energy, and weighting by it returns
+   zero sites. That wants a real differential table, still the ask of §10. §6.42.
 2. **`min_score` is the dominant assumption.** `--score_percentile` exists as the
    scale-free alternative; the configs still use the absolute cut. Consider switching.
 3. ~~Column depth is bounded by the walk unless `max_range_km` is set.~~ ✅ measured,

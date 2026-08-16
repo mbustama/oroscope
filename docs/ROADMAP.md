@@ -2401,6 +2401,53 @@ scattering into the band come from `E/(1-y)`, above it, where a steeper spectrum
 γ = 2.7 gives 1.258 — and two of the doctest values were wrong on top of that. Caught by
 running them, which is exactly what §8.2 exists for. A test now pins the direction.
 
+### 6.42 The decay weighting is selectable: flux, acceptance, or both
+
+§9.1: an event rate is `∫Φ(E)·A(E)·P(E)dE` and the weight used was the flux alone.
+`spectrum_weighted_decay_probability` now takes `weight_by`, with the config parameter
+`decay_weight_by` and the flag `--decay_weight_by`:
+
+| | weight | asks |
+| --- | --- | --- |
+| `flux` *(default)* | `E^-γ` | of the neutrinos that **arrive**, what fraction decays usefully? |
+| `acceptance` | `A(E)` | over the energies the **detector responds to**, what fraction decays usefully? No assumed spectrum — which is the point, since γ is an assumption. |
+| `flux_times_acceptance` | `E^-γ·A(E)` | the event-rate integrand itself. |
+
+`A(E)` arrives as `--decay_response_csv`, a two-column table; `aperture.infer_response()`
+recovers one from a published integral curve by dividing out the geometric model.
+
+The mechanism is pinned by a check worth stating: **`flux_times_acceptance` with a flat
+response reproduces `flux` to twelve decimal places.** A constant must cancel in the
+normalisation, and it does, so the acceptance factor is entering exactly where it should.
+`acceptance` is likewise independent of γ, also to twelve places.
+
+**Using it on TAMBO produced a warning, not a result.** Recovering `A(E)` from
+`data/tambo_aperture_fig3.csv` against our own Colca configuration and re-running:
+
+| `decay_weight_by` | sites | area km² | capacity | mean decay term |
+| --- | --- | --- | --- | --- |
+| `flux` | 15 | 83.6 | 9,717 | 0.9566 |
+| `flux_times_acceptance` | 15 | 78.1 | 9,093 | 0.9401 |
+| `acceptance` | **0** | **0.0** | **0** | — |
+
+The inferred `A(E)` rises monotonically to its maximum at the *top* of the published
+range, 8.8 EeV. Weighting by it alone puts all the weight where the tau decay length is
+hundreds of kilometres against a 2–5 km canyon, so the decay term collapses, every
+candidate falls below `min_score` and the search returns nothing.
+
+**That is a statement about the inferred response, not about TAMBO.** `A(E)` here is
+`published / (our geometric model)`, and our model's aperture peaks near 66 PeV while the
+published curve keeps climbing. The ratio therefore absorbs every high-energy effect our
+model does not reproduce — a different baseline distribution, a geometry the ±20° window
+does not capture — and attributes all of it to "response". `infer_response`'s own
+docstring says it is "a better weight than a flat response, not a substitute for a
+differential table"; this is what that caveat looks like when it bites.
+
+So: the selector is the deliverable, and it works. `flux` remains the default and every
+published number is unmoved. `flux_times_acceptance` is usable now and costs ~6% of
+capacity. **`acceptance` alone should not be used with an inferred response** — it wants
+a real differential acceptance table, which remains the outstanding ask of §10.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

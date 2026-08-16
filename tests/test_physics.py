@@ -964,3 +964,79 @@ class TestNeutralCurrentRegeneration(unittest.TestCase):
         factors = [physics.nc_regeneration_factor(x, 1.0e8)
                    for x in (1e7, 5e7, 1e8, 2e8)]
         self.assertTrue(all(b > a for a, b in zip(factors, factors[1:])))
+
+
+class TestDecayWeightingIsSelectable(unittest.TestCase):
+    """
+    An event rate is the integral of flux * A(E) * P(E). Weighting by flux alone is one
+    of three defensible choices, and which one was used has to be a stated parameter
+    rather than an assumption buried in the code.
+    """
+
+    def setUp(self):
+        from oroscope import aperture
+        self.flat = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0], [1.0] * 5)
+        self.low = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0],
+                                              [1.0, 1.0, 0.5, 0.05, 0.001])
+        self.high = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0],
+                                               [0.001, 0.05, 0.5, 1.0, 1.0])
+
+    def test_a_flat_response_reduces_exactly_to_the_flux_weighting(self):
+        # The check that the acceptance factor enters where it should: multiplying by a
+        # constant must cancel in the normalisation and leave the flux answer untouched.
+        flux = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
+        both = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="flux_times_acceptance", response=self.flat)
+        self.assertAlmostEqual(float(flux), float(both), places=12)
+
+    def test_a_low_energy_response_decays_more_readily_than_a_high_energy_one(self):
+        # The tau outruns a 3 km gap at high energy, so weighting toward low energies
+        # must raise the decay probability.
+        low = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="acceptance", response=self.low)
+        high = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="acceptance", response=self.high)
+        self.assertGreater(float(low), float(high))
+
+    def test_acceptance_weighting_ignores_the_spectral_index(self):
+        # The point of it: gamma is an assumption, and this weighting removes it.
+        a = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=1.5,
+            weight_by="acceptance", response=self.low)
+        b = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=2.7,
+            weight_by="acceptance", response=self.low)
+        self.assertAlmostEqual(float(a), float(b), places=12)
+
+    def test_flux_times_acceptance_still_depends_on_the_index(self):
+        a = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=1.5,
+            weight_by="flux_times_acceptance", response=self.low)
+        b = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=2.7,
+            weight_by="flux_times_acceptance", response=self.low)
+        self.assertNotAlmostEqual(float(a), float(b), places=6)
+
+    def test_an_acceptance_weighting_without_a_response_is_refused(self):
+        for mode in ("acceptance", "flux_times_acceptance"):
+            with self.assertRaises(ValueError):
+                physics.spectrum_weighted_decay_probability(
+                    3000.0, 3.0, 1000.0, weight_by=mode)
+
+    def test_an_unknown_weighting_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(
+                3000.0, 3.0, 1000.0, weight_by="vibes", response=self.flat)
+
+    def test_a_response_that_is_zero_everywhere_is_refused_rather_than_dividing_by_zero(self):
+        from oroscope import aperture
+        elsewhere = aperture.TabulatedResponse([1e6, 1e7], [1.0, 1.0])
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(
+                3000.0, 3.0, 1000.0, weight_by="acceptance", response=elsewhere)
+
+    def test_the_default_is_flux_so_published_numbers_do_not_move(self):
+        explicit = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="flux")
+        default = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
+        self.assertEqual(float(explicit), float(default))

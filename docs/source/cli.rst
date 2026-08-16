@@ -463,6 +463,14 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.
+   * - ``--decay_weight_by``
+     - str
+     - ``flux``
+     - What weights the spectrum-folded decay probability. ``flux`` (the default) asks what fraction of *arriving neutrinos* decay usefully, and is what every published number here was computed with. ``acceptance`` asks the same over the energies the *detector responds to*, with no assumed spectrum — useful precisely because the spectral index is an assumption. ``flux_times_acceptance`` is the event-rate integrand itself. The latter two require ``--decay_response_csv``.
+   * - ``--decay_response_csv``
+     - str
+     - ``—``
+     - Two-column CSV of energy in PeV against relative detector response A(E), for the acceptance weightings. ``data/`` holds the published integral curves; :func:`oroscope.aperture.infer_response` recovers A(E) from one by dividing out the geometric model.
    * - ``--score_percentile``
      - float
      - ``—``

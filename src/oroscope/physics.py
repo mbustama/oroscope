@@ -1198,10 +1198,14 @@ def earth_absorption_cutoff_deg(energy_pev: float, fraction: float = 0.5,
 DEFAULT_SPECTRAL_INDEX = 2.0
 
 
+DECAY_WEIGHTINGS = ("flux", "acceptance", "flux_times_acceptance")
+
+
 def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_pev,
                                         spectral_index=DEFAULT_SPECTRAL_INDEX,
                                         shower_development_m=0.0, samples=96,
-                                        index_samples=129):
+                                        index_samples=129,
+                                        weight_by="flux", response=None):
     r"""
     Probability the tau decays inside the usable gap, folded over a power-law spectrum.
 
@@ -1220,12 +1224,31 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
 
     integrated on a log-spaced grid, since the range spans decades.
 
-    Two things this deliberately is *not*. It is not an event rate: that needs the
-    detector's acceptance :math:`A(E)`, which no available table supplies, and the
-    weight here is the flux alone. And a steep spectrum weights low energies heavily,
-    where the tau decays readily -- so a soft spectrum drives :math:`P` toward 1 and the
-    term stops discriminating. That is the physics rather than a defect, but it means
-    the spectral index deserves the same scrutiny as any other assumption.
+    **What weights the average is selectable.** An event rate is
+    :math:`\int \Phi(E) A(E) P(E)\,{\rm d}E`, and weighting by the flux alone is only
+    one of three defensible choices:
+
+    ``"flux"``
+        :math:`w(E) = E^{-\gamma}`. The default, and what every published number here
+        was computed with. Says: *of the neutrinos that arrive, what fraction decays
+        usefully?*
+    ``"acceptance"``
+        :math:`w(E) = A(E)`. Says: *over the energies this detector actually responds
+        to, what fraction decays usefully?* -- a property of the instrument and the
+        terrain, with no assumed spectrum. Useful precisely because :math:`\gamma` is an
+        assumption and this removes it.
+    ``"flux_times_acceptance"``
+        :math:`w(E) = E^{-\gamma} A(E)`, the event-rate integrand itself, and the right
+        one when both the spectrum and a response table are trusted.
+
+    ``A(E)`` is not something this module can supply; pass a callable, most usefully one
+    recovered from a published curve by :func:`aperture.infer_response`, which divides
+    that curve by the geometric model and leaves everything else.
+
+    Note a steep spectrum weights low energies heavily, where the tau decays readily --
+    so a soft spectrum drives :math:`P` toward 1 and the term stops discriminating. That
+    is the physics rather than a defect, but it means the spectral index deserves the
+    same scrutiny as any other assumption, and it is the reason ``"acceptance"`` exists.
 
     Parameters
     ----------
@@ -1244,6 +1267,12 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
         Points across the spectral-index range, when one is given. Generous by default
         because the index integral is folded into a weight vector computed once, so a
         fine grid costs nothing per candidate. Ignored for a single index.
+    weight_by : {'flux', 'acceptance', 'flux_times_acceptance'}, optional
+        What weights the average. See the discussion above. ``'acceptance'`` ignores
+        ``spectral_index`` entirely, which is the point of it.
+    response : callable, optional
+        ``A(E)`` in PeV, required by the two acceptance weightings. A response that is
+        zero everywhere on the grid leaves nothing to average and raises.
 
     Returns
     -------
@@ -1285,6 +1314,16 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     """
     if energy_max_pev <= energy_min_pev:
         raise ValueError("energy_max_pev must exceed energy_min_pev")
+    if weight_by not in DECAY_WEIGHTINGS:
+        raise ValueError(f"weight_by must be one of {DECAY_WEIGHTINGS}, got {weight_by!r}")
+    if weight_by != "flux" and response is None:
+        raise ValueError(f"weight_by={weight_by!r} needs a response A(E); pass one, "
+                         f"e.g. from aperture.infer_response()")
+
+    # Weighting by acceptance alone is the flux weighting with no spectrum at all, so
+    # gamma drops out rather than being quietly retained.
+    if weight_by == "acceptance":
+        spectral_index = 0.0
 
     gammas = np.atleast_1d(np.asarray(spectral_index, dtype=np.float64))
     if gammas.size == 2:
@@ -1316,6 +1355,17 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     # Done the obvious way it was 45 times the work for a 45-point index grid, which on
     # a real search was 25 s against 1 s; this way a fine grid is free.
     weights = energies[None, :] ** (1.0 - gammas[:, None])
+    if response is not None and weight_by != "flux":
+        # A(E) multiplies the weight before normalisation, so the average is taken over
+        # the energies the detector actually responds to. Outside a tabulated range
+        # TabulatedResponse returns zero, which correctly removes those energies rather
+        # than extrapolating over them.
+        acceptance = np.asarray(response(energies), dtype=np.float64)
+        if not np.any(acceptance > 0):
+            raise ValueError("the response is zero across the whole energy range, so "
+                             "there is nothing to average; check its tabulated range "
+                             "against energy_min_pev/energy_max_pev")
+        weights = weights * acceptance[None, :]
     normalised = weights / _trapezoid(weights, ln_e, axis=-1)[:, None]
     if gammas.size == 1:
         effective = normalised[0]
