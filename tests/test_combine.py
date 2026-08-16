@@ -335,6 +335,89 @@ class TestCombineRefusesBadRequests(unittest.TestCase):
         self.assertIn("world file", str(caught.exception))
 
 
+class TestTheOverlayActuallyRenders(unittest.TestCase):
+    """
+    Every other test here passes ``--no_image``, so the figure had no coverage at all.
+
+    That is the stage which has been running out of memory, and the one whose layer
+    compositing was rewritten to halve its peak. A test that never draws it cannot
+    notice either. These draw it, at both the filled and the outlined branch, since a
+    class covering more than 40% of the frame is outlined rather than filled and the
+    two take different paths through the same loop.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def render(self, a, b, reveal=False):
+        for label, mask in (("A", a), ("B", b)):
+            run_dir = os.path.join(self.tmp, label)
+            os.makedirs(run_dir, exist_ok=True)
+            write_mask(os.path.join(run_dir, ss.RESULTS_PREFIX + "x.tif"), mask)
+            with open(os.path.join(run_dir, ss.RESULTS_PREFIX + "x.json"), "w") as f:
+                json.dump({"results": {"total_capacity": 100, "total_sites": 1,
+                                       "sites": []}}, f)
+        out = os.path.join(self.tmp, "combined")
+        argv = sys.argv
+        sys.argv = ["combine_experiments.py",
+                    os.path.join(self.tmp, "A"), os.path.join(self.tmp, "B"),
+                    "--labels", "A", "B", "--out", out]
+        if reveal:
+            sys.argv.append("--reveal")
+        try:
+            with quiet():
+                ce.main()
+        finally:
+            sys.argv = argv
+        return out
+
+    def test_the_overview_is_written(self):
+        a = np.zeros((40, 50), np.uint8)
+        a[:12, :] = 1
+        b = np.zeros((40, 50), np.uint8)
+        b[8:20, :] = 1
+        out = self.render(a, b)
+        png = os.path.join(out, "combined_overview.png")
+        self.assertTrue(os.path.exists(png))
+        self.assertGreater(os.path.getsize(png), 5000, "a blank page is not a map")
+
+    def test_a_dominant_class_takes_the_outlined_branch(self):
+        """
+        Over 40% of the frame is outlined rather than filled -- a translucent wash over
+        most of a map turns it to mud. The compositing has to flush its accumulated
+        raster when that happens, or an outline lands on the wrong side of a fill.
+        """
+        a = np.zeros((40, 50), np.uint8)
+        a[:38, :] = 1                        # 95% of the frame, so `A only` is outlined
+        b = np.zeros((40, 50), np.uint8)
+        b[38:, :] = 1
+        out = self.render(a, b)
+        self.assertTrue(os.path.exists(os.path.join(out, "combined_overview.png")))
+
+    def test_the_reveal_frames_are_all_written(self):
+        """Frames for a talk: the categories appear, nothing else may move."""
+        a = np.zeros((30, 40), np.uint8)
+        a[:10, :] = 1
+        b = np.zeros((30, 40), np.uint8)
+        b[6:16, :] = 1
+        out = self.render(a, b, reveal=True)
+        for name in ("combined_overview.png", "combined_overview_1_a.png",
+                     "combined_overview_2_b.png", "combined_overview_3_both.png"):
+            self.assertTrue(os.path.exists(os.path.join(out, name)), name)
+
+    def test_an_empty_class_is_skipped_without_failing(self):
+        """Two runs that do not overlap have no `both` layer to draw."""
+        a = np.zeros((30, 40), np.uint8)
+        a[:10, :] = 1
+        b = np.zeros((30, 40), np.uint8)
+        b[20:, :] = 1
+        out = self.render(a, b)
+        self.assertTrue(os.path.exists(os.path.join(out, "combined_overview.png")))
+
+
 if __name__ == "__main__":
     unittest.main()
 

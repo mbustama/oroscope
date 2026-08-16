@@ -3196,7 +3196,7 @@ def available_memory_gb():
     return None                                          # pragma: no cover
 
 
-def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1):
+def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1, combine=False):
     """
     Memory the map costs, in GiB, which is *not* what the search costs.
 
@@ -3223,32 +3223,64 @@ def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1):
     which is ~190 bytes per viz pixel once matplotlib's own ~130 MB of import and canvas
     is taken out. Both terms are carried here.
 
+    **The combination is a different, larger stage, and was not modelled at all.**
+    ``combine_experiments`` renders at the mask's own resolution rather than at
+    ``viz_ds``, so its raster is *four times* the search map's, and it draws the two
+    experiments and their overlap on top of the relief. Sized by the search map's
+    numbers it looked cheap, ran last, and is what actually kept failing. Measured over
+    2.0 to 12.5 Mpx of raster, with the overlay composited in float32:
+
+    ======================  ===================
+    combine raster          peak RSS
+    ======================  ===================
+    1276 x 1576  (2.0 Mpx)  0.46 GiB
+    1806 x 1740  (3.1 Mpx)  0.63 GiB
+    2551 x 3151  (8.0 Mpx)  1.31 GiB
+    3200 x 3900 (12.5 Mpx)  1.95 GiB
+    ======================  ===================
+
+    which fits 182 MB + 145 bytes per pixel to within 1.1% at every point. Four points
+    rather than the one the search estimator is calibrated on.
+
     Parameters
     ----------
     rows, cols : int
         Full-resolution DEM dimensions.
     downsample_factor : int, optional
-        As the pipeline's. The map uses twice it.
+        As the pipeline's. The search map uses twice it; the combination uses it as-is.
+    combine : bool, optional
+        Estimate the combination overlay instead of a search's own map. It renders at
+        four times the pixels and costs about 2.7x as much at DEM scale.
 
     Returns
     -------
     float
-        Estimated peak for the visualisation alone, in GiB.
+        Estimated peak for that one figure, in GiB.
 
     Examples
     --------
     >>> from oroscope import site_searcher as ss
     >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1), 2)
     0.63
+
+    The same DEM's combination, which the search's own estimate does not cover:
+
+    >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1, combine=True), 2)
+    1.72
     """
-    d = max(1, int(downsample_factor or 1)) * 2
-    viz_pixels = (rows / d) * (cols / d)
+    d = max(1, int(downsample_factor or 1))
+    if combine:
+        pixels = (rows / d) * (cols / d)
+        return (COMBINE_FIXED_BYTES + COMBINE_BYTES_PER_PIXEL * pixels) / (1024 ** 3)
+    viz_pixels = (rows / (2 * d)) * (cols / (2 * d))
     return (MATPLOTLIB_FIXED_BYTES + VIZ_BYTES_PER_PIXEL * viz_pixels) / (1024 ** 3)
 
 
-# Measured, not assumed: see estimate_visualisation_memory_gb for the table.
+# Measured, not assumed: see estimate_visualisation_memory_gb for the tables.
 VIZ_BYTES_PER_PIXEL = 190.0
 MATPLOTLIB_FIXED_BYTES = 130 * 1024 ** 2
+COMBINE_BYTES_PER_PIXEL = 145.0
+COMBINE_FIXED_BYTES = 182 * 1024 ** 2
 
 # How much of what the system reports available a run may be estimated to need before
 # preflight_memory(refuse=True) stops it. Not 1.0: the estimate is rough, the desktop
@@ -3258,7 +3290,7 @@ REFUSE_FRACTION = 0.8
 
 
 def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
-                     max_memory_gb=None, quiet=False, refuse=False):
+                     max_memory_gb=None, quiet=False, refuse=False, combine=False):
     """
     Estimates what a search will need, says so, and caps the address space.
 
@@ -3287,13 +3319,21 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         :data:`REFUSE_FRACTION` of what is available. Default ``False``, which only
         warns — but warning is what it did while three runs died anyway, so a caller
         that can afford to stop should pass ``True``.
+    combine : bool, optional
+        Also account for a combination overlay after the searches. It renders at four
+        times the search map's pixels and was not modelled at all, so a region could
+        clear this pre-flight and then die at the last step — which is what happened,
+        twice. The stages are sequential rather than simultaneous, so the number
+        judged is ``max(search + map, combine)`` rather than their sum.
 
     Returns
     -------
     dict
-        ``{"estimate_gb", "search_gb", "visualisation_gb", "available_gb", "cap_gb",
-        "capped", "cap_exceeds_available"}``. ``estimate_gb`` is the sum of the search
-        and visualisation terms, and is ``None`` when the DEM could not be measured.
+        ``{"estimate_gb", "search_gb", "visualisation_gb", "combine_gb",
+        "available_gb", "cap_gb", "capped", "cap_exceeds_available"}``.
+        ``estimate_gb`` is the largest stage the run will pass through, and is ``None``
+        when the DEM could not be measured. ``combine_gb`` is ``None`` unless
+        ``combine`` was asked for.
 
     Raises
     ------
@@ -3328,21 +3368,31 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         pass
 
     have = available_memory_gb()
-    need = viz = None
+    need = viz = joint = None
     if rows and cols:
         search = estimate_peak_memory_gb(rows, cols,
                                          downsample_factor=int(downsample_factor or 1),
                                          candidate_stride=int(candidate_stride or 5))
         viz = estimate_visualisation_memory_gb(rows, cols,
                                                int(downsample_factor or 1))
+        # The stages run one after another, so what has to fit is the largest of them,
+        # not their total. The map is the exception: it is built while the search's
+        # arrays are still live, so those two are added.
         need = search + viz
+        breakdown = f"{search:.1f} search + {viz:.1f} map"
+        if combine:
+            joint = estimate_visualisation_memory_gb(rows, cols,
+                                                     int(downsample_factor or 1),
+                                                     combine=True)
+            breakdown += f", then {joint:.1f} to combine"
+            need = max(need, joint)
         if not quiet:
             print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
-                  f" ({search:.1f} search + {viz:.1f} map)"
+                  f" ({breakdown})"
                   + (f", available {have:.1f} GiB" if have else ""))
         if have and need > REFUSE_FRACTION * have:
             message = (f"This run is estimated to need {need:.1f} GiB "
-                       f"({search:.1f} for the search plus {viz:.1f} for the map) "
+                       f"({breakdown}) "
                        f"against {have:.1f} GiB available. Raise candidate_stride, "
                        f"which is the memory lever, or crop the DEM.")
             if refuse:
@@ -3381,7 +3431,7 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
               f"(raise --candidate_stride, which is the memory lever) rather than "
               f"raising the cap again.{C.RESET}")
     return {"estimate_gb": need, "search_gb": search if rows and cols else None,
-            "visualisation_gb": viz, "available_gb": have,
+            "visualisation_gb": viz, "combine_gb": joint, "available_gb": have,
             "cap_gb": cap if capped else None, "capped": capped,
             "cap_exceeds_available": over}
 

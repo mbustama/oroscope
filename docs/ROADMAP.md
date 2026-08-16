@@ -3322,6 +3322,60 @@ search has ever called either function; searches score against the default (10�
 
 631 → 638 tests.
 
+### 6.57 The combination was outside the memory model that exists because of it ✅ delivered
+
+§6.50 added a pre-flight after three runs died drawing their maps. It models the search
+and the search's own map. It does not model the **combination**, which is the larger
+figure and the one that failed twice this session and was re-run standalone both times.
+
+`combine_experiments` renders at the mask's own resolution, where a search's map renders
+at `downsample_factor * 2` — so **four times the pixels** — and it drew each of the three
+classes as its own `float64` RGBA raster, each held alive by its own `imshow` until the
+figure closed. Measured at the Arequipa mask's 2551×3151:
+
+| | peak RSS |
+| --- | --- |
+| three float64 rasters *(as shipped)* | 1.96 GiB |
+| three float32 rasters | 1.50 GiB |
+| **composited, float32** | **1.31 GiB** |
+| what the pre-flight budgeted for "the map" | 0.48 GiB |
+
+**0.65 GiB back for the identical picture**, and the picture really is identical: the
+classes are disjoint, so compositing cannot reorder them — but a *contour* drawn between
+two fills can be reordered, and compositing everything unconditionally changed the image
+in **2 of 32** combinations of visible and outlined classes. Flushing the accumulated
+raster whenever an outlined class intervenes is pixel-identical in all 32, which is how
+this is asserted rather than assumed.
+
+**And it is now modelled.** `estimate_visualisation_memory_gb(..., combine=True)`,
+fitted to four measured sizes rather than the one the search estimator has:
+
+| combine raster | measured | model |
+| --- | --- | --- |
+| 1276 × 1576 (2.0 Mpx) | 0.46 GiB | 0.46 |
+| 1806 × 1740 (3.1 Mpx) | 0.63 GiB | 0.62 |
+| 2551 × 3151 (8.0 Mpx) | 1.31 GiB | 1.32 |
+| 3200 × 3900 (12.5 Mpx) | 1.95 GiB | 1.95 |
+
+182 MB + 145 bytes/pixel, within 1.1% everywhere. `preflight_memory(combine=True)`
+reports it and judges `max(search + map, combine)` — the stages are sequential, so what
+must fit is the largest, not the total; the map is added to the search because it is
+drawn while the search's arrays are still live. `run_full_dem.py` passes it unless
+`--only` was given, so a region that cannot survive its own combination is now refused
+*before* an hour of searching rather than after. The huaylas dry run reads:
+
+```
+estimate:  3.27 GiB at downsample_factor 1, candidate_stride 1
+           2.64 search + 0.63 map, then 1.72 to combine
+```
+
+**The render had no test coverage whatever** — every combine test passed `--no_image` —
+which is why a stage that was failing repeatedly could also be quietly the most expensive
+thing in the pipeline. Four tests now draw it, covering the filled branch, the outlined
+branch, the `--reveal` frames and an empty class.
+
+638 → 644 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

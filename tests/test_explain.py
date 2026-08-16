@@ -682,6 +682,48 @@ class TestLibraryParity(unittest.TestCase):
                                report["search_gb"] + report["visualisation_gb"],
                                places=6, msg="the reported total must be the sum")
 
+    def test_the_combination_is_the_larger_figure_and_is_now_counted(self):
+        """
+        The overlay renders at the mask's own resolution, not at ``viz_ds``, so it is
+        four times the pixels. It was outside the estimate entirely, ran last, and is
+        what actually kept failing: measured 1.96 GiB at the Arequipa mask's 2551x3151
+        against the 0.48 GiB budgeted for a map. Composited in float32 it is 1.31 GiB,
+        and the model is fitted to four measured sizes.
+        """
+        rows, cols = 10204, 12603
+        for ds in (1, 2, 4):
+            solo = ss.estimate_visualisation_memory_gb(rows, cols, ds)
+            joint = ss.estimate_visualisation_memory_gb(rows, cols, ds, combine=True)
+            self.assertGreater(joint, solo, msg=f"downsample_factor {ds}")
+
+        # Against the bench: 8.04 Mpx of raster measured 1.31 GiB peak RSS.
+        self.assertAlmostEqual(
+            ss.estimate_visualisation_memory_gb(10204, 12603, 4, combine=True),
+            1.31, delta=0.06)
+
+    def test_the_preflight_judges_the_largest_stage_not_the_sum(self):
+        """
+        The search, its map and the combination happen one after another, so what has
+        to fit is the biggest of them. The map is the exception -- it is drawn while the
+        search's arrays are still live -- so those two are added and the combination is
+        compared against that total.
+        """
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "combine.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        with quiet():
+            without = ss.preflight_memory(dem, max_memory_gb=0)
+            with_it = ss.preflight_memory(dem, max_memory_gb=0, combine=True)
+
+        self.assertIsNone(without["combine_gb"], "not asked for, not reported")
+        self.assertIsNotNone(with_it["combine_gb"])
+        self.assertGreaterEqual(with_it["estimate_gb"], without["estimate_gb"],
+                                "counting a stage cannot lower the estimate")
+        self.assertEqual(with_it["estimate_gb"],
+                         max(with_it["search_gb"] + with_it["visualisation_gb"],
+                             with_it["combine_gb"]))
+
     def test_the_preflight_can_refuse_instead_of_merely_warning(self):
         """
         Warning is what it did while three runs died anyway. ``refuse=True`` is the

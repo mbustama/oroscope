@@ -743,19 +743,47 @@ def main():
                           interpolation="bilinear", zorder=0)
                 im = matplotlib.cm.ScalarMappable(norm=norm, cmap=grey)
 
+            # Consecutive filled classes share one RGBA raster, in float32.
+            #
+            # This was one float64 raster per class, each handed to its own imshow and
+            # so each held alive by the axes until the figure closes. At the Arequipa
+            # mask's 2551x3151 those are 257 MB each, and the overlay measured 1.96 GiB
+            # of peak RSS -- against the 0.48 GiB the pre-flight budgets for a map. It
+            # is the stage that has actually been running out of memory.
+            #
+            # The classes are disjoint by construction (only_a, only_b and both
+            # partition the union), so no pixel is claimed twice and painting several
+            # into one array cannot lose an ordering *between them*. What it can lose is
+            # an ordering against a contour drawn in between, so the run is flushed
+            # whenever an outlined class intervenes. Compared over all 32 combinations
+            # of visible and outlined classes, this is pixel-identical to the stacked
+            # form; compositing everything unconditionally was not, and differed in two
+            # of them.
+            run = []
+
+            def flush(zorder):
+                """Paints the accumulated filled classes as one raster."""
+                if not run:
+                    return
+                rgba = np.zeros(code.shape + (4,), dtype=np.float32)
+                for mask, colour, alpha in run:
+                    rgba[mask, :3] = matplotlib.colors.to_rgb(colour)
+                    rgba[mask, 3] = alpha
+                ax.imshow(rgba, extent=extent, origin="upper",
+                          interpolation="nearest", zorder=zorder)
+                run.clear()
+
             for name, mask, colour, alpha, order in layers:
                 if name not in visible or not mask.any():
                     continue
                 if colour in outlined:
+                    flush(order - 0.5)
                     ax.contour(mask.astype(float), levels=[0.5], colors=[colour],
                                linewidths=1.4, extent=extent, origin="upper",
                                zorder=order)
                     continue
-                rgba = np.zeros(code.shape + (4,), dtype=np.float64)
-                rgba[..., :3] = matplotlib.colors.to_rgb(colour)
-                rgba[..., 3] = np.where(mask, alpha, 0.0)
-                ax.imshow(rgba, extent=extent, origin="upper",
-                          interpolation="nearest", zorder=order)
+                run.append((mask, colour, alpha))
+            flush(len(layers))
 
             ax.set_xlabel("Longitude (°)")
             ax.set_ylabel("Latitude (°)")

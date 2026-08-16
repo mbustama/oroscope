@@ -333,15 +333,24 @@ def main():
             "--max-memory-gb 0 disables the address-space cap, which is the only thing "
             "between a runaway and the OOM killer. Pass a number below what is "
             "available, or omit the flag for 80% of it.")
+    # combine=True unless --only: the overlay renders at four times the search map's
+    # pixels and used to be outside the estimate entirely, so a region could clear the
+    # pre-flight, finish both searches, and then die drawing the last figure. That is
+    # what happened, twice.
     report = ss.preflight_memory(dem, downsample_factor=downsample,
                                  candidate_stride=stride,
                                  max_memory_gb=0 if args.dry_run else None,
-                                 quiet=args.dry_run, refuse=not args.dry_run)
+                                 quiet=args.dry_run, refuse=not args.dry_run,
+                                 combine=not args.only)
     if args.dry_run:
         print(f"region:    {args.region}")
         print(f"DEM:       {os.path.relpath(dem, REPO)}")
         print(f"estimate:  {report['estimate_gb']:.2f} GiB at "
               f"downsample_factor {downsample}, candidate_stride {stride}")
+        print(f"           {report['search_gb']:.2f} search + "
+              f"{report['visualisation_gb']:.2f} map"
+              + (f", then {report['combine_gb']:.2f} to combine"
+                 if report["combine_gb"] else ""))
         print(f"available: {report['available_gb']:.1f} GiB"
               if report["available_gb"] else "available: unknown")
         print(f"would run: {', '.join(labels)}, then combine")
