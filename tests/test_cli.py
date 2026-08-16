@@ -579,5 +579,68 @@ class TestOneTranslationForEveryCaller(unittest.TestCase):
         self.assertEqual(kw["min_slope_deg"], 11.0)
 
 
+class TestTheSensitivitySweepReadsItsOwnFunnel(unittest.TestCase):
+    """
+    A sweep row's ``accepted`` must be what reached closing, cut included.
+
+    The first use in this module's own docstring is ``--sweep min_score``, a sweep whose
+    entire subject is the score cut. Reading ``directions accepted`` alone -- which now
+    holds the geometry, since the funnel separates the two -- would have printed a flat
+    acceptance column for exactly the sweep it exists to run.
+    """
+
+    def summarise(self, funnel):
+        from oroscope import sensitivity
+        return sensitivity.summarise(
+            {"results": {"total_sites": 1, "total_capacity": 10, "sites": []},
+             "funnel": funnel})
+
+    def test_a_score_cut_is_what_the_row_reports(self):
+        got = self.summarise({"DEM pixels": 1000, "kept by stride 5": 200,
+                              "directions accepted": 150, "score >= 0.35": 40})
+        self.assertEqual(got["accepted"], 40)
+        self.assertEqual(got["kept"], 200)
+        self.assertAlmostEqual(got["acceptance"], 0.2)
+
+    def test_a_percentile_cut_counts_too(self):
+        got = self.summarise({"DEM pixels": 1000, "kept by stride 5": 200,
+                              "directions accepted": 150, "score in top 25%": 37})
+        self.assertEqual(got["accepted"], 37)
+
+    def test_without_a_cut_the_geometry_is_the_answer(self):
+        got = self.summarise({"DEM pixels": 1000, "kept by stride 5": 200,
+                              "directions accepted": 150})
+        self.assertEqual(got["accepted"], 150)
+
+    def test_a_run_that_produced_nothing_still_makes_a_row(self):
+        from oroscope import sensitivity
+        got = sensitivity.summarise(None)
+        self.assertEqual(got["sites"], 0)
+        self.assertEqual(got["acceptance"], 0.0)
+
+
+class TestASweepPointThatHangsDoesNotEndTheSweep(unittest.TestCase):
+    """
+    Each point runs in its own process so that one bad point costs one row.
+
+    The timeout was passed to ``subprocess.run`` and its ``TimeoutExpired`` never
+    caught, so a point that hung raised through ``main()`` and threw away every row
+    already computed -- the opposite of what both the docstring and the design promised,
+    and likeliest to happen on the sweep of whichever parameter decides how much work
+    the search does.
+    """
+
+    def test_a_timeout_is_a_failed_row_not_an_exception(self):
+        from oroscope import sensitivity
+        tmp = tempfile.mkdtemp()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                got = sensitivity.run_once({"_sleep": True}, tmp, timeout=0.001)
+            self.assertIsNone(got)
+            self.assertIn("timed out", out.getvalue())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

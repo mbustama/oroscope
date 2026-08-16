@@ -31,7 +31,6 @@ import tempfile
 import time
 
 # Three levels up now: src/oroscope/sensitivity.py -> src/oroscope -> src -> repo
-# Three levels up now: src/oroscope/sensitivity.py -> src/oroscope -> src -> repo
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from oroscope import site_searcher as ss         # noqa: E402
@@ -113,10 +112,19 @@ def run_once(config, out_dir, verbose=False, max_memory_gb=None, timeout=3600):
         json.dump(params, f)
 
     src_dir = os.path.join(REPO_ROOT, "src")
-    proc = subprocess.run(
-        [sys.executable, "-c", _CHILD, payload, out_dir, src_dir],
-        cwd=src_dir, timeout=timeout,
-        capture_output=not verbose, text=True, check=False)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _CHILD, payload, out_dir, src_dir],
+            cwd=src_dir, timeout=timeout,
+            capture_output=not verbose, text=True, check=False)
+    except subprocess.TimeoutExpired:
+        # Reported as a failed row, not raised. The whole reason each point runs in its
+        # own process is that one bad point must not end the sweep -- and a point that
+        # hangs is the likeliest bad point there is, since the parameter being swept is
+        # usually the one that decides how much work the search does. Letting this
+        # propagate threw away every row already computed.
+        print(f"      run timed out after {timeout:.0f}s")
+        return None
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().splitlines()[-1:] if not verbose else []
         print(f"      run failed (exit {proc.returncode})"
@@ -151,7 +159,12 @@ def summarise(results: dict | None) -> dict:
     r = results["results"]
     funnel = results.get("funnel", {})
     kept = next((v for k, v in funnel.items() if k.startswith("kept by stride")), 0)
-    accepted = funnel.get("directions accepted", 0)
+    # Whatever reached the closing stage, which is the score row when a cut is in force
+    # and the geometry otherwise. Reading `directions accepted` alone would report the
+    # geometry only, and this tool's first documented use is `--sweep min_score` -- a
+    # sweep whose whole subject is the cut. That column would have been flat.
+    accepted = next((v for k, v in funnel.items() if k.startswith("score ")),
+                    funnel.get("directions accepted", 0))
     return dict(
         sites=r["total_sites"],
         capacity=r["total_capacity"],

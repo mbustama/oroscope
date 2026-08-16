@@ -3403,6 +3403,55 @@ touching a kernel.
 *Correction to §0 of the handover:* `_rfi_exposure` is driven by `tests/test_physics.py`,
 not `test_arrival_scan.py`, and `count_grid_capacity` by `tests/test_capacity.py`.
 
+### 6.59 Two in the sensitivity sweep, one of them made by §6.53 ✅ delivered
+
+**A hanging point ended the sweep.** `run_once` passes `timeout` to `subprocess.run`
+and never caught `TimeoutExpired`, so it raised through `main()` and discarded every row
+already computed. Both the docstring ("the point reported as failed") and the design
+("one point that fails ... reports a failed row rather than ending the sweep" — the
+whole reason each point gets its own process) said otherwise. It is also the likeliest
+failure there is: the parameter being swept is usually the one deciding how much work
+the search does, so the slow point is the one at the end of the range.
+
+**And a column this session's own change would have flattened.** `summarise` read
+`funnel["directions accepted"]` for its `accepted` figure. After §6.53 that key holds
+the *geometry*, so a `--sweep min_score` — the first example in this module's own
+docstring, and a sweep whose entire subject is the cut — would have reported an
+identical acceptance at every threshold, with no error and a perfectly plausible table.
+It now reads whatever reached closing: the score row where a cut is in force, the
+geometry otherwise, which is what it always meant.
+
+Worth recording as a shape rather than a bug: changing the meaning of a funnel key was
+correct, and it silently broke a reader three modules away that the tests did not cover.
+`sensitivity.py` had no tests of its own. It has six now.
+
+644 → 649 tests.
+
+### 6.60 Checked and clean
+
+Recorded so the same ground is not covered twice.
+
+- **`count_grid_capacity` is called once per site**, on that site's own bounding box —
+  not per tile — so there is no lattice discontinuity across chunk boundaries. Nothing
+  treats it as an optimum. One property is undocumented: `cumulative_capacity` sums
+  independently anchored lattices, 109 of them at Huaylas, which is not a realizable
+  single array.
+- **`_min_clearance_ratio` samples with `int()` and has no bilinear path**, unlike
+  `_scan_one_direction`, which documents at length why truncation toward zero biases
+  the sample. Suspected an azimuthal bias in the `clearance` component; measured, there
+  is none. Truncation is symmetric about the candidate, so mirroring the terrain and
+  looking the other way is exact to the last digit (60 profiles, 0.00%); and `int()`
+  differs from `floor()` only for negative coordinates, which the bounds check rejects
+  before they are used (800 rays across four azimuths, 100% identical). What remains is
+  a fidelity difference — nearest against sub-pixel — not a bias.
+- **`check_alignment` does refuse** mismatched shape, pixel size and corner, so two runs
+  at different `downsample_factor` cannot silently produce a misaligned overlay.
+- **Unknown config keys are dropped but named** in the warning, which is the right
+  treatment and the one `--score_weights` lacked (§6.54).
+- **No API key is committed, printed, or written to any artefact.** It is passed as a
+  URL query parameter, so it can reach shell history and proxy logs, and no error path
+  redacts it — worth knowing, not a defect in this code.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
