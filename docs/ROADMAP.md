@@ -2192,6 +2192,32 @@ Two things learned in the doing:
   parameter it was meant to pass. Eighteen tests failed at once and were right to.
   `_PIPELINE_PARAMS` is bound once, to the real function.
 
+### 6.36 Configuration paths are relative to the configuration ✅ delivered
+
+§9.11: the search resolved `dem_path` against the working directory, so the bundled
+configurations ran only from `src/` and produced a `FileNotFoundError` anywhere else.
+
+A configuration that says `"dem_path": "../input/dem/colca.tif"` is describing where the
+DEM sits relative to *itself* — the only fixed point it can reason about. `load_config()`
+now resolves `dem_path`, `road_map_path` and `resume_dir` that way, and `main()` applies
+the same rule to the output base, since fixing the inputs alone would have left the
+*outputs* landing wherever the caller happened to stand (from the repository root, the
+default `../output/` writes a sibling of the repository).
+
+**No shipped configuration had to change**, which is what made this safe: `config/` and
+`src/` are both one level below the root, so `../input/dem/colca.tif` names the same file
+read from either. Verified by running the TAMBO stride-1 control from the repository
+root and getting the identical answer — 29 sites, 396.9 km², 45,856 detectors.
+
+A path that resolves only against the working directory is left alone with a warning.
+Silently breaking a setup that relied on the old behaviour would be a poor way to fix a
+convenience wart. A base typed on the command line is likewise left relative to the
+caller, because that is their own instruction rather than the configuration's.
+
+**Not covered: `oroscope-fetch-dem`.** It writes `../input/dem/` and `../config/`
+relative to the working directory and has no configuration file to be relative to, so it
+still wants running from `src/`. Documented rather than fixed.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

@@ -165,7 +165,10 @@ Fetches the bundled regions — Lima and Arequipa — into ``input/dem/`` and wr
 ready-to-run configuration for each. The key is free from
 `OpenTopography <https://portal.opentopography.org/myopentopo>`_.
 
-Run it from ``src/``: both paths are relative to it.
+Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/``, both relative
+to the working directory. Unlike the search, this one has not been made
+config-relative — there is no configuration file to be relative *to* — so it still
+needs a directory one level below the repository root.
 
 
 ``tools/run_arequipa_full.py`` — the full-DEM run
@@ -260,10 +263,15 @@ than ~100 m is reported rather than silently honoured.
 
 .. note::
 
-   The search resolves several paths relative to the working directory, so the bundled
-   configurations expect to be run from ``src/``. That is a known wart, not a design:
-   the console scripts are the first half of removing it, and making those paths
-   relative to the configuration file is the second.
+   **Paths in a configuration are relative to the configuration file**, not to the
+   working directory, so a search runs the same from anywhere. ``"dem_path":
+   "../input/dem/colca.tif"`` in ``config/`` means ``input/dem/colca.tif`` in the
+   repository whether you are standing in the root, in ``src/`` or elsewhere; the
+   outputs follow the same rule. Absolute paths are left alone, and a path that
+   resolves only against the working directory still works, with a warning — the old
+   behaviour, kept so this does not break a setup that relied on it.
+
+   This replaces the long-standing requirement to ``cd src`` first.
 
 
 Every option, in full

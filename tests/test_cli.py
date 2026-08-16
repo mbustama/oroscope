@@ -50,8 +50,9 @@ def cli(argv, cwd, fallbacks=None):
         with open(os.path.join(config_dir, "fallbacks.json"), "w") as f:
             json.dump(fallbacks, f)
 
-    # main() reads ../config/fallbacks.json and writes ../output/, i.e. relative to a
-    # working directory one level down. That is the `cd src` requirement.
+    # main() reads ../config/fallbacks.json relative to a working directory one level
+    # down. Config paths and the output base are resolved against the configuration
+    # file now, but the fallbacks lookup is still cwd-relative, so these run from src/.
     work = os.path.join(cwd, "src")
     os.makedirs(work, exist_ok=True)
 
@@ -411,6 +412,76 @@ class TestFailFast(CliCase):
         with self.assertRaises(SystemExit):
             with cli(["--config_path", config], self.tmp):
                 pass
+
+
+class TestConfigPathsAreRelativeToTheConfig(unittest.TestCase):
+    """
+    A configuration describes where its DEM sits relative to *itself*.
+
+    Resolving against the working directory instead is what made the bundled configs
+    run only from ``src/``. These pin the new rule and the fallback that keeps the old
+    one working.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.cfg_dir = os.path.join(self.tmp, "config")
+        self.dem_dir = os.path.join(self.tmp, "input", "dem")
+        os.makedirs(self.cfg_dir)
+        os.makedirs(self.dem_dir)
+        self.dem = os.path.join(self.dem_dir, "x.tif")
+        with open(self.dem, "w") as f:
+            f.write("not really a tif")
+
+    def write(self, **keys):
+        path = os.path.join(self.cfg_dir, "run.json")
+        with open(path, "w") as f:
+            json.dump(keys, f)
+        return path
+
+    def test_a_relative_dem_resolves_against_the_config_from_any_cwd(self):
+        path = self.write(dem_path=os.path.join("..", "input", "dem", "x.tif"))
+        here = os.getcwd()
+        try:
+            for cwd in (self.tmp, self.cfg_dir, tempfile.gettempdir()):
+                os.chdir(cwd)
+                with self.subTest(cwd=cwd):
+                    self.assertEqual(ss.load_config(path)["dem_path"], self.dem)
+        finally:
+            os.chdir(here)
+
+    def test_an_absolute_path_is_left_alone(self):
+        path = self.write(dem_path="/data/elsewhere.tif")
+        self.assertEqual(ss.load_config(path)["dem_path"], "/data/elsewhere.tif")
+
+    def test_a_working_directory_relative_path_still_works_with_a_warning(self):
+        # The old behaviour. Breaking it silently to fix the wart would be a poor trade.
+        path = self.write(dem_path=os.path.join("input", "dem", "x.tif"))
+        here = os.getcwd()
+        buf = io.StringIO()
+        try:
+            os.chdir(self.tmp)
+            with contextlib.redirect_stdout(buf):
+                loaded = ss.load_config(path)
+        finally:
+            os.chdir(here)
+        self.assertEqual(loaded["dem_path"], os.path.join("input", "dem", "x.tif"))
+        self.assertIn("working directory", buf.getvalue())
+
+    def test_a_path_that_exists_nowhere_names_what_the_config_asked_for(self):
+        path = self.write(dem_path=os.path.join("..", "input", "dem", "absent.tif"))
+        resolved = ss.load_config(path)["dem_path"]
+        self.assertTrue(resolved.endswith(os.path.join("input", "dem", "absent.tif")))
+        self.assertTrue(os.path.isabs(resolved),
+                        "an error should name the path the config meant, not a fragment")
+
+    def test_the_repository_layout_reads_the_same_either_way(self):
+        # config/ and src/ are both one level below the root, so no shipped config had
+        # to change: ../input/... names the same file read from either.
+        from_config = os.path.normpath(os.path.join("/repo/config", "../input/d.tif"))
+        from_src = os.path.normpath(os.path.join("/repo/src", "../input/d.tif"))
+        self.assertEqual(from_config, from_src)
 
 
 class TestOneTranslationForEveryCaller(unittest.TestCase):

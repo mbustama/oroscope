@@ -85,7 +85,7 @@ __all__ = [
     # files, the memory pre-flight, and the run summary.
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
     "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
-    "preflight_memory", "emit_explanation",
+    "preflight_memory", "emit_explanation", "resolve_config_paths",
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
 ]
 
@@ -2892,9 +2892,85 @@ def generate_config(path, preset="default"):
     return config
 
 
+# Configuration keys naming a file or directory the run needs to find. Resolved
+# relative to the configuration file, which is the only fixed point a config can
+# reason about; the working directory is not.
+_PATH_KEYS = ("dem_path", "road_map_path", "resume_dir")
+
+
+def resolve_config_paths(config, config_dir, quiet=False):
+    """
+    Makes a configuration's relative paths absolute, against the config's own directory.
+
+    A configuration that says ``"dem_path": "../input/dem/colca.tif"`` is describing
+    where the DEM sits relative to *itself*, which is the only thing it can know. The
+    pipeline resolved it against the working directory instead, so the bundled configs
+    ran only from ``src/`` and produced a `FileNotFoundError` anywhere else -- the
+    long-standing "you must ``cd src`` first" wart.
+
+    A path that does not resolve against the configuration's directory but does resolve
+    against the working directory is left alone, with a warning: that is the old
+    behaviour, and silently breaking someone's working setup to fix a wart is a poor
+    trade. Absolute paths are untouched.
+
+    Parameters
+    ----------
+    config : dict
+        A configuration mapping. Not modified; a copy is returned.
+    config_dir : str
+        Directory holding the configuration file.
+    quiet : bool, optional
+        Suppress the warning about a working-directory-relative fallback.
+
+    Returns
+    -------
+    dict
+        A copy with the path keys resolved.
+
+    Examples
+    --------
+    The repository's own layout is why this is safe to change: ``config/`` and ``src/``
+    are both one level below the root, so ``../input/dem/colca.tif`` names the same file
+    read either way, and no shipped configuration has to change.
+
+    >>> import os
+    >>> from oroscope import site_searcher as ss
+    >>> a = os.path.normpath(os.path.join("/repo/config", "../input/dem/colca.tif"))
+    >>> b = os.path.normpath(os.path.join("/repo/src", "../input/dem/colca.tif"))
+    >>> a == b == "/repo/input/dem/colca.tif"
+    True
+
+    An absolute path is left as it is:
+
+    >>> cfg = ss.resolve_config_paths({"dem_path": "/data/x.tif"}, "/repo/config")
+    >>> cfg["dem_path"]
+    '/data/x.tif'
+    """
+    resolved = dict(config)
+    for key in _PATH_KEYS:
+        value = resolved.get(key)
+        if not value or not isinstance(value, str) or os.path.isabs(value):
+            continue
+        candidate = os.path.normpath(os.path.join(config_dir, value))
+        if os.path.exists(candidate):
+            resolved[key] = candidate
+            continue
+        if os.path.exists(value):
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}{key}={value!r} was found relative to the "
+                      f"working directory but not to the configuration file. That is "
+                      f"the old behaviour and still works; making it relative to the "
+                      f"config (or absolute) will keep working from anywhere.{C.RESET}")
+            continue
+        # Neither exists. Resolve against the config anyway, so the error names the
+        # path the configuration actually asked for.
+        resolved[key] = candidate
+    return resolved
+
+
 def load_config(path):
     """
-    Reads a configuration JSON.
+    Reads a configuration JSON, resolving its relative paths against its own directory.
 
     Parameters
     ----------
@@ -2908,6 +2984,10 @@ def load_config(path):
         how the command line has always treated a missing ``--config_path``, and
         matching it here keeps one behaviour rather than two.
 
+        Path-valued keys (``dem_path``, ``road_map_path``, ``resume_dir``) come back
+        absolute, resolved against the directory holding the configuration rather than
+        the working directory. See :func:`resolve_config_paths`.
+
     Raises
     ------
     json.JSONDecodeError
@@ -2917,7 +2997,8 @@ def load_config(path):
     if not path or not os.path.exists(path):
         return {}
     with open(path, 'r') as f:
-        return json.load(f)
+        config = json.load(f)
+    return resolve_config_paths(config, os.path.dirname(os.path.abspath(path)))
 
 
 def emit_explanation(results, run_output_dir=None, print_it=True):
@@ -4081,6 +4162,15 @@ def main():
 
     if args.config_path and os.path.exists(args.config_path):
         config_basename = os.path.splitext(os.path.basename(args.config_path))[0]
+        # Relative to the configuration, not the working directory -- the same rule
+        # load_config applies to dem_path, and for the same reason. Without it, fixing
+        # the inputs to run from anywhere would leave the *outputs* still landing
+        # wherever the caller happened to stand: from the repository root the default
+        # "../output/" writes a sibling of the repository. A base typed on the command
+        # line is the caller's own instruction and is left relative to where they are.
+        if key not in explicit_cli and not os.path.isabs(base_dir):
+            config_dir = os.path.dirname(os.path.abspath(args.config_path))
+            base_dir = os.path.normpath(os.path.join(config_dir, base_dir))
         run_output_dir = os.path.join(base_dir, config_basename)
     else:
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")

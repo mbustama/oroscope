@@ -385,8 +385,15 @@ obstacle: a pixel has one slope and both must accept it.
     a preset name was iterated character by character and a sweep on a GRAND config ran
     with **no exclusion zones while printing `RFI Zones: 8 active`**. The recorded
     sweeps are unaffected (they used TAMBO's `"none"`). Roadmap §6.35.
-11. **The pipeline resolves paths relative to the working directory**, so the bundled
-    configs need `cd src`. Making them relative to the configuration file is the fix.
+11. ~~**The pipeline resolves paths relative to the working directory.**~~ ✅ done,
+    2026-08-16. `load_config()` resolves `dem_path`, `road_map_path` and `resume_dir`
+    against the configuration's own directory, and the output base follows the same
+    rule, so a search runs identically from anywhere. No shipped config changed:
+    `config/` and `src/` are both one level below the root, so `../input/...` names the
+    same file either way. A cwd-relative path still works, with a warning. **Note
+    `oroscope-fetch-dem` is not covered** — it writes `../input/dem/` and `../config/`
+    relative to the working directory and has no configuration file to be relative to,
+    so it still wants running from `src/`.
 12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
 13. **No release.** Nothing on PyPI. The logo question is settled: it is a **PNG
     everywhere** (1024×1024 RGBA), because PyPI does not render SVG and a project
