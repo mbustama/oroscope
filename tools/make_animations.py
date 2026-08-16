@@ -60,6 +60,8 @@ small ones somewhere they can be committed.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import sys
 
@@ -142,11 +144,20 @@ def _colca_ground(fraction=0.4):
 
 
 def _colca_candidates(z, grid, stride=5):
-    """TAMBO's topographic screen over that ground, as the pipeline runs it."""
-    return ss.get_candidates_chunked(
-        z, grid, None, COLCA_ORIGIN_LAT, COLCA_ORIGIN_LON,
-        min_slope_deg=TAMBO_SLOPE_BAND[0], max_slope_deg=TAMBO_SLOPE_BAND[1],
-        candidate_stride=stride)
+    """
+    TAMBO's topographic screen over that ground, as the pipeline runs it.
+
+    The screen's tqdm bar goes to stderr, where a notebook stores it as output. It
+    reports a step that takes a fifth of a second on a crop this size, so it is carrying
+    nothing, and three of these animations are built inside a notebook whose outputs are
+    committed. Silenced here rather than in the library, which is right to be noisy when
+    it is chewing through a 6 Mpx DEM.
+    """
+    with contextlib.redirect_stderr(io.StringIO()):
+        return ss.get_candidates_chunked(
+            z, grid, None, COLCA_ORIGIN_LAT, COLCA_ORIGIN_LON,
+            min_slope_deg=TAMBO_SLOPE_BAND[0], max_slope_deg=TAMBO_SLOPE_BAND[1],
+            candidate_stride=stride)
 
 
 def the_walk():
@@ -782,6 +793,62 @@ BUILDERS = {"the_walk": the_walk, "the_azimuth_fan": the_azimuth_fan,
             "the_funnel": the_funnel, "stride_and_closing": stride_and_closing,
             "product_collapse": product_collapse, "slope_criterion": slope_criterion,
             "tau_in_rock": tau_in_rock, "energy_window": energy_window}
+
+
+def write_mp4_with_stills(name, fig, anim, out_dir, at=(0.0, 0.5, 1.0)):
+    """
+    Writes one MP4 and returns still frames from the *same* pass over the animation.
+
+    Two reasons this is one function and not two. It is half the work — several of these
+    spend twenty seconds scanning terrain before a frame is drawn. And the builders
+    **accumulate**: the ray drawn at frame 30 is still on the axes at frame 60, which is
+    what makes the fan fill in. So the frames can be walked exactly once; a second pass
+    would begin with everything already drawn, and its "first" frame would be a lie.
+
+    For showing an animation somewhere that cannot play one — a notebook whose outputs
+    are committed to a repository, a printed page, a slide that has to survive a
+    projector.
+
+    Parameters
+    ----------
+    name : str
+        Basename for the file, without extension.
+    fig, anim : Figure, FuncAnimation
+        As a builder in :data:`BUILDERS` returns them.
+    out_dir : str
+        Directory to write into; created if absent.
+    at : sequence of float, optional
+        Where to take stills, as fractions of the way through.
+
+    Returns
+    -------
+    path : str
+        The MP4 written.
+    stills : list of bytes
+        PNG bytes, one per entry in ``at``, at the video's own frame size.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{name}.mp4")
+    n = getattr(anim, "_save_count", None) or 1
+    wanted = sorted({min(n - 1, max(0, round(f * (n - 1)))) for f in at})
+    stills = []
+    # Driving the writer by hand means anim.save() never runs, and matplotlib's
+    # finaliser warns that an animation was discarded without being rendered. It was
+    # rendered; it just was not rendered by the method the finaliser watches.
+    anim._draw_was_started = True
+    writer = animation.FFMpegWriter(fps=FPS, bitrate=2400)
+    with writer.saving(fig, path, dpi=100):
+        for i in range(n):
+            # FuncAnimation offers no public way to ask for frame i, so this is the
+            # callable it was built with. Walked in order, for the reason above.
+            anim._func(i)
+            writer.grab_frame()
+            if i in wanted:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png")     # fig.dpi is the writer's: same size
+                stills.append(buf.getvalue())
+    plt.close(fig)
+    return path, stills
 
 
 def write(name, fig, anim, out_dir, formats):

@@ -58,10 +58,12 @@ jobs:
         # reproducible bit-for-bit across matplotlib versions -- so nothing is written
         # back and the working tree stays clean.
         #
-        # 07 and 08 are excluded. Both drive the whole pipeline rather than the
+        # 07, 08 and 09 are excluded. 07 and 08 drive the whole pipeline rather than the
         # kernels, and 08 reads stored full-DEM results that take about half an hour
-        # each to produce and are not in a runner's filesystem anyway. Executing them
-        # on every push would cost more than it checks. They are run locally when a
+        # each to produce and are not in a runner's filesystem anyway. 09 builds eight
+        # animations: two minutes of rendering, three of them running full arrival scans
+        # per frame, and it needs an ffmpeg the runner does not have. Executing any of
+        # them on every push would cost more than it checks. They are run locally when a
         # configuration changes and their outputs are committed; test_docs.py checks
         # that the API names they call still exist, which is the drift that mattered.
         run: |
@@ -69,5 +71,6 @@ jobs:
           cp notebooks/*.ipynb /tmp/nbcheck/
           rm -f /tmp/nbcheck/07_explaining_a_run.ipynb
           rm -f /tmp/nbcheck/08_the_full_dem.ipynb
+          rm -f /tmp/nbcheck/09_animating_the_mechanism.ipynb
           cd /tmp/nbcheck
           jupyter nbconvert --to notebook --execute --inplace *.ipynb

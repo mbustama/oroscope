@@ -1,14 +1,17 @@
 Tutorial notebooks
 ==================
 
-Eight worked notebooks live in `notebooks/
+Nine worked notebooks live in `notebooks/
 <https://github.com/mbustama/oroscope/tree/main/notebooks>`_, numbered in reading
 order. Each carries its figures inline, so they can be read on GitHub without being
 run, and each ends with links to the previous and next.
 
 **None of them needs a real DEM.** Every notebook builds its own terrain, because the
 DEMs are a quarter of a gigabyte and are not in the repository — a tutorial only its
-author can run is not a tutorial.
+author can run is not a tutorial. Notebook 9 will *use* the Colca DEM for three of its
+eight animations when it is there, because those three are about what a criterion does
+to real ground, but it falls back to synthetic terrain and says on each figure which it
+used.
 
 To run them rather than read them:
 
@@ -75,10 +78,17 @@ Running one
    ``tools/run_arequipa_full.py`` rather than running the searches itself, and says
    what to look at when they are run.
 
+`9. Animating the mechanism <https://github.com/mbustama/oroscope/blob/main/notebooks/09_animating_the_mechanism.ipynb>`_
+   The eight animations in ``tools/make_animations.py``, built and explained — what
+   each one argues, and why the six rejected candidates are better served by a static
+   figure. Ends with how to turn the MP4s into animated GIFs, both through the tool and
+   with plain ``ffmpeg``.
+
 .. note::
 
-   Notebooks 7 and 8 are not executed in CI. They drive whole searches, and 8 reads
-   stored full-DEM results that take about half an hour each to produce. They are run
-   locally when a configuration changes; ``tests/test_docs.py`` checks statically that
-   the API names they call still exist, which is the drift the execution would have
-   caught.
+   Notebooks 7, 8 and 9 are not executed in CI. Seven and eight drive whole searches,
+   and 8 reads stored full-DEM results that take about half an hour each to produce;
+   9 renders eight animations and wants an ``ffmpeg`` the runner does not have. They
+   are run locally when a configuration changes; ``tests/test_docs.py`` checks
+   statically that the API names they call still exist, which is the drift the
+   execution would have caught.
