@@ -50,12 +50,11 @@ from oroscope import site_searcher as ss
 with open(sys.argv[1]) as f:
     payload = json.load(f)
 
-params = {k: v for k, v in payload.items() if not k.startswith("_")}
-dem = params.pop("dem_path")
-lat = params.pop("origin_lat")
-lon = params.pop("origin_lon")
-ss.find_grand_regions_interactive(dem_path=dem, origin_lat=lat, origin_lon=lon,
-                                  run_output_dir=sys.argv[2], **params)
+# run_from_config does the configuration-to-pipeline translation, the same one main()
+# uses. This child used to splat the payload straight in, which meant rfi_zones reached
+# the pipeline as the preset *name*: iterated character by character, every character
+# failing the 'circle' test, and the point silently searching with no exclusion zones.
+ss.run_from_config(payload, run_output_dir=sys.argv[2])
 """
 
 
@@ -95,16 +94,14 @@ def run_once(config, out_dir, verbose=False, max_memory_gb=None, timeout=3600):
         own caller, and that caller is in another process here -- which is the whole
         point of running each point in one.
     """
+    # Only the sweep's own overrides here; the translation itself belongs to
+    # run_from_config, which the child calls.
     params = {k: v for k, v in config.items() if not k.startswith("_")}
-    for drop in ("print_info", "output_directory_base_with_given_json",
-                 "output_image_format"):
-        params.pop(drop, None)
+    params.pop("output_image_format", None)
     params["generate_kml"] = False
     # A sweep point is a row in a table, not something anyone reads: skip the
     # per-run summary rather than writing eighty of them nobody opens.
     params["explain"] = False
-    if params.get("score_weights") is not None:
-        params["score_weights"] = ss.parse_score_weights(params["score_weights"])
     if max_memory_gb:
         # The pipeline applies the cap itself now, so this is an ordinary parameter
         # rather than something the child had to remember to do first.

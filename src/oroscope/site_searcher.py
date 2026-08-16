@@ -33,6 +33,7 @@ re-read the file it was just handed the path to.
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 import numpy as np
 import tifffile as tiff
@@ -2968,6 +2969,203 @@ def emit_explanation(results, run_output_dir=None, print_it=True):
 
 
 # ==========================================
+#        CONFIGURATION -> PIPELINE
+# ==========================================
+# Keys a configuration file carries that are not pipeline parameters: they steer the
+# command line, not the search.
+_NOT_PIPELINE_KEYS = frozenset({
+    "print_info", "output_directory_base_with_given_json", "require_sky",
+})
+
+
+def resolve_rfi_zones(value, quiet=False):
+    """
+    Turns the many spellings of ``rfi_zones`` into the list the pipeline wants.
+
+    A configuration may carry a preset name, a JSON string from the command line, an
+    explicit list of zones, or nothing. The pipeline accepts only the list, and it
+    iterates whatever it is given -- so a preset name reaching it unresolved is iterated
+    *character by character*, each character failing the ``item[0] == 'circle'`` test.
+    That is silent: no exception, no warning, and a search that believes it is excluding
+    five radio-noise zones runs with none.
+
+    Parameters
+    ----------
+    value : str, list, or None
+        ``'lima'`` or ``'arequipa'`` for a preset, ``'none'`` or ``None`` for no zones,
+        a JSON string, or an explicit list of zone tuples.
+    quiet : bool, optional
+        Suppress the warning printed when a string cannot be parsed.
+
+    Returns
+    -------
+    list or None
+        Zones for the pipeline, or ``None``.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> len(ss.resolve_rfi_zones("arequipa"))
+    5
+    >>> ss.resolve_rfi_zones("none") is None
+    True
+    >>> ss.resolve_rfi_zones(None) is None
+    True
+
+    An explicit list is passed through untouched:
+
+    >>> ss.resolve_rfi_zones([("circle", -16.4, -71.5, 25.0, "Arequipa")])
+    [('circle', -16.4, -71.5, 25.0, 'Arequipa')]
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        key = value.lower()
+        if key == "lima":
+            return LIMA_RFI_ZONES
+        if key == "arequipa":
+            return AREQUIPA_RFI_ZONES
+        if key == "none":
+            return None
+        try:
+            return json.loads(value)
+        except Exception as e:                           # pragma: no cover - defensive
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}Could not parse rfi_zones {value!r}; "
+                      f"proceeding with none. {e}{C.RESET}")
+            return None
+    return list(value) if value else None
+
+
+def config_to_pipeline_kwargs(config, quiet=False, **overrides):
+    """
+    Translates a configuration mapping into :func:`find_grand_regions_interactive` kwargs.
+
+    This translation was written out three times -- in ``main()``, in the child process
+    ``sensitivity`` spawns, and in ``tools/run_arequipa_full.py`` -- and the copies had
+    already drifted. The sweep child passed ``rfi_zones`` through as the raw preset
+    name, which the pipeline then iterated character by character and silently resolved
+    to no zones at all; it never inverted ``require_sky`` either. Having one function
+    do it means a new parameter is added once, and means the drift cannot recur.
+
+    What the translation actually consists of:
+
+    - comment keys (``_``-prefixed) and command-line-only keys are dropped;
+    - ``require_sky`` is inverted into the pipeline's positive ``require_terrain``;
+    - ``rfi_zones`` presets are resolved to lists (:func:`resolve_rfi_zones`);
+    - the bands are made tuples, since JSON gives lists;
+    - ``score_weights`` is parsed from its ``"name=value"`` spelling;
+    - ``decay_spectral_index`` accepts a scalar or a ``(low, high)`` pair;
+    - a negative ``azimuth_half_width_deg`` means "unbounded", i.e. ``None``;
+    - anything the pipeline does not accept is dropped, with a warning naming it, so a
+      misspelled key is reported rather than silently ignored.
+
+    Parameters
+    ----------
+    config : dict
+        A configuration mapping, as :func:`load_config` returns.
+    quiet : bool, optional
+        Suppress the warnings about unknown keys and unparseable zones.
+    **overrides
+        Applied after the translation, so a caller can set ``run_output_dir`` or force
+        ``generate_kml=False`` without having to edit the mapping.
+
+    Returns
+    -------
+    dict
+        Keyword arguments for :func:`find_grand_regions_interactive`.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> kw = ss.config_to_pipeline_kwargs(
+    ...     {"_comment": "ignored", "dem_path": "d.tif", "require_sky": True,
+    ...      "rfi_zones": "arequipa", "grammage_band_gcm2": [236.0, 1287.0],
+    ...      "print_info": True})
+    >>> kw["require_terrain"], kw["grammage_band_gcm2"], len(kw["rfi_zones"])
+    (False, (236.0, 1287.0), 5)
+
+    The command-line-only keys do not reach the pipeline:
+
+    >>> "print_info" in kw or "require_sky" in kw
+    False
+    """
+    params = {k: v for k, v in config.items()
+              if not k.startswith("_") and k not in _NOT_PIPELINE_KEYS}
+
+    # The pipeline asks the positive question; the config and the CLI ask the negative.
+    params["require_terrain"] = not config.get("require_sky", False)
+
+    params["rfi_zones"] = resolve_rfi_zones(config.get("rfi_zones"), quiet=quiet)
+
+    # JSON has no tuples, and these are compared and unpacked as pairs downstream.
+    for key in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
+        if params.get(key) is not None:
+            params[key] = tuple(params[key])
+
+    if params.get("score_weights") is not None:
+        params["score_weights"] = parse_score_weights(params["score_weights"])
+
+    if params.get("decay_spectral_index") is not None:
+        params["decay_spectral_index"] = _one_or_pair(params["decay_spectral_index"])
+
+    # Negative means unbounded: scan every azimuth rather than a wedge around aspect.
+    half_width = params.get("azimuth_half_width_deg")
+    if half_width is not None and half_width < 0:
+        params["azimuth_half_width_deg"] = None
+
+    params.update(overrides)
+
+    unknown = sorted(k for k in params if k not in _PIPELINE_PARAMS)
+    for key in unknown:
+        del params[key]
+    if unknown and not quiet:
+        print(f"{C.WARN}{Icon.WARN}Ignoring {len(unknown)} key(s) the pipeline does not "
+              f"take: {', '.join(unknown)}. Check the spelling against "
+              f"default_config().{C.RESET}")
+    return params
+
+
+def run_from_config(config, run_output_dir=".", quiet=False, **overrides):
+    """
+    Runs one search from a configuration mapping or a path to one.
+
+    The library counterpart of ``oroscope --config_path ...``: one call, from a file a
+    run can be reproduced from, returning the results dictionary.
+
+    Parameters
+    ----------
+    config : dict or str
+        A configuration mapping, or a path to a JSON configuration file.
+    run_output_dir : str, optional
+        Where the run writes its outputs.
+    quiet : bool, optional
+        Passed to :func:`config_to_pipeline_kwargs`.
+    **overrides
+        Applied after the translation.
+
+    Returns
+    -------
+    dict
+        The results dictionary, as :func:`find_grand_regions_interactive` returns.
+
+    Examples
+    --------
+    Translation and execution are separable, which is what makes the mapping testable
+    without running a search:
+
+    >>> from oroscope import site_searcher as ss
+    >>> kw = ss.config_to_pipeline_kwargs(ss.default_config(), quiet=True)
+    >>> kw["require_terrain"], kw["rfi_zones"]
+    (True, None)
+    """
+    if isinstance(config, str):
+        config = load_config(config)
+    kwargs = config_to_pipeline_kwargs(config, quiet=quiet, **overrides)
+    return find_grand_regions_interactive(run_output_dir=run_output_dir, **kwargs)
+
+
+# ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
 def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=10000,
@@ -3722,6 +3920,16 @@ class TeeLogger:
         self.terminal.flush()
         self.log_file.flush()
 
+
+# Bound once, to the real function, rather than read inside
+# config_to_pipeline_kwargs on every call. Reading it at call time meant the filter
+# followed whatever `find_grand_regions_interactive` happened to be at that moment --
+# so a test double, or any decorator, presented a bare (*args, **kwargs) signature and
+# the translation quietly dropped every parameter it was supposed to pass.
+_PIPELINE_PARAMS = frozenset(
+    inspect.signature(find_grand_regions_interactive).parameters)
+
+
 def main():
     """
     Command-line entry point: parses arguments, reconciles them against the config
@@ -3967,114 +4175,15 @@ def _run_from_arguments(parser, args, explicit_cli, config_params, fallback_para
     # pipeline itself (preflight_memory), so a library caller gets all three without
     # having to know they exist. main() only passes the ceiling through.
 
-    # Handle RFI Zone selection mapping (Checks Config-passed custom lists, or matches string presets)
-    rfi_input = final_params.get('rfi_zones', 'none')
-    selected_rfi = None
-    
-    if isinstance(rfi_input, str):
-        if rfi_input.lower() == 'lima':
-            selected_rfi = LIMA_RFI_ZONES
-        elif rfi_input.lower() == 'arequipa':
-            selected_rfi = AREQUIPA_RFI_ZONES
-        elif rfi_input.lower() != 'none':
-            # Attempt to parse as JSON if a raw string array was passed via CLI
-            try:
-                selected_rfi = json.loads(rfi_input)
-            except Exception as e:
-                print(f"{C.WARN}{Icon.WARN}WARNING: Could not parse custom rfi_zones string. Proceeding with 'none'. Error: {e}{C.RESET}")
-    elif isinstance(rfi_input, list):
-        # Naturally supports custom RFI arrays loaded cleanly from the JSON config file
-        selected_rfi = rfi_input
-
     # Output explanations if requested (either via flag or configured true)
     if final_params.get('print_info', True):
         print_tool_explanation()
 
-    # Execute main search pipeline with our integrated parameters
-    return find_grand_regions_interactive(
-        dem_path=final_params['dem_path'],
-        target_antennas=final_params['target_antennas'], 
-        rfi_zones=selected_rfi,
-        min_width_km=final_params['min_width_km'],
-        origin_lat=final_params['origin_lat'],
-        origin_lon=final_params['origin_lon'],
-        min_altitude=final_params['min_altitude'], 
-        max_altitude=final_params['max_altitude'],
-        antenna_spacing_km=final_params['antenna_spacing_km'],
-        min_dist_km=final_params['min_dist_km'],
-        max_dist_km=final_params['max_dist_km'],
-        grid_type=final_params['grid_type'],       
-        generate_kml=final_params['generate_kml'],     
-        road_map_path=final_params['road_map_path'],    
-        max_road_dist_km=final_params['max_road_dist_km'],
-        search_mode=final_params['search_mode'],
-        min_sub_array_size=final_params['min_sub_array_size'],
-        min_aspect_deg=final_params['min_aspect_deg'], 
-        max_aspect_deg=final_params['max_aspect_deg'],
-        min_slope_deg=final_params['min_slope_deg'],
-        max_slope_deg=final_params['max_slope_deg'],
-        region_name=final_params['region_name'],
-        downsample_factor=final_params['downsample_factor'],
-        run_output_dir=run_output_dir,
-        output_image_format=final_params['output_image_format'],
-        tile_size=final_params['tile_size'],
-        resume=final_params.get('resume', False),
-        resume_dir=final_params.get('resume_dir'),
-        num_cores=final_params.get('num_cores', -1),
-        cell_size_deg=final_params.get('cell_size_deg'),
-        candidate_stride=final_params.get('candidate_stride', 5),
-        slope_baseline_m=final_params.get('slope_baseline_m'),
-        energy_min_pev=final_params.get('energy_min_pev'),
-        energy_max_pev=final_params.get('energy_max_pev'),
-        n_azimuths=final_params.get('n_azimuths', 9),
-        azimuth_half_width_deg=(None if (final_params.get('azimuth_half_width_deg', 60.0) or 0) < 0
-                                else final_params.get('azimuth_half_width_deg', 60.0)),
-        elev_min_deg=final_params.get('elev_min_deg', -3.0),
-        elev_max_deg=final_params.get('elev_max_deg', 3.0),
-        n_elev_bins=final_params.get('n_elev_bins', 12),
-        min_column_depth_gcm2=final_params.get('min_column_depth_gcm2', 0.0),
-        require_terrain=not final_params.get('require_sky', False),
-        fresnel_frequency_mhz=final_params.get('fresnel_frequency_mhz'),
-        refraction_k=final_params.get('refraction_k'),
-        antenna_height_m=final_params.get('antenna_height_m', 2.0),
-        exclude_near_field=final_params.get('exclude_near_field', True),
-        fresnel_near_field_m=final_params.get('fresnel_near_field_m', 500.0),
-        depth_band_gcm2=(tuple(final_params['depth_band_gcm2'])
-                         if final_params.get('depth_band_gcm2') else None),
-        score_composition=final_params.get('score_composition', 'product'),
-        min_score=final_params.get('min_score', 0.0),
-        geomag_declination_deg=final_params.get('geomag_declination_deg'),
-        geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
-        muon_shielding_km=final_params.get('muon_shielding_km'),
-        bilinear_sampling=final_params.get('bilinear_sampling', True),
-        use_geomagnetic=final_params.get('use_geomagnetic', True),
-        grammage_mode=final_params.get('grammage_mode', 'radio'),
-        grammage_band_gcm2=(tuple(final_params['grammage_band_gcm2'])
-                            if final_params.get('grammage_band_gcm2') else None),
-        grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
-        decay_energy_pev=final_params.get('decay_energy_pev'),
-        decay_energy_min_pev=final_params.get('decay_energy_min_pev'),
-        decay_energy_max_pev=final_params.get('decay_energy_max_pev'),
-        decay_spectral_index=_one_or_pair(final_params.get('decay_spectral_index')),
-        shower_development_m=final_params.get('shower_development_m', 3000.0),
-        gap_close_km=final_params.get('gap_close_km'),
-        max_range_km=final_params.get('max_range_km'),
-        score_percentile=final_params.get('score_percentile'),
-        stop_at_target=final_params.get('stop_at_target', False),
-        min_target_slope_deg=final_params.get('min_target_slope_deg'),
-        max_target_slope_deg=final_params.get('max_target_slope_deg'),
-        grammage_band_fraction=final_params.get('grammage_band_fraction'),
-        shower_elongation_rate_gcm2=final_params.get('shower_elongation_rate_gcm2'),
-        shower_lambda_gcm2=final_params.get('shower_lambda_gcm2'),
-        solid_angle_half_sr=final_params.get('solid_angle_half_sr'),
-        distance_band_m=(tuple(final_params['distance_band_m'])
-                         if final_params.get('distance_band_m') else None),
-        clearance_full_at=final_params.get('clearance_full_at'),
-        score_weights=parse_score_weights(final_params.get('score_weights')),
-        nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2'),
-        max_memory_gb=final_params.get('max_memory_gb'),
-        explain=final_params.get('explain', True)
-    )
+    # Execute the search. The configuration-to-pipeline translation lives in
+    # config_to_pipeline_kwargs, so main(), the sensitivity child and the full-DEM
+    # runner all use the same one and a new parameter is added in a single place.
+    # run_output_dir is an override because main() derives it from the config's name.
+    return run_from_config(final_params, run_output_dir=run_output_dir)
 
 
 if __name__ == "__main__":

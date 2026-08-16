@@ -2152,6 +2152,46 @@ stride 1 over the full DEM is 26.8M candidates, which the corrected estimator pu
 The joint area is affected as well, and in the direction that matters: it is limited by
 TAMBO's mask, so 50.1 km² at Colca is also a floor rather than an estimate.
 
+### 6.35 One config→pipeline translation, and the silent bug the three copies hid
+
+§9.10 called the triplicated config→pipeline mapping "where a new parameter gets
+forgotten". It had already happened, and worse than forgetting.
+
+`main()` translated a configuration into pipeline keywords across sixty explicit lines.
+`sensitivity`'s child process splatted the payload straight in. `tools/run_arequipa_full.py`
+re-derived a third version. Only the first was complete.
+
+**The sweep child never resolved `rfi_zones`.** A preset name reached
+`find_grand_regions_interactive`, which does `for item in rfi_zones: if item[0] ==
+'circle'`. Given the string `"arequipa"` that iterates *characters*; `'a'[0]` is `'a'`,
+never `'circle'`, so every zone was skipped. No exception and no warning — and because
+the count is `len(rfi_zones)`, the run cheerfully printed **`RFI Zones: 8 active`**, one
+per letter, while excluding nothing. A sweep on a GRAND config would have searched
+straight through Arequipa city and reported that it had not.
+
+The recorded sweeps (§6.20–6.21) are **not** affected: they were run on
+`tambo_colca_config.json`, whose `rfi_zones` is `"none"`, and iterating `"none"` also
+yields nothing — which is the right answer there, by luck rather than by design. The
+child also never inverted `require_sky`, and never made the bands tuples.
+
+`config_to_pipeline_kwargs()` is now the single translation and `run_from_config()` the
+single entry point; `main()` is one call, the sweep child is one call, and the runner is
+one call. Verified behaviour-preserving by re-running GRAND over the Colca crop and
+diffing: funnel, results, aperture and every parameter identical. The sweep child now
+records five zones and a funnel identical to the direct run.
+
+Two things learned in the doing:
+
+- **Unknown keys are now dropped *and named*.** A misspelled `min_slop_deg` used to be
+  ignored in silence, because an explicit keyword-by-keyword mapping simply never reads
+  it. The translation warns, which is how a typo becomes visible.
+- **Bind the signature at import, not at call time.** The filter first read
+  `inspect.signature(find_grand_regions_interactive)` on every call, which meant it
+  followed whatever that name pointed at — so the existing CLI tests, which substitute a
+  recorder, presented a bare `(*args, **kwargs)` and the translation dropped every
+  parameter it was meant to pass. Eighteen tests failed at once and were right to.
+  `_PIPELINE_PARAMS` is bound once, to the real function.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

@@ -379,11 +379,12 @@ obstacle: a pixel has one slope and both must accept it.
 **Software**
 9. ~~**A stride-1 control at TAMBO settings.**~~ ✅ done, 2026-08-16. It is a lower bound
    by **4.75×**. Roadmap §6.34; `config/tambo_colca_stride1.json`.
-10. **The config→pipeline translation is duplicated three times** — `main()`,
-    `sensitivity.py`'s child process, and `tools/run_arequipa_full.py` each re-derive the
-    same mapping (drop `print_info`, invert `require_sky`, tuple-ify the bands, resolve
-    the RFI preset, parse `score_weights`). A single `run_from_config()` would collapse
-    it, and it is where a new parameter gets forgotten.
+10. ~~**The config→pipeline translation is duplicated three times.**~~ ✅ done,
+    2026-08-16. `config_to_pipeline_kwargs()` / `run_from_config()`; all three callers
+    use them. It had already cost a bug: the sweep child never resolved `rfi_zones`, so
+    a preset name was iterated character by character and a sweep on a GRAND config ran
+    with **no exclusion zones while printing `RFI Zones: 8 active`**. The recorded
+    sweeps are unaffected (they used TAMBO's `"none"`). Roadmap §6.35.
 11. **The pipeline resolves paths relative to the working directory**, so the bundled
     configs need `cd src`. Making them relative to the configuration file is the fix.
 12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
