@@ -489,7 +489,7 @@ class TestOneTranslationForEveryCaller(unittest.TestCase):
     ``config_to_pipeline_kwargs`` is the single translation, and the reason it exists.
 
     The mapping was written out three times -- ``main()``, the child ``sensitivity``
-    spawns, and ``tools/run_arequipa_full.py`` -- and the copies drifted. The sweep
+    spawns, and ``tools/run_full_dem.py`` -- and the copies drifted. The sweep
     child splatted the config straight into the pipeline, so a preset name reached a
     function that iterates its argument, every character failed the ``item[0] ==
     'circle'`` test, and the point searched with no exclusion zones at all. No

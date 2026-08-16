@@ -113,7 +113,8 @@ real ground" is not something synthetic terrain can honestly show.
   The criterion is per direction, the observable is a mean over accepted directions.
   **Read `target_slope_deg` as a description, never as a prediction of what a cut does.**
 
-**Notebook 9**, generated from `tools/make_notebooks.py` as usual. Builds all eight,
+**The animations notebook** (now 07), generated from `tools/make_notebooks.py` as
+usual. Builds all eight,
 explains what each argues, and documents MP4 → GIF two ways: `--format gif`, and a plain
 `ffmpeg` `palettegen`/`paletteuse` recipe for an MP4 from anywhere. The palette matters —
 342 KiB against pillow's 761 KiB on the same animation, and better colour.
@@ -126,9 +127,10 @@ the frames can be walked exactly once.
 **The Peru-wide survey ran.** §6.46. 22,080 × 15,360 = 339 Mpx at 3 arc-seconds:
 **17 sites, 563,411 km², 633,655 antenna positions, in four minutes.** Caveats in §5.
 
-**Notebook 10** is that survey on its own, at the owner's request. It reads the stored
+**The Peru notebook** (now 12) is that survey on its own, at the owner's request. It
+reads the stored
 run rather than repeating it, but everything else computes live — the memory table, the
-stride/closing table, the funnel, the area bracket, and the resolution check. **Unlike
+stride/closing table, the funnel, the area bracket, and the resolution check. **Unlike 07 through 10 it is executed in CI**:
 7, 8 and 9 it is executed in CI**: every cell needing the store is guarded and nothing
 else touches the filesystem outside the library, so on a bare runner it degrades to
 prose and arithmetic instead of failing. Verified by running it from an empty directory
@@ -240,7 +242,7 @@ mkdir -p /tmp/k/kernels/python3 && cat > /tmp/k/kernels/python3/kernel.json <<'J
           "ipykernel_launcher", "-f", "{connection_file}"],
  "display_name": "Python 3", "language": "python"}
 JSON
-cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 09_animating_the_mechanism.ipynb
+cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 07_animating_the_mechanism.ipynb
 ```
 
 **Trap 5 — `ffmpeg` is the snap build** and cannot write outside its confinement — it will
@@ -256,7 +258,8 @@ produced** — count `image/png` outputs, or grep built HTML for `Figure size`. 
 a green build.
 
 **Trap 8 — notebook size.** `show_figure` picks JPEG over PNG above 250 KiB; terrain maps
-are photographic and PNG made notebook 8 4.2 MB. Notebook 9's stills use the same trick.
+are photographic and PNG made the Arequipa notebook 4.2 MB. The animations notebook's
+stills use the same trick.
 
 **Trap 9 — a killed run leaves orphans.** The crashed search left two 339 MB
 `buffer_*.npy` scratch files and an output directory mixing two runs' artefacts. Check
@@ -285,13 +288,12 @@ of superseded material if room is ever needed.
 | --- | --- |
 | `tools/make_animations.py` | Eight animations now. Adds `_colca_ground()` (real DEM or synthetic fallback), `write_mp4_with_stills()`, and the four new builders. |
 | `tools/make_notebooks.py` | Adds `NB09`. **Edit here, never the `.ipynb`.** |
-| `notebooks/09_animating_the_mechanism.ipynb` | Generated and executed. Excluded from CI execution. |
-| `notebooks/10_the_peru_survey.ipynb` | Generated and executed. **Not** excluded — it is written to survive a runner with no store. |
+| `notebooks/` | **Renumbered 2026-08-16.** 07 animations, 08 explaining a run, then a per-region block: 09 Arequipa, 10 Ancash, 11 reserved for Lima, 12 Peru. Generator variables are content-named (`NB_ANCASH`, not `NB10`) so the next region does not force a rename. 07–10 excluded from CI execution; 12 is not, and is written to survive a runner with no store. |
 | `src/oroscope/fetch_dem.py` | Adds the `peru` region (SRTMGL3), `--region`, `--output_dir`, `--config_dir`, `OPENTOPOGRAPHY_API_KEY`. No longer shells out to a `site_searcher.py` in the CWD — a pre-package leftover that broke it outside `src/`. |
 | `src/oroscope/site_searcher.py` | `preflight_memory` warns when the cap exceeds available memory and returns `cap_exceeds_available`. |
 | `config/grand_peru_survey.json` | **New.** The national survey. Every choice is commented with its reason. |
 | `input/dem/peru_SRTMGL3.tif` | Gitignored, 302 MB, downloaded this session. |
-| `tests/test_docs.py` | Checks notebook 9's `ma.<name>` calls resolve and that it builds every `BUILDERS` entry and no others. |
+| `tests/test_docs.py` | Checks the animations notebook's `ma.<name>` calls resolve and that it builds every `BUILDERS` entry and no others. Pins the CI exclusion list. |
 | `docs/ROADMAP.md` | §6.44–6.47. |
 
 ---
@@ -335,7 +337,8 @@ shared line of sight, not shared footprint.**
 
 ## 6. Do not repeat
 
-- **The full Arequipa DEM run.** Done, 26 minutes, store populated, notebook 8 executed.
+- **The full Arequipa DEM run.** Done, 26 minutes, store populated, notebook 09 executed.
+- **The Ancash run.** Done, `results/ancash_full/`, notebook 10.
 - **The Peru survey at stride 15.** Done, four minutes, `output/grand_peru_survey/`.
 - **The stride-1 controls.** Both GRAND and TAMBO. §6.34.
 - **The sensitivity sweeps.** §6.20–6.21.

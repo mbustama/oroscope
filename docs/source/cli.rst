@@ -161,7 +161,7 @@ Read this before quoting a capacity. Several criteria sit near cliffs.
 
    oroscope-fetch-dem --region arequipa --open_topography_api_key YOUR_KEY
    oroscope-fetch-dem --region peru                     # key from the environment
-   oroscope-fetch-dem                                   # all three regions
+   oroscope-fetch-dem                                   # all four regions
 
 Fetches a bundled region into ``input/dem/`` and writes a ready-to-run configuration
 for it.
@@ -179,6 +179,11 @@ for it.
      - 148 MB
      - The department. Every published number in this project comes from it or from a
        crop of it.
+   * - ``ancash``
+     - SRTMGL1, 30 m
+     - 95 MB
+     - The Cordillera Blanca and the Callejón de Huaylas. Run at the same resolution
+       and criteria as Arequipa, so the two are directly comparable.
    * - ``lima``
      - AW3D30, 30 m
      - 110 MB
@@ -320,17 +325,38 @@ any clone. The three that are about what happens on *real* ground —
 is not, saying on the figure which they used.
 
 
-``tools/run_arequipa_full.py`` — the full-DEM run
----------------------------------------------------
+``tools/run_full_dem.py`` — the full-DEM runs
+-----------------------------------------------
 
 Not a console script — it lives in the repository, because it is about *this* project's
-full-DEM run rather than about searching in general. It runs GRAND, then TAMBO, then
-the combination, over the whole Arequipa DEM, and stores the small artefacts for
-:doc:`notebook 8 <notebooks>` to read.
+own runs rather than about searching in general. For one region it runs GRAND, then
+TAMBO, then the combination over the whole DEM, and stores the small artefacts for that
+region's :doc:`notebook <notebooks>` to read.
+
+Regions come from a table in the file, each needing a DEM in ``input/dem/`` and a
+``config/{grand,tambo}_<region>_full.json`` pair:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 20 66
+
+   * - ``--region``
+     - grid
+     -
+   * - ``arequipa``
+     - 129 Mpx, 1 arc-sec
+     - The default. GRAND takes about 25 minutes, TAMBO about one.
+   * - ``ancash``
+     - 69 Mpx, 1 arc-sec
+     - The Cordillera Blanca. Roughly half the pixels, so roughly half the time.
+
+This was ``run_arequipa_full.py``, which hard-coded one DEM, one store and one pair of
+configurations. The second region asked for was not a reason to copy two hundred lines.
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py --dry-run
+   python tools/run_full_dem.py --dry-run
+   python tools/run_full_dem.py --region ancash --dry-run
 
 **What ``--dry-run`` does.** It reports what the real run would cost and then stops,
 without starting a search, writing a file or touching the store:
@@ -380,13 +406,14 @@ Then, for real:
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py
+   python tools/run_full_dem.py                     # arequipa, the default
+   python tools/run_full_dem.py --region ancash
 
 or one experiment at a time:
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py --only grand
+   python tools/run_full_dem.py --region ancash --only grand
 
 **Run it when a configuration changes, not otherwise.** The store carries a manifest
 naming the configurations and the time, so a stale one is detectable rather than merely

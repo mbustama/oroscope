@@ -3732,7 +3732,7 @@ def config_to_pipeline_kwargs(config, quiet=False, **overrides):
     Translates a configuration mapping into :func:`find_grand_regions_interactive` kwargs.
 
     This translation was written out three times -- in ``main()``, in the child process
-    ``sensitivity`` spawns, and in ``tools/run_arequipa_full.py`` -- and the copies had
+    ``sensitivity`` spawns, and in ``tools/run_full_dem.py`` -- and the copies had
     already drifted. The sweep child passed ``rfi_zones`` through as the raw preset
     name, which the pipeline then iterated character by character and silently resolved
     to no zones at all; it never inverted ``require_sky`` either. Having one function

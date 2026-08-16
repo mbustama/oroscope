@@ -769,15 +769,15 @@ list, and it is deliberately blunt."""),
   derivation behind every criterion."""),
 ("md", """## Where to go next
 
-- **[7. Explaining a run](07_explaining_a_run.ipynb)** — driving the pipeline from
-  Python, and reading what it says about a run that succeeds and one that does not.
-- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the run that has never been
-  done."""),
+- **[7. Animating the mechanism](07_animating_the_mechanism.ipynb)** — the parts of
+  all this that a still picture explains badly, as eight short films.
+- **[8. Explaining a run](08_explaining_a_run.ipynb)** — driving the pipeline from
+  Python, and reading what it says about a run that succeeds and one that does not."""),
 ("md", footer(prev=("05_grand_and_tambo.ipynb", "GRAND and TAMBO"),
-              nxt=("07_explaining_a_run.ipynb", "Explaining a run"))),
+              nxt=("07_animating_the_mechanism.ipynb", "Animating the mechanism"))),
 ]
 
-# --------------------------------------------------------------------------- 07
+# --------------------------------------------------------------------------- 08  explaining a run
 SHOW_HELPER = """from IPython.display import Image, display
 
 
@@ -816,8 +816,8 @@ def show_figure(path, width=1100, caption=None):
     display(Image(data=data))"""
 
 
-NB07 = [
-("md", """# 7. Explaining a run
+NB_EXPLAIN = [
+("md", """# 8. Explaining a run
 
 The earlier notebooks drive the pieces: the scan kernel, the physics, the score shapes.
 This one drives **the whole pipeline** — screen, scan, score, clean, label, pack, write
@@ -826,7 +826,7 @@ This one drives **the whole pipeline** — screen, scan, score, clean, label, pa
 Two searches are run below — one that finds ground and one that finds none — because
 the summary of an empty result is the one that matters most and is the easiest to
 neglect. The full Arequipa DEM has its own notebook,
-**[8](08_the_full_dem.ipynb)**.
+**[9](09_arequipa_dem.ipynb)**.
 
 Three things are worth knowing before the first call:
 
@@ -1163,23 +1163,23 @@ the point of keeping it a pure function of the results rather than something the
 pipeline prints as it goes."""),
 ("md", """## Where to go next
 
-- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the run that has never been
+- **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** — the run that has never been
   done, and what to look at when it is.
 - **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — how firm any
   of this is."""),
-("md", footer(prev=("06_combining_and_sensitivity.ipynb", "Combining and sensitivity"),
-              nxt=("08_the_full_dem.ipynb", "The full Arequipa DEM"))),
+("md", footer(prev=("07_animating_the_mechanism.ipynb", "Animating the mechanism"),
+              nxt=("09_arequipa_dem.ipynb", "Arequipa, the full DEM"))),
 ]
 
-# --------------------------------------------------------------------------- 08
-NB08 = [
-("md", """# 8. The full Arequipa DEM
+# --------------------------------------------------------------------------- 09  arequipa
+NB_AREQUIPA = [
+("md", """# 9. Arequipa, the full DEM
 
 Every number this project has published comes from **crops** — Colca, and small Arequipa
 windows. The full DEM is the run that has never been done, and this notebook is where it
 lands.
 
-[Notebook 7](07_explaining_a_run.ipynb) covers how to drive the pipeline and how to read
+[Notebook 8](08_explaining_a_run.ipynb) covers how to drive the pipeline and how to read
 what it says. This one is about one specific run, at a scale the crops cannot speak
 for."""),
 ("code", """import json
@@ -1195,8 +1195,8 @@ a machine that has the DEM; the notebook opens a few hundred kilobytes of JSON.
 To produce or refresh the store:
 
 ```bash
-python tools/run_arequipa_full.py --dry-run   # report the cost, then stop
-python tools/run_arequipa_full.py             # GRAND, TAMBO, then the combination
+python tools/run_full_dem.py --dry-run   # report the cost, then stop
+python tools/run_full_dem.py             # GRAND, TAMBO, then the combination
 ```
 
 **Start with `--dry-run`.** It begins nothing — no search, no file, no change to the
@@ -1268,8 +1268,8 @@ else:
     manifest = None
     print("The full-DEM store is empty: these searches have not been run yet.\\n")
     print("Produce it with:")
-    print("    python tools/run_arequipa_full.py --dry-run")
-    print("    python tools/run_arequipa_full.py")
+    print("    python tools/run_full_dem.py --dry-run")
+    print("    python tools/run_full_dem.py")
 
 grand_full = load_stored("grand")
 tambo_full = load_stored("tambo")"""),
@@ -1401,7 +1401,7 @@ large for a repository. But the PNG maps are in `output/`, and if you have run t
 searches locally they are worth looking at rather than reading about: the funnel says
 *how much* ground survived, the map says *where* it is.
 
-If `output/` is empty here, produce it with `python tools/run_arequipa_full.py`. The
+If `output/` is empty here, produce it with `python tools/run_full_dem.py`. The
 images below are stored in this notebook, so they are visible either way."""),
 ("code", SHOW_HELPER),
 ("code", """import glob
@@ -1661,14 +1661,16 @@ from striding and ~30% again from downsampling. The joint 50.2 km² inherits bot
 a floor rather than an estimate."""),
 ("md", """## Where to go next
 
-- **[9. Animating the mechanism](09_animating_the_mechanism.ipynb)** — the eight
-  animations, including the two that were built to interrogate the numbers on this
-  page."""),
-("md", footer(prev=("07_explaining_a_run.ipynb", "Explaining a run"),
-              nxt=("09_animating_the_mechanism.ipynb", "Animating the mechanism"))),
+- **[10. Ancash](10_ancash_dem.ipynb)** — the same question over the Cordillera
+  Blanca, at the same resolution and with every criterion unchanged, so the difference
+  in the answer is a difference in the ground.
+- **[12. Peru, all of it](12_peru_dem.ipynb)** — the whole country at 3 arc-seconds,
+  and how to read a coarse answer honestly."""),
+("md", footer(prev=("08_explaining_a_run.ipynb", "Explaining a run"),
+              nxt=("10_ancash_dem.ipynb", "Ancash"))),
 ]
 
-# --------------------------------------------------------------------------- 09
+# --------------------------------------------------------------------------- 07  animations
 STILLS_HELPER = """from IPython.display import Image, display
 
 
@@ -1705,8 +1707,8 @@ BUILD_HELPER = """def build(name, at=(0.0, 0.5, 1.0)):
           f"({os.path.getsize(path) / 1024:,.0f} KiB, {anim._save_count} frames)")
     show_stills(stills)"""
 
-NB09 = [
-("md", """# 9. Animating the mechanism
+NB_ANIMATIONS = [
+("md", """# 7. Animating the mechanism
 
 Some of what this project does is a **process**, and a process is badly served by a
 still picture. A ray sweeping down through the elevation window, a map draining stage by
@@ -1971,17 +1973,302 @@ print(f"{len(stills)} stills at the video's own frame size, "
   `the_azimuth_fan` animate, in code.
 - **[4. Criteria and scoring](04_criteria_and_scoring.ipynb)** — the component shapes
   that `product_collapse` multiplies together.
-- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — what the whole machine
+- **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** — what the whole machine
   produced when it was finally pointed at everything.
-- **[10. Peru, all of it](10_the_peru_survey.ipynb)** — the same machine pointed at a
+- **[12. Peru, all of it](12_peru_dem.ipynb)** — the same machine pointed at a
   country, and how to read a coarse answer honestly."""),
-("md", footer(prev=("08_the_full_dem.ipynb", "The full Arequipa DEM"),
-              nxt=("10_the_peru_survey.ipynb", "Peru, all of it"))),
+("md", footer(prev=("06_combining_and_sensitivity.ipynb", "Combining and sensitivity"),
+              nxt=("08_explaining_a_run.ipynb", "Explaining a run"))),
 ]
 
-# --------------------------------------------------------------------------- 10
-NB10 = [
-("md", """# 10. Peru, all of it
+# --------------------------------------------------------------------------- 10  ancash
+NB_ANCASH = [
+("md", """# 10. Ancash
+
+[Notebook 9](09_arequipa_dem.ipynb) ran the whole machine over Arequipa. This one runs
+**the same three searches over different ground** — the Cordillera Blanca and the
+Callejón de Huaylas, 300 km of the steepest tropical mountains on Earth, with Huascarán
+at 6,768 m in the middle of them.
+
+The point is not that Ancash is new terrain. It is that **every transferable criterion
+is held fixed**, so a difference in the answer is a difference in the ground rather than
+a difference in the question. That is a claim this notebook checks rather than asserts,
+in the second cell below."""),
+("code", """import json
+import os
+
+import numpy as np
+
+from oroscope import explain
+from oroscope import site_searcher as ss"""),
+("md", """## What is the same, and what is not
+
+Both configurations were derived from Arequipa's by changing the DEM path and the label,
+and nothing else. Rather than ask you to believe that, here is the diff."""),
+("code", """def settings(path):
+    \"\"\"A configuration without its commentary: `_comment*` keys are prose.\"\"\"
+    with open(path) as f:
+        return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+
+
+for experiment in ("grand", "tambo"):
+    a = settings(os.path.join("..", "config", f"{experiment}_arequipa_full.json"))
+    n = settings(os.path.join("..", "config", f"{experiment}_ancash_full.json"))
+    keys = sorted(set(a) | set(n))
+    differ = [k for k in keys if a.get(k) != n.get(k)]
+    print(f"{experiment.upper()}: {len(keys)} settings, {len(differ)} differ")
+    for k in differ:
+        print(f"    {k:<14} arequipa={a.get(k)!r}")
+        print(f"    {'':<14} ancash  ={n.get(k)!r}")"""),
+("md", """**TAMBO is an exact repeat**: the two differences are the file it reads and the name it
+prints.
+
+**GRAND differs in one real setting, `rfi_zones`.** Arequipa's run excludes five
+hand-curated circles — Arequipa city, Majes, Cerro Verde, La Joya, Mollendo — and there
+is no Ancash preset. Inventing a five-circle Ancash list would have injected a new
+assumption into a run whose entire purpose is comparison, so this run excludes nothing
+and says so. The size of it: Arequipa's zones cover about 3,500 km² of a ~120,000 km²
+box, so **read Ancash's GRAND area as at most ~3% flattered** on that account.
+
+The real settlements are not ignored — 774 of them, from OpenStreetMap, are on the maps
+below. They are context here, not a filter."""),
+("md", """## Read, not run
+
+The cells below open results produced locally and stored in `results/ancash_full/`. To
+produce or refresh them:
+
+```bash
+export OPENTOPOGRAPHY_API_KEY=...          # free, see the CLI page
+cd src && oroscope-fetch-dem --region ancash
+python -m oroscope.fetch_roads --dem ../input/dem/ancash_SRTMGL1.tif --places
+
+python tools/run_full_dem.py --region ancash --dry-run
+python tools/run_full_dem.py --region ancash
+```
+
+Ancash is 69 Mpx against Arequipa's 129, so it costs roughly half as much: about
+thirteen minutes for GRAND and under a minute for TAMBO."""),
+("code", """STORE = os.path.abspath(os.path.join("..", "results", "ancash_full"))
+AREQUIPA_STORE = os.path.abspath(os.path.join("..", "results", "arequipa_full"))
+
+
+def load(store, label):
+    path = os.path.join(store, f"{label}_results.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+runs = {label: load(STORE, label) for label in ("grand", "tambo")}
+reference = {label: load(AREQUIPA_STORE, label) for label in ("grand", "tambo")}
+for label, r in runs.items():
+    print(f"ancash {label:<6} {'loaded' if r else 'NOT IN THE STORE YET'}")
+for label, r in reference.items():
+    print(f"arequipa {label:<4} {'loaded' if r else 'not present'}")"""),
+("md", """## The terrain, before the searches
+
+The two DEMs can be compared without running anything, and doing so makes a prediction
+worth holding the results against. Slope is computed in tiles so that a 129 Mpx DEM does
+not need 1.5 GB of gradients at once."""),
+("code", """def slope_profile(tif, origin_lat, bands=(("GRAND 3-25", 3.0, 25.0),
+                                          ("TAMBO 20-60", 20.0, 60.0)), block=2048):
+    \"\"\"Median slope and band shares over a DEM, accumulated tile by tile.\"\"\"
+    import tifffile
+    grid = ss.resolve_grid_geometry(tif, origin_lat)
+    z = tifffile.imread(tif)
+    rows = z.shape[0]
+    hist = np.zeros(9001)                       # 0.01 degree bins, 0-90
+    counts = {name: 0 for name, _, _ in bands}
+    total = 0
+    for r0 in range(0, rows, block):
+        r1 = min(rows, r0 + block)
+        lo, hi = max(0, r0 - 1), min(rows, r1 + 1)
+        tile = z[lo:hi].astype(np.float32)
+        dy, dx = np.gradient(tile, grid.cell_size_y, grid.cell_size_x)
+        slope = np.degrees(np.arctan(np.hypot(dy, dx)))[r0 - lo:r1 - lo]
+        land = z[r0:r1] > 0                     # the sea is exactly 0 and has no slope
+        s = slope[land]
+        if not s.size:
+            continue
+        total += s.size
+        hist += np.histogram(s, bins=9001, range=(0.0, 90.0))[0]
+        for name, a, b in bands:
+            counts[name] += int(((s >= a) & (s <= b)).sum())
+    median = float((np.searchsorted(np.cumsum(hist), total / 2.0) + 0.5) / 100.0)
+    return {"Mpx": z.size / 1e6, "median slope": median,
+            **{name: 100.0 * counts[name] / total for name, _, _ in bands}}
+
+
+DEMS = {"Arequipa": ("arequipa_SRTMGL1.tif", -14.5553),
+        "Ancash":   ("ancash_SRTMGL1.tif",   -8.04958)}
+terrain = {}
+for name, (stem, lat) in DEMS.items():
+    tif = os.path.abspath(os.path.join("..", "input", "dem", stem))
+    if os.path.exists(tif):
+        terrain[name] = slope_profile(tif, lat)
+
+if terrain:
+    cols = list(next(iter(terrain.values())))
+    print(f"{'':<10}" + "".join(f"{c:>16}" for c in cols))
+    for name, row in terrain.items():
+        print(f"{name:<10}" + "".join(f"{row[c]:>16.1f}" for c in cols))
+else:
+    print("neither DEM is here; the measured values are quoted in the text below")"""),
+("md", """**Ancash is twice as steep.** Median slope 23.0° against Arequipa's 11.1°, and the
+consequence for the two experiments runs in opposite directions:
+
+| share of land in the band | Arequipa | Ancash |
+| --- | --- | --- |
+| GRAND, 3–25° deployable | 70.3% | **52.0%** |
+| TAMBO, 20–60° near wall | 24.1% | **58.0%** |
+
+So before a single ray is traced: **Ancash should be worse for GRAND per unit area and
+much better for TAMBO.** GRAND wants ground gentle enough to stand an array on and
+Ancash keeps giving it cliffs; TAMBO wants exactly those cliffs. Hold that against what
+the searches actually found."""),
+("md", """## What the searches found"""),
+("code", """def summary(results):
+    if not results:
+        return None
+    r = results["results"]
+    sites = r.get("sites") or []
+    return {"sites": r.get("total_sites"),
+            "area km2": sum(s.get("area_km2", 0.0) for s in sites),
+            "capacity": r.get("total_capacity")}
+
+
+print(f"{'':<22}{'sites':>8}{'area km2':>14}{'capacity':>12}")
+for label in ("grand", "tambo"):
+    for region, table in (("Arequipa", reference), ("Ancash", runs)):
+        s = summary(table.get(label))
+        if s:
+            print(f"{label.upper() + ', ' + region:<22}{s['sites']:>8,}"
+                  f"{s['area km2']:>14,.1f}{s['capacity']:>12,}")"""),
+("code", """for label in ("grand", "tambo"):
+    a, n = summary(reference.get(label)), summary(runs.get(label))
+    if not (a and n):
+        continue
+    print(f"{label.upper()}  Ancash / Arequipa")
+    for k in ("area km2", "capacity", "sites"):
+        if a[k]:
+            print(f"    {k:<10} {n[k] / a[k]:6.2f}x   "
+                  f"({n[k]:,.0f} against {a[k]:,.0f})")
+    print()"""),
+("md", """Ancash is 0.533× Arequipa's pixel count, so that is the ratio to read everything
+against: **anything near 0.53× means "the same ground, less of it", and a departure from
+it is the terrain talking.**
+
+And the terrain talks loudly. Per pixel, **GRAND is 0.91× and TAMBO is 2.93×** — the
+prediction confirmed in both directions, from a comparison made before either search
+ran.
+
+GRAND's loss is milder than the naive 0.74× the band shares suggested, because its 1 km
+closing element fills in around a mask that steep ground fragments. TAMBO's gain
+*exceeds* its naive 2.41%, because **both** of its stages improve at once: the slope
+screen keeps 33.9 million pixels in Ancash against 26.8 million in Arequipa — more
+candidates from a DEM half the size — and the share of those that then accept a
+direction rises from 9.7% to 15.1%. GRAND's acceptance moves the other way, 61.6% down
+to 54.9%.
+
+**So Ancash is a worse GRAND site and a much better TAMBO site than Arequipa, per unit
+of ground.** That is the result, and it is a statement about mountains rather than about
+software: TAMBO needs canyon walls and the Cordillera Blanca is made of them."""),
+("md", """## Where each run lost its candidates"""),
+("code", """for label in ("grand", "tambo"):
+    print(f"=== {label.upper()} ===")
+    for region, table in (("Arequipa", reference), ("Ancash", runs)):
+        results = table.get(label)
+        if not results:
+            continue
+        funnel = results["funnel"]
+        binding = explain.binding_constraint(funnel)
+        stages = list(funnel.items())
+        print(f"  {region:<9} binds at: {binding['stage']}  "
+              f"({100 * binding['kept_fraction']:.1f}% kept there)")
+        print(f"  {'':<9} knob:     {binding['knob'].split(',')[0]}")
+        print(f"  {'':<9} overall:  {stages[0][1]:>13,} px -> {stages[-1][1]:>12,} "
+              f"({100 * stages[-1][1] / stages[0][1]:.2f}%)")
+    print()"""),
+("md", """**GRAND's binding constraint changed between the two regions, and TAMBO's did
+not.** At Arequipa, GRAND was limited by `directions accepted` — plenty of deployable
+ground, and the arrival geometry decided. At Ancash it is limited by
+`slope 3.0-25.0 deg`: the mountains simply do not offer enough ground gentle enough to
+stand an array on, and the search never gets as far as asking what that ground can see.
+
+TAMBO binds at `directions accepted` in both, but from opposite sides — 9.7% of its
+strided candidates accept a direction at Arequipa against 15.1% at Ancash.
+
+This is the single most useful line in the comparison: **a criterion that binds is a
+statement about the ground, not about the configuration**, and it moved when only the
+ground moved."""),
+("md", """## The maps"""),
+("code", SHOW_HELPER),
+("code", """OUT = os.path.abspath(os.path.join("..", "output"))
+for label, title in (("grand", "GRAND over Ancash"), ("tambo", "TAMBO over Ancash")):
+    import glob
+    found = sorted(glob.glob(os.path.join(OUT, f"ancash_full_{label}",
+                                          "oroscope_results*.png")))
+    show_figure(found[0] if found else os.path.join(OUT, "missing.png"),
+                caption=title)"""),
+("md", """### Both at once
+
+The combination, revealed one experiment at a time so the overlay is readable. Every
+element that is not a category — terrain, colour bar, roads, towns, scale bar, legend —
+is identical between the three frames, so what changes is only the result."""),
+("code", """def show_stage(name, caption):
+    show_figure(os.path.join(OUT, "ancash_full_combined", name), caption=caption)
+
+
+for frame, caption in (("combined_overview_1_grand.png", "GRAND alone"),
+                       ("combined_overview_2_tambo.png", "TAMBO alone"),
+                       ("combined_overview_3_both.png", "Both — the joint ground")):
+    show_stage(frame, caption)"""),
+("code", """def joint(store):
+    path = os.path.join(store, "combined_report.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        report = json.load(f)
+    overlap = report["pairwise_overlap"]["GRAND & TAMBO"]
+    return {"joint km2": report["joint"]["area_km2"],
+            "jaccard": overlap["jaccard"],
+            "share of TAMBO": 100.0 * overlap["fraction_of_TAMBO"]}
+
+
+rows = {"Arequipa": joint(AREQUIPA_STORE), "Ancash": joint(STORE)}
+rows = {k: v for k, v in rows.items() if v}
+if rows:
+    fmt = {"joint km2": "{:>18.1f}", "jaccard": "{:>18.5f}",
+           "share of TAMBO": "{:>18.1f}"}
+    cols = list(next(iter(rows.values())))
+    print(f"{'':<10}" + "".join(f"{c:>18}" for c in cols))
+    for name, row in rows.items():
+        print(f"{name:<10}" + "".join(fmt[c].format(row[c]) for c in cols))"""),
+("md", """**The joint area nearly doubles**, and per pixel it is 2.81× — tracking TAMBO
+rather than GRAND, which is what you would expect if the joint region is limited by the
+scarcer of the two.
+
+The last column is the one to keep. **The joint region is 44.9% of TAMBO's mask at
+Arequipa and 43.0% at Ancash** — essentially unchanged across two regions whose terrain
+could hardly be more different. Co-location costs GRAND almost nothing and consumes
+roughly half of what TAMBO has, wherever you look. The Jaccard index tripling is not the
+two experiments agreeing more; it is TAMBO's mask growing while GRAND's shrinks."""),
+("md", """## Where to go next
+
+- **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** — the run this one is held
+  against, and the place to read the caveats that apply to both.
+- **[12. Peru, all of it](12_peru_dem.ipynb)** — the whole country at a third of the
+  resolution, and what that costs.
+- **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — how much of
+  any of this survives a change of assumption."""),
+("md", footer(prev=("09_arequipa_dem.ipynb", "Arequipa, the full DEM"),
+              nxt=("12_peru_dem.ipynb", "Peru, all of it"))),
+]
+
+# --------------------------------------------------------------------------- 12  peru
+NB_PERU = [
+("md", """# 12. Peru, all of it
 
 Every other notebook here works on a crop, or on one department. This one is the search
 run over **a whole country** — 22,080 × 15,360 pixels, 339 million of them, from the
@@ -2055,7 +2342,7 @@ available on the machine this ran on."""),
 ("md", """## Raising the stride costs area unless the closing element keeps up
 
 This is the trap that made a published TAMBO area 4.75× too low
-([notebook 9](09_animating_the_mechanism.ipynb) animates it as `stride_and_closing`).
+([notebook 7](07_animating_the_mechanism.ipynb) animates it as `stride_and_closing`).
 Striding marks one surviving pixel in N; the mask is then closed morphologically before
 area is measured. If the closing element cannot bridge the gap the stride leaves, the
 mask never reconnects — it stays a scatter of isolated pixels, small regions fall under
@@ -2274,15 +2561,18 @@ configuration does not fit** — and the answer is a coarser search, raising
 
 ## Where to go next
 
-- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the same machine at 1
+- **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** — the same machine at 1
   arc-second, where the areas are quotable rather than bracketed.
-- **[9. Animating the mechanism](09_animating_the_mechanism.ipynb)** —
+- **[7. Animating the mechanism](07_animating_the_mechanism.ipynb)** —
   `stride_and_closing` is the trap in this notebook, animated.
 - **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — what a
   criterion costs, which is the sweep this survey never ran."""),
-("md", footer(prev=("09_animating_the_mechanism.ipynb", "Animating the mechanism"))),
+("md", footer(prev=("10_ancash_dem.ipynb", "Ancash"))),
 ]
 
+# Reading order, which is also the numbering. The regional runs are 09 onward and are
+# numbered by region rather than by the order they happened to be written, so a new one
+# slots in without renumbering its neighbours -- 11 is reserved for Lima.
 NOTEBOOKS = {
     "01_getting_started.ipynb": NB01,
     "02_the_arrival_scan.ipynb": NB02,
@@ -2290,10 +2580,11 @@ NOTEBOOKS = {
     "04_criteria_and_scoring.ipynb": NB04,
     "05_grand_and_tambo.ipynb": NB05,
     "06_combining_and_sensitivity.ipynb": NB06,
-    "07_explaining_a_run.ipynb": NB07,
-    "08_the_full_dem.ipynb": NB08,
-    "09_animating_the_mechanism.ipynb": NB09,
-    "10_the_peru_survey.ipynb": NB10,
+    "07_animating_the_mechanism.ipynb": NB_ANIMATIONS,
+    "08_explaining_a_run.ipynb": NB_EXPLAIN,
+    "09_arequipa_dem.ipynb": NB_AREQUIPA,
+    "10_ancash_dem.ipynb": NB_ANCASH,
+    "12_peru_dem.ipynb": NB_PERU,
 }
 
 

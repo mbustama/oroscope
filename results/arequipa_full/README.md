@@ -14,9 +14,9 @@ that opens instantly and needs no DEM at all. That is possible because
 ## Producing it
 
 ```bash
-python tools/run_arequipa_full.py --dry-run   # report the cost, then stop
-python tools/run_arequipa_full.py             # GRAND, TAMBO, then the combination
-python tools/run_arequipa_full.py --only grand
+python tools/run_full_dem.py --dry-run   # report the cost, then stop
+python tools/run_full_dem.py             # GRAND, TAMBO, then the combination
+python tools/run_full_dem.py --only grand
 ```
 
 `--dry-run` **starts nothing** — no search, no file, no change to this directory. It

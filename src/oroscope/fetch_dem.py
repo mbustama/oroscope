@@ -99,6 +99,21 @@ REGIONS = {
         "preset": "arequipa",
         "demtype": "SRTMGL1"
     },
+    # Ancash, at 1 arc-second like Arequipa so the two are directly comparable. The
+    # Cordillera Blanca and the Callejon de Huaylas: far steeper ground than Arequipa,
+    # which is the point of running it. Bounds are OpenStreetMap's administrative
+    # boundary for the department, queried from Nominatim rather than eyeballed.
+    # 9,855 x 6,958 = 68.6 Mpx, 53% of Arequipa's 128.6, and 64,684 km2 -- comfortably
+    # inside the 450,000 km2 the API allows for a 30 m dataset.
+    "ancash": {
+        "west": -78.6584805,
+        "east": -76.7257441,
+        "south": -10.7873076,
+        "north": -8.0497090,
+        "filename": "ancash_SRTMGL1.tif",
+        "preset": "default",
+        "demtype": "SRTMGL1"
+    },
     # The whole country, at 3 arc-seconds rather than 1. Not a preference, and it is
     # forced twice over. By memory: 18.4 by 12.8 degrees is 3,052 Mpx at 1 arc-second
     # and 339 Mpx at 3, and only the latter fits in a desktop in one run -- see

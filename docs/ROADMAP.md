@@ -1888,7 +1888,7 @@ warning fires when the estimate exceeds 80% of available, so **the two are only 
 if the estimate is accurate** — a wrong estimate silently disarms the warning while the
 cap still bites, which is exactly the failure seen. And on a machine whose desktop
 already holds half of RAM, this run needs its ceiling set explicitly:
-`tools/run_arequipa_full.py` gained `--max-memory-gb` for that, since a memory ceiling is
+`tools/run_full_dem.py` (then `run_arequipa_full.py`) gained `--max-memory-gb` for that, since a memory ceiling is
 a property of the machine and not of the science, and the configs were left untouched.
 
 ### 6.27 Documentation drift, and a test for it
@@ -2158,7 +2158,7 @@ TAMBO's mask, so 50.1 km² at Colca is also a floor rather than an estimate.
 forgotten". It had already happened, and worse than forgetting.
 
 `main()` translated a configuration into pipeline keywords across sixty explicit lines.
-`sensitivity`'s child process splatted the payload straight in. `tools/run_arequipa_full.py`
+`sensitivity`'s child process splatted the payload straight in. `tools/run_full_dem.py`
 re-derived a third version. Only the first was complete.
 
 **The sweep child never resolved `rfi_zones`.** A preset name reached
@@ -2774,6 +2774,84 @@ before any of them:
 
 Still analysis. Nothing here is implemented, and the placement routine remains unwritten
 by choice rather than by oversight.
+
+### 6.48 Ancash: the same question over steeper ground, and the terrain predicted the answer
+
+The Arequipa pair repeated over Ancash — the Cordillera Blanca and the Callejón de
+Huaylas — at the same 1 arc-second SRTMGL1 resolution, from the same source. 9,855 ×
+6,958 = **68.6 Mpx**, 64,684 km², bounds from OpenStreetMap's administrative boundary
+rather than eyeballed. Zero SRTM voids (OpenTopography serves the void-filled product,
+which matters here: the glaciated ground above 5,000 m is 1.16% of the DEM and would
+have been the first thing to drop out). Maximum elevation 6,744 m against Huascarán's
+6,768.
+
+**Every transferable criterion was held fixed**, and that is checkable rather than
+assertable — the notebook diffs the configurations. TAMBO differs in **2 of 60**
+settings, both bookkeeping: the file it reads and the name it prints. GRAND differs in
+**3 of 52**, the only real one being `rfi_zones`. Arequipa's run excludes five
+hand-curated circles and there is no Ancash preset; inventing one would have injected a
+new assumption into a run whose entire purpose is comparison, so Ancash excludes nothing
+and declares it. Arequipa's zones cover ~3,500 km² of a ~120,000 km² box, so read
+Ancash's GRAND area as **at most ~3% flattered** on that account.
+
+**The terrain made a prediction before any ray was traced.** Over land only:
+
+| | Arequipa | Ancash |
+| --- | --- | --- |
+| median slope | 11.1° | **23.0°** |
+| in GRAND's 3–25° band | 70.3% | **52.0%** |
+| in TAMBO's 20–60° band | 24.1% | **58.0%** |
+
+Ancash is twice as steep, so GRAND should do worse per unit area and TAMBO much better.
+Naively that is 0.74× for GRAND and 2.41× for TAMBO.
+
+**What the searches found.** Ancash is 0.533× Arequipa's pixel count, so that is the
+ratio everything is read against: near 0.53× means "the same ground, less of it".
+
+| | Arequipa | Ancash | ratio | per pixel |
+| --- | --- | --- | --- | --- |
+| GRAND, sites | 1 | 1 | | |
+| GRAND, area km² | 88,527.5 | 43,091.2 | 0.49× | **0.91×** |
+| GRAND, capacity | 101,948 | 49,447 | 0.49× | **0.91×** |
+| TAMBO, sites | 26 | 35 | 1.35× | |
+| TAMBO, area km² | 111.9 | 174.9 | 1.56× | **2.93×** |
+| TAMBO, capacity | 9,024 | 14,290 | 1.58× | **2.97×** |
+| joint, area km² | 50.20 | 75.25 | 1.50× | **2.81×** |
+| Jaccard | 0.000567 | 0.001742 | 3.07× | |
+
+**The prediction holds on both counts, and the direction is the whole result: Ancash is
+worse for GRAND and about three times better for TAMBO.** GRAND's loss is milder than
+the naive 0.74× because its 1 km closing element fills in around a fragmented mask;
+TAMBO's gain exceeds the naive 2.41× because *both* of its stages improve — the slope
+screen keeps 33.9M pixels against Arequipa's 26.8M **from a DEM half the size**, and
+acceptance among those rises from 9.7% to 15.1%. GRAND's acceptance falls, 61.6% to
+54.9%. (Compare those on the funnel rows `directions accepted / kept by stride 5`, not
+positionally: Arequipa's GRAND funnel carries an extra `outside RFI zones` stage that
+Ancash's does not.)
+
+**GRAND's binding constraint moved, and TAMBO's did not.** At Arequipa GRAND binds at
+`directions accepted` (61.6% kept) — plenty of deployable ground, and the arrival
+geometry decides. At Ancash it binds at `slope 3.0-25.0 deg` (44.4% kept): the mountains
+do not offer enough ground gentle enough to stand an array on, and the search never gets
+as far as asking what that ground can see. TAMBO binds at `directions accepted` in both,
+from opposite sides — 9.7% against 15.1%. **A criterion that binds is a statement about
+the ground rather than about the configuration**, and here it moved when only the ground
+moved, which is about as clean a demonstration as the funnel can give.
+
+**One invariant worth keeping.** The joint region is **44.9% of TAMBO's mask at Arequipa
+and 43.0% at Ancash** — essentially unchanged across two regions with very different
+terrain. That is §6.47's finding arriving independently: the joint is TAMBO-limited, and
+co-location costs GRAND almost nothing. The Jaccard index tripling is TAMBO's mask
+growing, not the two experiments agreeing more.
+
+Timing: GRAND 9.1 minutes, TAMBO under one, against Arequipa's 26.8 and ~1. Memory
+estimate 2.92 GiB at `downsample_factor` 4 / `candidate_stride` 5, run with
+`--max-memory-gb 5.0` against ~7 GiB available — comfortable, unlike Arequipa.
+
+All the TAMBO caveats carry over unchanged: ~4.75× low from striding against a 100 m
+closing element (§6.34) and ~30% again from downsampling. **Both regions are biased the
+same way, which is why the ratio is the trustworthy number and the absolute areas are
+not.**
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

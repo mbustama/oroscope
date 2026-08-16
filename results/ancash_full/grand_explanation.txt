@@ -1,0 +1,170 @@
+==============================================================================
+ WHAT THIS SEARCH FOUND, AND WHY
+==============================================================================
+
+THE RUN
+-------
+  DEM              /home/mbustamante/Research/GRAND/oroscope/input/dem/ancash_SRTMGL1.tif
+  Origin           -8.049583, -78.658750  (auto-detected from the GeoTIFF tiepoint)
+  Resolution       0.00027778°/px  =  30.7 m N-S x 30.5 m E-W
+  Layout           distributed search, hex grid, 1.0 km spacing
+  Finished         2026-08-16 16:42:37
+  Code             commit 5346916 on dev (dirty tree)
+  DEM checksum     sha256 182f1b4e41cfc381…
+  Command          tools/run_full_dem.py --region ancash --max-memory-gb 5.0
+
+THE HEADLINE
+------------
+  1 site covering 43,091.2 km², 49,447 detectors against a target of 10,000.
+
+  Largest by capacity: site 2, 43,091.19 km², 49,447 detectors, facing S,
+  centred -9.2862, -77.6182 — paste that into a map.
+
+WHERE THE CANDIDATES WENT
+-------------------------
+  stage                           |         pixels |   of DEM |  of prev
+  ----------------------------------------------------------------------
+  DEM pixels                      |     68,571,090 | 100.000% |         -
+  finite elevation                |     68,571,090 | 100.000% | 100.000%
+  slope 3.0-25.0 deg              |     30,445,029 |  44.399% |  44.399%
+  kept by stride 5                |      6,089,014 |   8.880% |  20.000%
+  directions accepted             |      3,343,531 |   4.876% |  54.911%
+  after gap closing               |     47,351,981 |  69.055% | 1416.227%
+  after pruning (< 2.0 km wide)   |     46,407,313 |  67.678% |  98.005%
+  pixels in selected sites (est.) |     45,978,976 |  67.053% |  99.077%
+
+  The binding constraint is “slope 3.0-25.0 deg”. It kept 44.4% of the
+  68,571,090 pixels that reached it, a larger cut than any other stage made —
+  so it, not the stages around it, is what set the size of this result.
+
+  To move it, change: min_slope_deg / max_slope_deg.
+
+  “kept by stride 5” is not a constraint. Striding subsamples the candidates
+  deliberately, and acceptance was measured identical at strides 1 and 5 on a
+  GRAND-scale search. How well the gaps it leaves are closed again depends on
+  the closing element, which the next section measures for this run.
+
+FROM PIXELS TO SITES
+--------------------
+  66 connected regions were labelled. 1 were large enough (at least 33,344
+  pixels), 1 then held enough detectors (at least 500), and 1 were selected.
+
+THE SITES
+---------
+      id |  area km² |  capacity | facing |  score | weakest component
+  --------------------------------------------------------------------
+       2 |  43091.19 |    49,447 |      S |  0.160 | solid_angle (0.49)
+
+  “solid_angle” is the weakest component at 1 of 1 sites (100%). Under a
+  product composition the weakest component bounds the total from above, so
+  that is where a better site would have to come from.
+
+WHY THESE SITES QUALIFY
+-----------------------
+  What the terrain at each one actually offers. The score is a product of
+  named criteria, so a site can be described rather than merely ranked —
+  these are the criteria it satisfies, with the measurement that earned each.
+
+  Site 2 — 43,091.19 km², 49,447 detectors, facing S, centred -9.2862, -77.6182
+      Measured: 0.05 sr of accepted sky, targets at 16,830 m, striking 24°
+      terrain, 5,114,932 g/cm² of rock behind, at 3,544 m altitude.
+      Satisfies 4 of 7 criteria:
+        • Fresnel clearance (1.34 F1) — 1.00
+        • column depth (5,114,932 g/cm²) — 1.00
+        • exit distance (16,830 m) — 1.00
+        • shower development (1,447 g/cm²) — 1.00
+      Held back by accepted sky at 0.49, which under a product composition is
+      what bounds the total.
+
+  Every selected site satisfies: Fresnel clearance, column depth, exit
+  distance, shower development. That is a statement about this terrain, not
+  about any one site — and if a criterion is satisfied everywhere, it is not
+  discriminating between sites and its threshold is worth checking.
+
+WHAT ENERGY THIS GEOMETRY FAVOURS
+---------------------------------
+  Folding each site's accepted solid angle and area against the tau decay
+  length gives a geometric aperture that peaks near 398 PeV (analytically 443
+  PeV), at 9.87e+08 m² sr.
+
+           1 PeV    4.51e-80  
+           4 PeV    1.12e-13  
+          16 PeV    5.34e+03  
+          63 PeV    8.26e+07  ###
+         251 PeV     8.5e+08  ##################################
+       1,000 PeV    7.84e+08  ################################
+       3,981 PeV    2.84e+08  ############
+      15,849 PeV    7.86e+07  ###
+      63,096 PeV    2.02e+07  #
+
+  Relative, not absolute: this is geometry and an analytic decay factor, with
+  no flux, no cross-section and no detector response. The detector acceptance
+  A(E) is the one thing no available table supplies, and it is why these are
+  apertures in shape only.
+
+HOW TO READ THESE NUMBERS
+-------------------------
+  Reported area is not physics-accepted area. The mask is closed
+  morphologically with a 1.0 km element before areas are measured. Closing is
+  not wrong — a site has to be a deployable region rather than a scatter of
+  pixels — but it moves the number, and at Colca with a 1 km element it
+  inflated the reported area by 2.29× against a stride-1 control. Set
+  gap_close_km to 0 to see the accepted area directly.
+
+  This run's own funnel puts that factor at 2.83×: closing turned the
+  stride-corrected accepted set into a mask that much larger. Divide the
+  areas above by it for what the physics accepted.
+
+  Area and capacity are measured on different grids. Area comes from the map
+  downsampled by 4, capacity from the full-resolution mask, so a feature a
+  few pixels wide loses area while keeping its detectors — around 30% for a
+  canyon strip. Use downsample_factor 1 for thin features.
+
+  The scores rank sites against each other for one experiment and one energy
+  band. They are not apertures, and no flux or detector response has been
+  folded in.
+
+  The layout is anchored, not fitted: detectors are placed from each site's
+  bounding-box corner rather than optimised, so capacity is an estimate for
+  an arbitrarily placed array.
+
+WHICH OF THESE ARE ASSUMPTIONS
+------------------------------
+  Choices, not measurements. Check them before quoting a result.
+
+  • geomag_declination_deg = -6.9°
+      Constant across the DEM unless a declination model was supplied — the
+      centred dipole that gives inclination is unreliable for declination
+      (-0.2° against a measured -6.9° at Arequipa), so it falls back to
+      Arequipa's IGRF value. Right for southern Peru, wrong elsewhere.
+      physics.set_declination_model() takes any callable, and
+      declination_from_grid() builds one from a NOAA export.
+  • max_range_km = unset
+      Column depth accumulates over the whole profile walk, which then stops
+      at max_dist_km — so the reported depth is a property of where the walk
+      stopped, not of the target's thickness. Measured on TAMBO at Colca:
+      walking to 20 km instead of the 5 km distance window raised the
+      reported depth 6.4× and changed the selection not at all. Read this
+      depth as a lower bound. Do not simply set it large, though — at 60 km
+      the same run kept only 6.0% of directions against 17.5%, so the walk
+      length is a parameter to check rather than to maximise.
+
+  Not modelled at all: tau production and escape through rock (so β, the
+  energy-loss constant, does not enter these numbers — the decay length used
+  here is kinematics, E/m·cτ, and carries no β), neutral-current regeneration
+  (so Earth-chord suppression is overstated), shower simulation, detector
+  response and trigger, and any geology beyond one standard rock density.
+  Nothing here has been checked against an external simulation.
+
+WHAT TO TRY NEXT
+----------------
+  Chosen from what this run did, not a generic list.
+
+  Test the constraint that bound this run — “slope 3.0-25.0 deg”
+      oroscope-sensitivity <config> --sweep min_slope_deg <values>
+
+  See the area the physics accepted, without morphological closing
+      oroscope <config> --gap_close_km 0
+
+  Confirm the stride is unbiased at this closing element
+      oroscope <config> --candidate_stride 1   (currently 5)

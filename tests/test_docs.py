@@ -151,10 +151,11 @@ class TestEveryModuleIntroducesItself(unittest.TestCase):
 class TestTheNotebooksCallRealNames(unittest.TestCase):
     """
     Notebooks are executed in CI, which is what makes their claim to work checkable —
-    except notebooks 7, 8 and 9. Seven and eight drive whole searches and read stored
-    full-DEM results; nine builds eight animations and wants an ffmpeg the runner does
-    not have. All three are excluded because executing them on every push costs far
-    more than it checks.
+    except 07 through 10. Seven builds eight animations and wants an ffmpeg the runner
+    does not have; eight drives whole searches; nine and ten read stored full-DEM
+    results. All four are excluded because executing them on every push costs far more
+    than it checks. Twelve is *not* excluded, and is written so that it survives a
+    runner with no store.
 
     So the drift they are exposed to is checked here instead, statically: every
     ``ss.<name>``, ``explain.<name>`` and ``ma.<name>`` the generator writes must still
@@ -182,7 +183,8 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
 
     def test_every_animation_name_exists(self):
         """
-        Notebook 9 names every builder in ``tools/make_animations.py`` and is not
+        The animations notebook names every builder in ``tools/make_animations.py``
+        and is not
         executed in CI, so a renamed animation would break it silently. The tool is a
         script rather than a package, so it is loaded by path the same way the notebook
         loads it.
@@ -195,14 +197,16 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
         spec.loader.exec_module(module)
 
         called = self.attributes("ma")
-        self.assertTrue(called, "notebook 9 calls nothing on make_animations")
+        self.assertTrue(called, "the animations notebook calls nothing on "
+                                "make_animations")
         missing = sorted(n for n in called if not hasattr(module, n))
         self.assertEqual(missing, [],
                          f"notebooks call make_animations names that do not exist: {missing}")
 
         named = set(re.findall(r'build\("([a-z_]+)"', self.source))
         self.assertEqual(named, set(module.BUILDERS),
-                         "notebook 9 must build every animation and no others; "
+                         "the animations notebook must build every animation and no "
+                         "others; "
                          f"it names {sorted(named)} against {sorted(module.BUILDERS)}")
 
     def test_every_generated_notebook_is_committed(self):
@@ -220,8 +224,8 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
         every push by an hour and a half.
         """
         workflow = read(".github", "workflows", "lint.yml")
-        for name in ("07_explaining_a_run.ipynb", "08_the_full_dem.ipynb",
-                     "09_animating_the_mechanism.ipynb"):
+        for name in ("07_animating_the_mechanism.ipynb", "08_explaining_a_run.ipynb",
+                     "09_arequipa_dem.ipynb", "10_ancash_dem.ipynb"):
             self.assertIn(name, workflow,
                           f"{name} must be named in the CI workflow, excluded or not")
 
