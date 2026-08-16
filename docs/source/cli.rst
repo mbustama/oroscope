@@ -176,9 +176,10 @@ needs a directory one level below the repository root.
 
 .. code-block:: shell
 
-   oroscope-fetch-roads --dem input/dem/arequipa_SRTMGL1.tif
+   oroscope-fetch-roads --dem input/dem/arequipa_SRTMGL1.tif --places
    oroscope --config_path config/grand_colca_config.json \
-       --roads_geojson input/roads/arequipa_SRTMGL1.geojson
+       --roads_geojson input/roads/arequipa_SRTMGL1.geojson \
+       --settlements input/roads/arequipa_SRTMGL1_places.geojson
 
 Downloads roads from OpenStreetMap through Overpass and writes a GeoJSON, so a map can
 show what a site count cannot: whether the good ground is reachable. Over the Arequipa
@@ -188,6 +189,18 @@ DEM that is 8,780 roads of motorway through tertiary class.
 older facility for access as a *criterion* — ``--road_map_path`` takes an aligned
 distance-to-road raster and ``--max_road_dist_km`` cuts on it, appearing in the funnel
 as ``road distance`` — which nothing yet produces and no bundled configuration uses.
+
+``--places`` fetches populated places — city, town, village — into a sibling
+``_places.geojson``, which ``--settlements`` then marks on the map. **This is how to get
+real town coordinates.** The bundled ``arequipa`` and ``lima`` presets are the handful of
+named places already curated as RFI zones; anything beyond them should be *sourced*, not
+written from memory, because a town in the wrong valley looks exactly like a town in the
+right one. Over the Arequipa DEM that is 1,268 places, and over the Colca crop it puts
+Chivay where OSM says it is.
+
+Markers scale with the place class and only the most important few are labelled — every
+place inside the map gets a marker, but sixty village names over one canyon is not a
+map. Raise ``max_labels`` on :func:`oroscope.add_settlements` if you want more.
 
 The bounding box is **tiled** and fetched a piece at a time, with a pause between
 requests and a fallback to a second mirror. A single query over the 3.5-degree Arequipa

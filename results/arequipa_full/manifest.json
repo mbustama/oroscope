@@ -1,5 +1,5 @@
 {
-    "generated": "2026-08-16T02:52:02",
+    "generated": "2026-08-16T07:48:37",
     "generated_by": "tools/run_arequipa_full.py",
     "dem": "input/dem/arequipa_SRTMGL1.tif",
     "configs": {

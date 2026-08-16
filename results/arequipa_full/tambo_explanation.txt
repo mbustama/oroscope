@@ -8,10 +8,10 @@ THE RUN
   Origin           -14.555139, -73.586250  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 29.7 m E-W
   Layout           distributed search, hex grid, 0.1 km spacing
-  Finished         2026-08-16 02:42:59
-  Code             commit 1fa8810 on dev (dirty tree)
+  Finished         2026-08-16 07:48:32
+  Code             commit ea5fd94 on dev (dirty tree)
   DEM checksum     sha256 f2831c9f69e54d21…
-  Command          tools/run_arequipa_full.py --only tambo --max-memory-gb 7.0
+  Command          tools/run_arequipa_full.py --max-memory-gb 7.0
 
 THE HEADLINE
 ------------
@@ -247,16 +247,19 @@ WHICH OF THESE ARE ASSUMPTIONS
   • max_range_km = unset
       Column depth accumulates over the whole profile walk, which then stops
       at max_dist_km — so the reported depth is a property of where the walk
-      stopped, not of the target's thickness.
-  • β, the tau energy-loss constant = 0.6e-6 cm²/g
-      Estimated from mass scaling, in the range (0.4–1.0)e-6. Moves the
-      production-and-escape optimum in proportion. Not yet pinned to a
-      collaboration value.
+      stopped, not of the target's thickness. Measured on TAMBO at Colca:
+      walking to 20 km instead of the 5 km distance window raised the
+      reported depth 6.4× and changed the selection not at all. Read this
+      depth as a lower bound. Do not simply set it large, though — at 60 km
+      the same run kept only 6.0% of directions against 17.5%, so the walk
+      length is a parameter to check rather than to maximise.
 
-  Not modelled at all: neutral-current regeneration (so Earth-chord
-  suppression is overstated), shower simulation, detector response and
-  trigger, and any geology beyond one standard rock density. Nothing here has
-  been checked against an external simulation.
+  Not modelled at all: tau production and escape through rock (so β, the
+  energy-loss constant, does not enter these numbers — the decay length used
+  here is kinematics, E/m·cτ, and carries no β), neutral-current regeneration
+  (so Earth-chord suppression is overstated), shower simulation, detector
+  response and trigger, and any geology beyond one standard rock density.
+  Nothing here has been checked against an external simulation.
 
 WHAT TO TRY NEXT
 ----------------

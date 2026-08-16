@@ -519,8 +519,16 @@ def main():
 
     if not args.no_image and len(labels) == 2:
         a, b = labels
-        fig, ax = plt.subplots(figsize=(11, 8))
         extent = geographic_extent(world, code.shape)
+        # Size the figure to the ground it shows. set_aspect on its own is not enough:
+        # attach_colorbar's divider pins the axes position, so matplotlib satisfies the
+        # aspect by widening the *data* limits instead, padding the map with empty
+        # degrees until it looks like the raster failed to fill its frame. Giving the
+        # figure the right shape up front leaves nothing to adjust.
+        _centre_lat = 0.5 * (extent[2] + extent[3])
+        _aspect = 1.0 / np.cos(np.radians(_centre_lat))
+        _ratio = abs(extent[3] - extent[2]) * _aspect / abs(extent[1] - extent[0])
+        fig, ax = plt.subplots(figsize=(11.0, max(3.5, min(13.0, 11.0 * _ratio))))
 
         # Altitude in greyscale, shaded for relief, with a colour bar that reads it.
         #
@@ -588,8 +596,16 @@ def main():
         ax.set_xlabel("Longitude (°)")
         ax.set_ylabel("Latitude (°)")
         ax.tick_params(direction="out", length=4)
-        centre_lat = 0.5 * (extent[2] + extent[3])
-        ax.set_aspect(1.0 / np.cos(np.radians(centre_lat)))
+        centre_lat = _centre_lat
+        # Deliberately "auto" rather than set_aspect(1/cos(lat)). The divider that
+        # attach_colorbar uses pins the axes position, so a fixed aspect is satisfied by
+        # widening the data limits rather than shrinking the box -- padding the map with
+        # empty degrees until it looks like the raster failed to fill its frame, which
+        # both adjustable modes did. The figure was shaped to the ground above, so
+        # letting the axes fill it gives those proportions with nothing left over.
+        ax.set_aspect("auto")
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
         ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
         ss.add_north_arrow(ax)
 
@@ -606,7 +622,7 @@ def main():
                 # ODbL requires attribution, and a figure travels away from the file it
                 # was made from, so it goes on the picture rather than only in the data.
                 road_credit = (roads or {}).get("attribution", "")
-                ax.text(0.995, -0.055, road_credit, transform=ax.transAxes,
+                ax.text(0.995, -0.135, road_credit, transform=ax.transAxes,
                         ha="right", va="top", fontsize=7, color="#6B6B6B")
 
         places = ss.resolve_settlements(
@@ -616,8 +632,6 @@ def main():
         if im is not None:
             ss.attach_colorbar(fig, ax, im, "Altitude (m)")
 
-        pct_a = 100.0 * both.sum() / max(masks[a].sum(), 1)
-        pct_b = 100.0 * both.sum() / max(masks[b].sum(), 1)
         def key(colour, label, alpha=1.0):
             """A filled patch, or a line when that class was outlined rather than filled."""
             if colour in outlined:
@@ -627,14 +641,11 @@ def main():
         handles = [
             key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²", base_alpha),
             key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
-            # The parenthetical is the point of this entry: 50 km² means nothing until
-            # you know it is 0.1% of one experiment's ground and 45% of the other's.
-            key("#E8189B", f"Both — {joint_km2:,.1f} km² "
-                           f"({pct_a:.1f}% of {a}, {pct_b:.1f}% of {b})"),
+            key("#E8189B", f"Both — {joint_km2:,.1f} km²"),
         ]
         if road_count:
             handles.append(Line2D([0], [0], color=ss.ROAD_COLOUR, lw=1.0, alpha=0.7,
-                                  label=f"Roads ({road_count:,})"))
+                                  label="Roads"))
         ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=3,
                   loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
                   columnspacing=1.6)

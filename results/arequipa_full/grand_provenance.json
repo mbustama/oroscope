@@ -1,9 +1,9 @@
 {
-    "timestamp": "2026-08-16T02:17:14.049541",
+    "timestamp": "2026-08-16T07:20:06.994513",
     "git": {
-        "commit": "1fa8810fee9b757b6082e41d429d2fc03493ae97",
+        "commit": "ea5fd9450c470e19fa61379cce28eec947e84c16",
         "branch": "dev",
-        "dirty": true
+        "dirty": false
     },
     "dem": {
         "path": "/home/mbustamante/Research/GRAND/oroscope/input/dem/arequipa_SRTMGL1.tif",
@@ -29,5 +29,5 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_arequipa_full.py --only grand --max-memory-gb 7.0"
+    "command": "tools/run_arequipa_full.py --max-memory-gb 7.0"
 }

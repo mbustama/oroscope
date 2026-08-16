@@ -90,6 +90,7 @@ __all__ = [
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
     "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
     "attach_colorbar", "resolve_settlements", "add_settlements", "add_roads",
+    "PLACE_STYLE",
     "ROAD_WIDTHS", "ROAD_COLOUR",
     "AREQUIPA_SETTLEMENTS", "LIMA_SETTLEMENTS", "SETTLEMENT_PRESETS",
 ]
@@ -2129,10 +2130,10 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
             if n_roads:
                 legend_handles.append(Line2D([0], [0], color=ROAD_COLOUR, lw=1.0,
                                              alpha=0.7))
-                legend_labels.append(f"Roads ({n_roads:,})")
+                legend_labels.append("Roads")
                 # ODbL requires attribution, and a figure travels away from the file
                 # it was made from -- so it goes on the picture, not just in the data.
-                ax.text(0.995, -0.055, roads.get("attribution", ""),
+                ax.text(0.995, -0.135, roads.get("attribution", ""),
                         transform=ax.transAxes, ha="right", va="top",
                         fontsize=7, color="#6B6B6B")
             elif roads is None:
@@ -2634,6 +2635,18 @@ def resolve_settlements(value, bounds=None):
     key = value.lower()
     if key in ("none", ""):
         return []
+    # A places file from oroscope-fetch-roads --places. Real OSM coordinates, which is
+    # the only honest way to put a town on a map: the curated lists below are five
+    # named places for a whole region, and writing more from memory is how a map
+    # acquires a town in the wrong valley.
+    if value.endswith(".geojson") or value.endswith(".json"):
+        from oroscope import fetch_roads as fetch_roads_mod
+        places = fetch_roads_mod.load_places(value)
+        if bounds is not None:
+            south, north, west, east = bounds
+            places = [p for p in places
+                      if south <= p[0] <= north and west <= p[1] <= east]
+        return places
     if key in SETTLEMENT_PRESETS:
         return list(SETTLEMENT_PRESETS[key])
     if key != "auto" or bounds is None:
@@ -2647,7 +2660,16 @@ def resolve_settlements(value, bounds=None):
     return best
 
 
-def add_settlements(ax, settlements, to_axes, fontsize=9):
+# Marker size and label size by OSM place class. A city and a hamlet are both "a
+# settlement" to a bounding box and very different things to a deployment.
+PLACE_STYLE = {"city":    dict(ms=10.0, fs=11.0, marker="*"),
+               "town":    dict(ms=7.0, fs=9.5, marker="o"),
+               "village": dict(ms=4.5, fs=8.0, marker="o")}
+PLACE_DEFAULT = dict(ms=5.0, fs=8.5, marker="s")
+
+
+def add_settlements(ax, settlements, to_axes, fontsize=9, max_labels=6,
+                    max_markers=25):
     """
     Marks settlements, with their names, wherever they fall inside the axes.
 
@@ -2661,7 +2683,15 @@ def add_settlements(ax, settlements, to_axes, fontsize=9):
         ``to_axes(latitude, longitude) -> (x, y)`` in the axes' own units, so this
         serves both the pixel-coordinate search map and the degree-coordinate overlay.
     fontsize : int, optional
-        Label size.
+        Fallback label size, for entries carrying no place class.
+    max_labels : int, optional
+        How many to name.
+    max_markers : int, optional
+        How many to mark at all. Entries arrive most-important-first -- cities, then
+        towns, then villages, by population within each -- so both caps take the ones
+        worth showing. Over the full Arequipa DEM there are 1,268 places, and drawing
+        every one buries the result under a thousand white dots; over one canyon there
+        are sixty, and naming them all is not a map either.
 
     Returns
     -------
@@ -2674,17 +2704,26 @@ def add_settlements(ax, settlements, to_axes, fontsize=9):
     x0, x1 = sorted(ax.get_xlim())
     y0, y1 = sorted(ax.get_ylim())
     drawn = 0
-    for lat, lon, name in settlements:
+    for entry in settlements:
+        lat, lon, name = entry[0], entry[1], entry[2]
+        kind = entry[3] if len(entry) > 3 else None
         x, y = to_axes(lat, lon)
         if not (x0 <= x <= x1 and y0 <= y <= y1):
             continue
-        ax.plot([x], [y], marker="s", ms=5, mfc="#F2F2F2", mec="#1A1A1A",
-                mew=1.1, zorder=18, linestyle="none")
-        label = ax.annotate(name, (x, y), textcoords="offset points", xytext=(7, 3),
-                            fontsize=fontsize, color="#1A1A1A", zorder=19,
-                            annotation_clip=True)
-        label.set_path_effects([path_effects.Stroke(linewidth=2.6, foreground="white"),
-                                path_effects.Normal()])
+        if drawn >= max_markers:
+            break
+        style = PLACE_STYLE.get(kind, PLACE_DEFAULT)
+        ax.plot([x], [y], marker=style["marker"], ms=style["ms"], mfc="#FFFFFF",
+                mec="#1A1A1A", mew=1.1, zorder=18, linestyle="none")
+        # Places arrive most-important-first, so labelling the first few labels the
+        # ones worth naming. Sixty village names over a canyon is not a map.
+        if drawn < max_labels:
+            label = ax.annotate(name, (x, y), textcoords="offset points",
+                                xytext=(6, 3), fontsize=style["fs"], color="#1A1A1A",
+                                zorder=19, annotation_clip=True)
+            label.set_path_effects([
+                path_effects.Stroke(linewidth=2.6, foreground="white"),
+                path_effects.Normal()])
         drawn += 1
     return drawn
 
@@ -2693,10 +2732,13 @@ def add_settlements(ax, settlements, to_axes, fontsize=9):
 # both "a road" to the search and very different things to a deployment.
 ROAD_WIDTHS = {"motorway": 1.5, "trunk": 1.2, "primary": 0.9,
                "secondary": 0.65, "tertiary": 0.45}
-ROAD_COLOUR = "#2B2B2B"
+# Green rather than a neutral dark line. Roads have to be findable against both the
+# terrain ramp and the greyscale overlay, and a dark thin line disappears into hillshade
+# exactly where the ground is steep -- which is where the sites are.
+ROAD_COLOUR = "#00B33C"
 
 
-def add_roads(ax, roads, to_axes, colour=ROAD_COLOUR, alpha=0.55, scale=1.0):
+def add_roads(ax, roads, to_axes, colour=ROAD_COLOUR, alpha=0.9, scale=1.0):
     """
     Draws road geometry, as context rather than as a result.
 
@@ -2723,7 +2765,7 @@ def add_roads(ax, roads, to_axes, colour=ROAD_COLOUR, alpha=0.55, scale=1.0):
     colour : str, optional
         Line colour.
     alpha : float, optional
-        Line opacity. Roads sit under the result, not over it.
+        Line opacity.
     scale : float, optional
         Multiplies every width, for maps drawn at a different size.
 

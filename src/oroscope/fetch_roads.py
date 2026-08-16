@@ -171,6 +171,132 @@ def fetch_tile(bounds, classes=ROAD_CLASSES, timeout=180, mirrors=OVERPASS_MIRRO
     raise RuntimeError("every Overpass mirror failed -- " + "; ".join(problems))
 
 
+PLACE_TYPES = ("city", "town", "village")
+
+
+def places_query_for(bounds, types=PLACE_TYPES):
+    """The Overpass QL for populated places in one tile."""
+    south, north, west, east = bounds
+    pattern = "|".join(types)
+    return (f'[out:json][timeout:120];'
+            f'node["place"~"^({pattern})$"]'
+            f'({south:.5f},{west:.5f},{north:.5f},{east:.5f});'
+            f'out body;')
+
+
+def places_to_geojson(elements, types=PLACE_TYPES):
+    """
+    Turns Overpass place nodes into a GeoJSON FeatureCollection.
+
+    Keeps the name, the place class and the population where OSM has one, which is what
+    decides whether a place is worth a label on a crowded map.
+    """
+    features, seen = [], set()
+    for element in elements:
+        if element.get("id") in seen or "lat" not in element:
+            continue
+        seen.add(element.get("id"))
+        tags = element.get("tags") or {}
+        name = tags.get("name")
+        if not name:
+            continue
+        try:
+            population = int(str(tags.get("population", "")).replace(",", ""))
+        except ValueError:
+            population = None
+        features.append({
+            "type": "Feature",
+            "properties": {"name": name, "place": tags.get("place"),
+                           "population": population},
+            "geometry": {"type": "Point",
+                         "coordinates": [round(element["lon"], 5),
+                                         round(element["lat"], 5)]},
+        })
+    return {"type": "FeatureCollection", "attribution": ATTRIBUTION,
+            "types": list(types), "features": features}
+
+
+def load_places(path):
+    """
+    Reads a places file written by this tool.
+
+    Parameters
+    ----------
+    path : str
+        Path to the GeoJSON.
+
+    Returns
+    -------
+    list
+        ``(latitude, longitude, name, place_class, population)`` tuples, most important
+        first -- cities before towns before villages, and within a class the larger
+        population first. A map that can only label a dozen places should label those.
+        Empty when the file is absent or unreadable.
+    """
+    if not path or not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):                    # pragma: no cover - defensive
+        return []
+    rank = {"city": 0, "town": 1, "village": 2}
+    out = []
+    for feature in data.get("features", []):
+        lon, lat = (feature.get("geometry") or {}).get("coordinates", (None, None))
+        props = feature.get("properties") or {}
+        if lat is None or not props.get("name"):
+            continue
+        out.append((lat, lon, props["name"], props.get("place"),
+                    props.get("population")))
+    out.sort(key=lambda p: (rank.get(p[3], 9), -(p[4] or 0)))
+    return out
+
+
+def fetch_places(bounds, out_path, types=PLACE_TYPES, step_deg=1.2, pause=1.5,
+                 quiet=False):
+    """
+    Fetches populated places over a bounding box and writes one GeoJSON.
+
+    Same tiling and pacing as :func:`fetch`, for the same reasons.
+    """
+    pieces = tiles(bounds, step_deg)
+    elements = []
+    for i, piece in enumerate(pieces, 1):
+        if not quiet:
+            print(f"   places tile {i}/{len(pieces)} ...", end=" ", flush=True)
+        payload = urllib.parse.urlencode(
+            {"data": places_query_for(piece, types)}).encode()
+        got = []
+        problems = []
+        for url in OVERPASS_MIRRORS:
+            request = urllib.request.Request(url, data=payload,
+                                             headers={"User-Agent": USER_AGENT})
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    got = json.loads(response.read()).get("elements", [])
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError,
+                    ValueError, OSError) as e:
+                problems.append(f"{url.split('/')[2]}: {type(e).__name__}")
+                time.sleep(2.0)
+        else:                                        # pragma: no cover - all mirrors down
+            raise RuntimeError("every Overpass mirror failed -- " + "; ".join(problems))
+        elements += got
+        if not quiet:
+            print(f"{len(got)} places")
+        if i < len(pieces):
+            time.sleep(pause)
+
+    collection = places_to_geojson(elements, types)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(collection, f, indent=1)
+    if not quiet:
+        print(f"\n   {len(collection['features']):,} places -> {out_path}")
+    return collection
+
+
 def to_geojson(elements, classes=ROAD_CLASSES):
     """
     Turns Overpass ways into a GeoJSON FeatureCollection, keeping only what is drawn.
@@ -315,6 +441,11 @@ def main():
                         help="Output GeoJSON (default: input/roads/<dem name>.geojson).")
     parser.add_argument("--classes", type=str, nargs="+", default=list(ROAD_CLASSES),
                         help=f"Highway classes to fetch (default: {' '.join(ROAD_CLASSES)}).")
+    parser.add_argument("--places", action="store_true",
+                        help="Also fetch populated places (city, town, village) into a "
+                             "sibling _places.geojson, for marking towns on the map.")
+    parser.add_argument("--places_only", action="store_true",
+                        help="Fetch only the places, skipping the roads.")
     parser.add_argument("--step_deg", type=float, default=1.2,
                         help="Tile size in degrees. Larger is fewer requests, and more "
                              "gateway timeouts.")
@@ -333,8 +464,13 @@ def main():
 
     out = args.out or os.path.join("input", "roads", default_name)
     print(f"bbox: {bounds[0]:.4f}..{bounds[1]:.4f} lat, {bounds[2]:.4f}..{bounds[3]:.4f} lon")
-    print(f"classes: {', '.join(args.classes)}\n")
-    fetch(bounds, out, args.classes, args.step_deg)
+    if not args.places_only:
+        print(f"classes: {', '.join(args.classes)}\n")
+        fetch(bounds, out, args.classes, args.step_deg)
+    if args.places or args.places_only:
+        places_out = out.replace(".geojson", "_places.geojson")
+        print(f"\nplaces: {', '.join(PLACE_TYPES)}\n")
+        fetch_places(bounds, places_out, step_deg=args.step_deg)
     return 0
 
 

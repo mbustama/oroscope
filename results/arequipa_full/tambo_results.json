@@ -1,5 +1,5 @@
 {
-    "timestamp": "2026-08-16T02:42:59.789501",
+    "timestamp": "2026-08-16T07:48:32.490977",
     "mode": "distributed",
     "parameters": {
         "dem": "/home/mbustamante/Research/GRAND/oroscope/input/dem/arequipa_SRTMGL1.tif",
@@ -64,6 +64,10 @@
         "gap_close_km": null,
         "max_range_km": null,
         "score_percentile": null,
+        "decay_weight_by": "flux",
+        "decay_response_csv": null,
+        "settlements": "auto",
+        "roads_geojson": null,
         "stop_at_target": false,
         "min_target_slope_deg": 25.0,
         "max_target_slope_deg": null,
@@ -1972,11 +1976,11 @@
         "capacity_threshold_antennas": 250
     },
     "timings_sec": {
-        "load_dem": 0.0012464523315429688,
-        "topographic_screen": 2.9104716777801514,
-        "ray_tracing": 63.28304719924927,
-        "morphology": 3.758899450302124,
-        "capacity_analysis": 1.3517184257507324
+        "load_dem": 0.0005750656127929688,
+        "topographic_screen": 2.857950210571289,
+        "ray_tracing": 73.72554326057434,
+        "morphology": 16.018491506576538,
+        "capacity_analysis": 2.4833054542541504
     },
     "aperture": {
         "energies_pev": [

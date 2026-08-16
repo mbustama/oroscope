@@ -801,6 +801,13 @@ def show_figure(path, width=1100, caption=None):
         buf = _io.BytesIO()
         img.convert("RGB").save(buf, format="PNG", optimize=True)
         data = buf.getvalue()
+        # A shaded terrain map is photographic and does not compress as PNG: the full
+        # Arequipa map is 1.1 MB at this width and 190 KB as JPEG, for no visible
+        # difference. Line art stays PNG, where JPEG would ring around every edge.
+        if len(data) > 250 * 1024:
+            jpg = _io.BytesIO()
+            img.convert("RGB").save(jpg, format="JPEG", quality=82, optimize=True)
+            data = jpg.getvalue()
     except Exception:                       # pillow absent: show it full size
         with open(path, "rb") as f:
             data = f.read()

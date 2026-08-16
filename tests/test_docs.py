@@ -71,7 +71,11 @@ class TestTheCliPageDocumentsTheCli(unittest.TestCase):
     # full-DEM runner, which this page documents too.
     OTHER_TOOLS = {"--only", "--dry-run", "--north", "--south", "--west", "--east",
                    "--labels", "--out", "--mode", "--require", "--no_image", "--sweep",
-                   "--keep_runs", "--open_topography_api_key"}
+                   "--keep_runs", "--open_topography_api_key",
+                   # oroscope-fetch-roads
+                   "--places", "--places_only", "--bbox", "--classes", "--step_deg",
+                   # oroscope-combine
+                   "--roads"}
 
     def test_no_option_is_documented_that_does_not_exist(self):
         """``--fresnel_buffer`` outlived the code by some months."""
