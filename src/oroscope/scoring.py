@@ -324,7 +324,13 @@ DEFAULT_SCORE_CONFIG = {
     "decay_weight_by": "flux",
     "decay_response": None,
     "shower_development_m": 3000.0,
-    "solid_angle_half_sr": 0.05,
+    # Retuned by exactly 3 when the azimuthal cell width was corrected: the scan had
+    # been crediting a +/-60 degree fan with the whole circle, so every solid angle it
+    # reported was 3x the arc it had looked at, and this half-value was calibrated
+    # against those inflated numbers. saturating_score is x/(x+h), so scaling x and h
+    # together leaves every score exactly where it was -- which is the point. The old
+    # value was 0.05. See ROADMAP 6.63.
+    "solid_angle_half_sr": 0.016666666666666666,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
     "composition": "product",
     "weights": None,

@@ -3556,6 +3556,47 @@ strided figures remain artefacts and should not be quoted at all.
 **Still to redo at 150 m:** the §6.51 three-department comparison, the §6.49 striding
 control, and every notebook that quotes a TAMBO number.
 
+### 6.63 The reported solid angle was the whole circle, whatever the fan ✅ delivered
+
+Found by audit, in the observable the project calls "the closest thing to a single
+measure of how good a site is". `azimuth_fan` returns a wedge spanning
+`2 × half_width_deg`; the kernel computed the azimuthal cell width as `2π / n_az` — the
+**whole circle** — regardless. Measured on terrain where every direction is accepted,
+against the analytic arc:
+
+| fan | reported | analytic | ratio |
+| --- | --- | --- | --- |
+| full 360° | 3.0565 sr | 3.0563 | **1.00×** |
+| wedge ±60° *(every shipped config)* | 3.0565 sr | 1.0188 | **3.00×** |
+| wedge ±30° | 3.0565 sr | 0.5094 | 6.00× |
+| wedge ±90° | 3.0565 sr | 1.5281 | 2.00× |
+
+**The reported figure was identical for every fan width.** It was exact for a full sweep
+and wrong by `360 / (2·half_width)` for every wedge, so `azimuth_half_width_deg` — the
+knob that says how much sky a slope-mounted array can see — changed the observable it
+most affects **not at all**. Every shipped config uses ±60°, so every reported solid
+angle was exactly 3× the arc the scan had looked at, including the "1.08 sr of usable
+sky" in `explain`'s site summaries. The true figure there is ~0.36 sr.
+
+**Fixed** by passing the fan's span from `scan()`, where `half_width_deg` is known,
+rather than inferring it inside the kernel. Every wedge now recovers its own arc to
+three decimal places.
+
+**And nothing downstream moved.** The factor is uniform across candidates and
+`saturating_score` is `x / (x + h)`, so dividing `solid_angle_half_sr` by the same 3
+(0.05 → 0.0167 in the defaults, 0.8 → 0.267 in the TAMBO configs) leaves every score
+where it was. Checked twice: the component agrees to 1.1e-16, and a real Huaylas run
+before and after gives **identical** sites, capacity, area and funnel, with the solid
+angle exactly ⅓. Site rankings never depended on this and still do not; what was wrong
+was the number reported for the sky, and any absolute aperture built on it.
+
+Two tests pin the arc against closed form, one asserts the knob now does something, and
+one asserts the retune is invariant. Two existing geomagnetic tests scanned with
+`half_width_deg=0.0`, a zero-width fan that now correctly integrates to zero sky; they
+test a *ratio*, so they ask for a 1° pencil instead.
+
+669 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

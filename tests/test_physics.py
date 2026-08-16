@@ -231,7 +231,11 @@ class TestGeomagneticInTheScan(unittest.TestCase):
 
     def scan(self, azimuth_deg, **kw):
         grid, elevation, cands = self.build(azimuth_deg)
-        params = dict(n_azimuths=1, half_width_deg=0.0, elev_min_deg=-1.0,
+        # One azimuth, but a declared width: the reported solid angle is now the arc
+        # the fan covers, so a zero-width fan integrates to exactly zero sky. These
+        # tests are about the geomagnetic *ratio*, which is width-independent, so they
+        # ask for a narrow pencil rather than a degenerate one.
+        params = dict(n_azimuths=1, half_width_deg=1.0, elev_min_deg=-1.0,
                       elev_max_deg=1.0, n_elev_bins=4, max_range_m=20000.0,
                       min_dist_km=5.0, max_dist_km=20.0)
         params.update(kw)
