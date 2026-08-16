@@ -182,6 +182,16 @@ stride-corrected accepted pixels — conflates the two effects and should not be
 the inflation alone: for TAMBO it reports 0.53× where closing by itself inflates 1.17×
 and fragmentation costs 4.75×.
 
+.. figure:: _static/stride_and_closing.gif
+   :alt: A strided mask closed with elements smaller and larger than the stride gap
+   :align: center
+   :width: 78%
+
+   The same accepted set, marked one pixel in five, then closed with elements either
+   side of the gap. The transition is **at** the gap and it is abrupt, not gradual: a
+   3-pixel element recovers 0.04× of the accepted set and a 5-pixel one recovers 0.61×.
+   Regenerate with ``python tools/make_animations.py --only stride_and_closing``.
+
 **Not every site in the file is in the result.** ``sites`` lists everything that cleared
 the area and capacity thresholds. With ``stop_at_target`` the selection stops once the
 target is met, and only the selection is in ``total_sites``, ``total_capacity`` and the

@@ -171,6 +171,40 @@ config-relative — there is no configuration file to be relative *to* — so it
 needs a directory one level below the repository root.
 
 
+``tools/make_animations.py`` — animations of the mechanism
+------------------------------------------------------------
+
+.. code-block:: shell
+
+   python tools/make_animations.py                    # all four, MP4 and GIF
+   python tools/make_animations.py --only the_walk
+   python tools/make_animations.py --format gif --out docs/source/_static
+
+Four animations, each showing a *process* whose intermediate states are the point —
+anything that is a single state is already a figure in :mod:`oroscope.figures`.
+
+``the_walk``
+   One backward ray sweeping down through the elevation window: the first intersection
+   sliding along the profile and the column depth accumulating behind it. This is the
+   mechanism the whole search rests on.
+
+``the_funnel``
+   The map draining stage by stage. The funnel table says where the candidates went;
+   this shows *where on the ground* they went.
+
+``stride_and_closing``
+   Why a closing element smaller than the stride gap loses the mask. Shown on the
+   :doc:`assumptions` page.
+
+``energy_window``
+   The arrival window narrowing as Earth absorption bites, its lower edge climbing from
+   −4.4° at 100 PeV to −0.9° at 10 EeV.
+
+Everything is built from committed code and synthetic terrain, so these reproduce on
+any clone with no DEM present. MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs
+land in ``output/animations/``, which is gitignored.
+
+
 ``tools/run_arequipa_full.py`` — the full-DEM run
 ---------------------------------------------------
 
