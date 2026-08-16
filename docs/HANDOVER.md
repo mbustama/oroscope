@@ -2,239 +2,202 @@
 
 Written to be fed to a fresh session. It assumes no memory of the previous one.
 
+**The next session's job is to audit the code.** §0 says what to audit and where the
+bodies are likely buried. Everything after that is context.
+
 **Repository:** `mbustama/oroscope`, **public**. Local path `~/Research/GRAND/oroscope`.
 A `site_search` symlink sits beside it for anything pointing at the old path; the owner
 knows about it and has chosen to keep it.
 
-**Branch:** `dev`, head **`c910462`**, pushed, **CI all green** — 8 jobs: `docs`, `ruff`,
-`Notebooks execute`, and tests on Python 3.9 through 3.13. `main` is 15 commits behind;
-the last merge was PR #4. **Tests:** 600, stdlib `unittest`, ~30 s.
-**Documentation:** <https://mbustama.github.io/oroscope/>, deployed from `main`.
+**Branch:** `dev`, head **`c946960`**, pushed, **CI all green** — 8 jobs: `docs`, `ruff`,
+`Notebooks execute`, and tests on Python 3.9 through 3.13. `main` is **21 commits
+behind**; the last merge was PR #4 and **there is no open PR**. **Tests:** 609, stdlib
+`unittest`, ~30 s. **Documentation:** <https://mbustama.github.io/oroscope/>, from `main`.
 
-`main` is protected: no direct push, PR required, seven status checks, **zero
-approvals**. You can open a PR and wait for checks, but **you cannot merge** — the
-permission classifier blocks `gh pr merge`. Open the PR, report the green checks, and
-hand the merge command to the owner. Do not try to work around it.
+`main` is protected: no direct push, PR required, seven status checks, **zero approvals**.
+You can open a PR and wait for checks, but **you cannot merge** — the permission
+classifier blocks `gh pr merge`. Open the PR, report the checks, hand the merge command to
+the owner. Do not try to work around it.
 
 ---
 
-## 0. Start here
+## 0. The audit — start here
 
-The previous session's four asks are all **delivered**. Nothing below is half-finished.
-What follows is what is genuinely next, in the order I would take it.
+Nothing is half-finished. What follows is where to look, in the order I would look.
 
-### 1. Open the PR
+### The known defect, still unfixed on purpose
 
-`dev` is pushed with CI green and there is no open PR for it. Eight commits are waiting
-to land.
+**`physics.tau_exit_probability` under-resolves its own integral** (§6.44). It spreads
+`samples` uniformly over `[0, X]`, but only interactions within about one tau range of the
+far surface contribute, so as `X` grows the spacing outruns the only region that matters.
+At 3 PeV and `X` = 10⁹ g/cm² the default is **8× the converged value and inverts the trend
+with depth**. `depth_band_from_energy` inherits it and returns a band excluding the true
+1 EeV optimum by an order of magnitude.
 
-```bash
-GIT_CONFIG_NOSYSTEM=1 gh pr create --base main --head dev --title "..." --body-file -
-```
+**No published number is affected** — every config leaves `depth_band_gcm2` null. Left
+alone because the fix changes a physics function's outputs and wants its own commit with a
+test pinning converged values. The substitution `u = X − x` on a log grid is the obvious
+form. **Owner's call.**
 
-Then report the green checks and hand the merge command to the owner — you cannot merge
-it yourself (see the note above). Watch for the docs-job flake in Trap 10 before
-concluding anything is broken.
+### Where I would audit hardest, and why
 
-### 2. `tau_exit_probability` under-resolves its own integral — decide whether to fix it
+1. **The memory model.** Three quantities get confused and it has cost a machine —
+   anonymous memory (`estimate_peak_memory_gb`), the map's separate peak
+   (`estimate_visualisation_memory_gb`), and the `RLIMIT_AS` cap. The estimator is
+   **~2× optimistic at `candidate_stride` 1** (measured: 3.27 GiB predicted, 5.31 GiB
+   RSS, 6.51 GiB virtual). It is calibrated on a *strided* run and has exactly one
+   data point at stride 1. `n_scoring_arrays` deserves a second calibration.
+2. **The `combine` step's memory is not modelled at all.** It renders at full resolution
+   where the search's map renders at `downsample_factor * 2`, so it needs ~4× the map's
+   estimate. It failed twice this session and was re-run standalone both times. This is a
+   real gap in `estimate_visualisation_memory_gb`.
+3. **Funnel rows are read by position in places.** Reading positionally is a live trap —
+   a run with RFI zones carries an extra stage, and it made GRAND's Arequipa acceptance
+   look like 20% when it is 61.6%. `compare_regions.py` reads by name; check everything
+   else does.
+4. **`count_grid_capacity` is anchored, not fitted.** Every capacity in the project is an
+   estimate for an arbitrarily placed array. Worth confirming nothing quietly treats it
+   as an optimum.
+5. **Numba kernels are excluded from coverage** (`^\s*@jit` in `[tool.coverage.report]`),
+   so a regression there is invisible to coverage. `tests/test_arrival_scan.py` drives
+   them against closed-form terrain; check that is still true after any change.
+6. **The three "silently wrong once" classes** listed in `docs/source/implementation.rst`
+   — a preset name iterated character by character, a component that appeared when
+   switched off, a results prefix naming one experiment. Each produced plausible output
+   while being incorrect. Look for more of that shape.
 
-Found this session, measured, recorded in **§6.44**, and deliberately **not fixed**. It
-integrates over interaction depth with `np.linspace(0, X, samples)` — a fixed number of
-points over the *whole* depth — while only interactions within about one tau range of
-the far surface contribute. As `X` grows the spacing outruns the only region that
-matters. At 3 PeV and `X` = 10⁹ g/cm² the default is **8× the converged value and
-inverts the trend with depth**, so the curve grows a spurious maximum at the grid edge.
+### Open questions, unchanged
 
-`depth_band_from_energy` inherits it and returns (5.6×10⁷, 2.9×10⁸) for TAMBO's
-3 PeV – 1 EeV range, a band excluding the true 1 EeV optimum of 5.7×10⁶ by more than an
-order of magnitude, whose low edge *rises* when the minimum energy is *lowered*.
-
-**No published number is affected** — every config leaves `depth_band_gcm2` null, so runs
-score against the default (10⁵, 10⁷) and never call it. That is why it was left alone:
-the fix changes a physics function's outputs and wants its own commit with a test pinning
-the converged values. The substitution `u = X − x` on a log grid is the obvious form.
-**Owner's call.**
-
-### 3. The Peru survey has an open follow-up that was started and abandoned
-
-§6.46 reports the survey at `candidate_stride` 15 with `gap_close_km` 1.5. That closing
-element is 1.5× GRAND's own 1 km antenna spacing, chosen to outrun the 1,382 m gap
-stride 15 leaves — so the area carries a **declared upward bias**, bracketed at
-4–6 × 10⁵ km².
-
-The run that removes it is `candidate_stride` 10 with `gap_close_km` 1.0: the element
-then equals the array's own spacing *and* still outruns the 922 m gap. **I started that
-run and it killed the machine.** Estimate 6.74 GiB against ~8.7 available. Read §6.46's
-second half before retrying, and see Trap 1 below. If you retry it, do it on a machine
-with more headroom, or accept the stride-15 bracket and move on — the bracket is already
-honest.
-
-### 4. `A(E)` is still the outstanding physics ask
-
-Unchanged. The selector exists (`--decay_weight_by` takes `flux`, `acceptance`,
-`flux_times_acceptance`); no real differential table does. One *inferred* from a
-published integral curve is demonstrably unsafe — §6.42, it returns zero sites.
-
-### 5. If a layout tool is ever written, read §6.47 first
-
-The joint-realization question was answered this session and the answer is not the one
-the obvious approach assumes. Summary in §5 below; the whole thing is §6.47.
+- **`A(E)` is the outstanding physics ask.** The selector exists (`--decay_weight_by`);
+  no real differential table does, and an inferred one is demonstrably unsafe (§6.42).
+- **Askaryan (charge-excess) emission is not modelled.** Only the geomagnetic term is, so
+  `sin α → 0` scores exactly zero and under a *product* composition that zero rejects the
+  site outright. Peru is near the magnetic equator, so north–south geometries get zeroed.
+- **Nothing has been checked against an external simulation.** The Earth-absorption
+  prediction (window edge −4.4° at 100 PeV to −0.9° at 10 EeV) is the cheapest such test.
+- **`min_score` → `score_percentile`** (§6.43). 0.35 ≡ percentile 22.8 on Colca and a scan
+  shows **no knee**. Switching restates published numbers: the owner's call.
 
 ---
 
 ## 1. What the previous session did
 
-Eight commits, `35d7814` → `c910462`.
+Twenty commits, `35d7814` → `c946960`. Measurements in `docs/ROADMAP.md` §6.44–6.52.
 
-**Four more animations**, taking `tools/make_animations.py` to eight (§6.45). The filter
-was whether the intermediate states carry the argument; six candidates were rejected
-because a static figure does them better, and those reasons are in §6.45 so they are not
-re-proposed.
+**Animations and notebooks.** `tools/make_animations.py` went to eight animations. The
+notebooks were **renumbered** at the owner's request and now run: 07 animations, 08
+explaining a run, then a per-region block — 09 Arequipa, 10 Ancash, **11 reserved
+originally for Lima and now Lima**, 12 Peru — then 13 turning the knobs. Generator
+variables are **content-named** (`NB_ANCASH`, not `NB10`) so the next region does not force
+a rename.
 
-- `the_azimuth_fan` — completes the pair with `the_walk`. That one sweeps elevation at
-  one bearing; this sweeps the bearing.
-- `product_collapse` — six real components multiplied into a real cut, one at a time.
-- `slope_criterion` — `min_target_slope_deg` crossing the wall-slope distribution over
-  Colca. The sweeps say how much; this says where.
-- `tau_in_rock` — energy and survival falling against the production-and-escape optimum.
+**Three department runs, one dataset.** Ancash and Lima were added; Lima was
+**re-downloaded as SRTMGL1** to replace AW3D30, because a dataset difference would have sat
+inside every comparison as a confound.
 
-Three of the eight now read `input/dem/colca.tif` when present and fall back to synthetic
-terrain — **saying which on the figure** — when not, because "where a criterion bites on
-real ground" is not something synthetic terrain can honestly show.
+| | Arequipa | Ancash | Lima |
+| --- | --- | --- | --- |
+| median slope | 11.1° | 23.0° | 20.4° |
+| GRAND per pixel | 1.00× | 0.91× | 0.72× |
+| TAMBO per pixel | 1.00× | 2.93× | 2.09× |
 
-**Two measurements fell out of building them,** both in §6.45:
+The answer tracks steepness in opposite directions for the two experiments.
 
-- **The product collapse is real but not evenly shared.** 100% of viable candidates above
-  `min_score` 0.35 before any component, 32.2% after six — but `solid_angle` alone takes
-  it from 100% to 35.9%, and `distance` moves it by *nothing*, the scan having already
-  applied that same 2–5 km window as a hard criterion before scoring saw it.
-- **The wall-slope mask outlives its own median by 20°.** Half the candidates see a mean
-  wall slope under 29.7°, yet a 30° floor keeps 87% of them; the half-way point is 50°.
-  The criterion is per direction, the observable is a mean over accepted directions.
-  **Read `target_slope_deg` as a description, never as a prediction of what a cut does.**
+**The biggest finding: the striding penalty for TAMBO is not 4.75×.** On the Callejón de
+Huaylas crop, run unbiased at `1 / 1` against a `4 / 5` control on identical ground, TAMBO
+lost **291× in area and 386× in capacity** while GRAND moved 1.1×. Acceptance was
+**identical** at 14.0% both ways. All of the loss happens between closing and selection:
+the mask fragments into 7,954 regions of which one clears `min_sub_array_size`. **Every
+strided TAMBO area and capacity in this project is a lower bound by a terrain-dependent
+factor with no useful upper limit.**
 
-**The animations notebook** (now 07), generated from `tools/make_notebooks.py` as
-usual. Builds all eight,
-explains what each argues, and documents MP4 → GIF two ways: `--format gif`, and a plain
-`ffmpeg` `palettegen`/`paletteuse` recipe for an MP4 from anywhere. The palette matters —
-342 KiB against pillow's 761 KiB on the same animation, and better colour.
+**A correction I had to make to my own work an hour after writing it.** The joint region's
+share of TAMBO's mask sat at 44.9 / 43.0 / 46.2% across the departments and looked like a
+constant of the two experiments. Both **unbiased** crops give ~73%. There are two
+constants, and the strided one is not real. Quote ~72–75%.
 
-New in the tool: `write_mp4_with_stills()`, which writes the MP4 and grabs stills in the
-same pass. **One function and not two because the builders accumulate** — the ray drawn
-at frame 30 is still on the axes at frame 60, which is what makes the fan fill in — so
-the frames can be walked exactly once.
+**Docs.** Four new pages — `howitworks.rst` (the vocabulary, with three new schematics in
+`oroscope.figures`), `glossary.rst`, `implementation.rst`, `data.rst` — plus notebook 13
+and a co-location helper.
 
-**The Peru-wide survey ran.** §6.46. 22,080 × 15,360 = 339 Mpx at 3 arc-seconds:
-**17 sites, 563,411 km², 633,655 antenna positions, in four minutes.** Caveats in §5.
-
-**The Peru notebook** (now 12) is that survey on its own, at the owner's request. It
-reads the stored
-run rather than repeating it, but everything else computes live — the memory table, the
-stride/closing table, the funnel, the area bracket, and the resolution check. **Unlike 07 through 10 it is executed in CI**:
-7, 8 and 9 it is executed in CI**: every cell needing the store is guarded and nothing
-else touches the filesystem outside the library, so on a bare runner it degrades to
-prose and arithmetic instead of failing. Verified by running it from an empty directory
-with no repo around it — the thing that would have broken there was a synthetic fallback
-importing from `../tests`, so it is built inline instead. Keep that property if you edit
-it.
-
-**The joint-realization question was answered.** §6.47, and §5 below.
-
-**A memory safeguard**, after the machine went down. §6.46 and Trap 1.
-
-**The CI docs job was red before this session started** and is now green. The scipy
-intersphinx entry was fetched on every build, referenced by nothing, and timed out from
-the runner twice. Trap 10.
+**A memory safeguard, after the machine went down twice.** See §3, Trap 1.
 
 ---
 
 ## 2. Owner preferences — follow these without being asked
 
-Learned by correction across two sessions. Consistent and worth honouring.
-
 **Figures**
 
-- **No titles.** The caption carries it. This applies to every map.
-- **Legend outside the axes, at the top.** Four columns unless told otherwise — but
-  build it from the categories that actually occur; a legend naming a colour that never
-  appears sends the reader hunting for nothing.
-- **Legend text minimal**: no counts, no parentheticals. "Roads", not "Roads (230, OSM)".
-- **Colorbar height must match the plot panel.** Use `ss.attach_colorbar`.
-  `fig.colorbar(fraction=...)` sizes against the *figure* and overshoots.
-- **Scale bar and north arrow** on every map. `ss.add_scale_bar`, `ss.add_north_arrow`.
-- **Grey base with a colorbar** beats a colourful base.
-- **Roads green**, not neutral dark: a thin dark line vanishes into hillshade exactly
-  where the ground is steep, which is where the sites are.
-- **Only a few labels.** 6 labels, 25 markers, arrived at by being told twice.
-- **Attribution goes in the caption, not on the figure.**
-- **Colour scales track the data** (`ss.altitude_limits`).
-- **Progressive-reveal frames** are wanted for talks, pixel-identical between frames.
-  Verify it, do not assume it.
+- **No titles.** The caption carries it. Applies to every map.
+- **Legend outside the axes, at the top**, four columns unless told otherwise — but build
+  it from the categories that actually occur.
+- **Legend text minimal**: no counts, no parentheticals.
+- **Colorbar height must match the panel.** Use `ss.attach_colorbar`.
+- **Scale bar and north arrow** on every map.
+- **Grey base with a colorbar** beats a colourful base. **Roads green**, not dark.
+- **Only a few labels** — 6 labels, 25 markers.
+- **Capitalise the first word** of every axis label, legend entry and annotation.
+- **Attribution in the caption, not on the figure.**
+- Publication-quality figures are wanted for talks; they are library functions so they can
+  be exported at any dpi.
 
-*Known inconsistency:* the pipeline's own search map still prints counts and
-parentheticals in its legend ("Site 5: 600703 DUs (533861.48 km²)"), against the rule
-above. Not changed — it was not in scope — but worth raising.
+*Known inconsistency:* the pipeline's own search map still prints counts and parentheticals
+in its legend, against the rule above. Not changed — never in scope.
 
 **Working style**
 
-- **Proceed without asking** when the path is clear. Said explicitly, more than twice.
-  Reserve questions for genuine forks.
+- **Proceed without asking** when the path is clear. Said explicitly, several times.
 - **Do not do trivial work.** When asked for options, filter hard and say what you
-  rejected and why.
-- **Source data, never invent it.** Town coordinates from OpenStreetMap, bibliography
-  verbatim from INSPIRE, API limits quoted from the vendor's own page. This matters.
-- **Notebooks are educational.** Figures shown inline, not merely saved.
-- They will feed a brief to a fresh session rather than let context run out — write
-  handovers accordingly.
+  rejected. When asked to assess, give a recommendation with reasons — the owner accepted
+  "extend notebook 11 rather than add a fourteenth" on that basis.
+- **Source data, never invent it.** Town coordinates from OpenStreetMap, bibliography from
+  INSPIRE, API limits quoted from the vendor's page, region bounds from Nominatim.
+- **Notebooks are educational**, figures shown inline, and **each region notebook carries
+  the full `explanation.txt` of its runs inline** — the owner asked for this explicitly.
+- **Check for zombie processes periodically.** The owner asked twice. See Trap 6.
 - **Credentials:** the owner will hand over an API key when asked and expects it used
-  directly. **Never commit it**; document how a reader gets their own instead.
+  directly. **Never commit it**; document how a reader gets their own.
 
-**Project conventions (from the repo, unchanged)**
+**Project conventions**
 
-- Measure before optimising, and after. Several confident hypotheses have been wrong —
-  including one this session (see §5, the 90 m slope check).
-- Run examples, don't read them — `tests/test_doctests.py` executes every `Examples`
-  block. **Doctest values must be computed, not predicted.**
+- Measure before optimising, and after. Several confident hypotheses were wrong this
+  session, including two of mine that I had already written down.
+- **Doctest values must be computed, not predicted** — `tests/test_doctests.py` runs every
+  `Examples` block.
 - Negative results go in `docs/ROADMAP.md` so they are not retried.
-- Lint as CI does: `ruff check .` **from the root** — it lints the notebooks too.
+- Lint as CI does: `ruff check .` **from the root** — it lints notebooks too.
 - Commit messages explain *why* and state measured deltas.
 - The roadmap is updated in the same commit as the code.
-- Figure labels capitalise their first word.
 
 ---
 
 ## 3. Environment and traps
 
-**Trap 1 — memory, and it is the one that bites hardest.** This desktop has ~8 GiB of 15
-actually available, and **a search that reaches it kills the session, not just the run.**
-That happened this session. Before launching any search:
+**Trap 1 — memory, and it is the one that bites hardest.** ~8 GiB available of 15, and **a
+search that reaches it kills the session, not just the run.** That happened twice. Before
+launching anything:
 
-```python
-ss.preflight_memory(dem, downsample_factor=…, candidate_stride=…, max_memory_gb=…)
+```bash
+python tools/run_full_dem.py --region <r> --dry-run
 ```
 
-Read both numbers. **Do not launch when the estimate is above ~70% of available, or when
-the cap is above available — ask first.** Two things to understand:
+- `--max_memory_gb` is `RLIMIT_AS`, capping **virtual** address space, so it counts the
+  memory-mapped DEM. `estimate_peak_memory_gb` estimates **anonymous** memory and excludes
+  it. They are not comparable.
+- **A cap above available memory is not a cap** — the OOM killer arrives first.
+  `preflight_memory` now warns, returns `cap_exceeds_available`, and with `refuse=True`
+  raises. `run_full_dem.py` passes `refuse=True` and **rejects `--max-memory-gb 0`**.
+- **I passed `max_memory_gb=0` myself** — the exact thing my own config comment forbade.
+  The advice existed and nothing enforced it. That is why the check is now a mechanism.
 
-- `--max_memory_gb` is `RLIMIT_AS`, which caps **virtual** address space and so counts
-  every mapping — the DEM's `.npy` cache, the ping-pong buffers. `estimate_peak_memory_gb`
-  estimates **anonymous** memory and deliberately excludes them. On a 339 Mpx DEM the two
-  differ by over 2 GiB.
-- **A cap above available memory is not a cap.** The OOM killer arrives before `RLIMIT_AS`
-  fires. The pre-flight now warns and returns `cap_exceeds_available`. When the two
-  constraints cannot both be met, the configuration does not fit: raise
-  `candidate_stride`, which is the memory lever (§6.26a), not the cap. Never pass 0.
+**Trap 2 — `conda activate sssearch` fails.** Call the interpreter directly:
+`/home/mbustamante/anaconda3/envs/sssearch/bin/python`.
 
-**Trap 2 — `conda activate sssearch` fails** (`conda init` not run). Call the interpreter
-directly: `/home/mbustamante/anaconda3/envs/sssearch/bin/python`. Same environment.
-
-**Trap 3 — `gh` needs `GIT_CONFIG_NOSYSTEM=1`** — the sandbox blocks `/etc/gitconfig` and
-every `gh` call fails without it. `gh pr create --body-file` cannot read from the
-scratchpad; pipe on stdin with `--body-file -`.
+**Trap 3 — `gh` needs `GIT_CONFIG_NOSYSTEM=1`.** And `gh pr create --body-file` cannot read
+from the scratchpad; pipe on stdin with `--body-file -`.
 
 **Trap 4 — Jupyter's `python3` kernelspec points at base anaconda**, which has no
-`oroscope`, so `nbconvert --execute` and the docs' `jupyter_sphinx` blocks both fail with
-`ModuleNotFoundError`:
+`oroscope`:
 
 ```bash
 mkdir -p /tmp/k/kernels/python3 && cat > /tmp/k/kernels/python3/kernel.json <<'JSON'
@@ -242,131 +205,106 @@ mkdir -p /tmp/k/kernels/python3 && cat > /tmp/k/kernels/python3/kernel.json <<'J
           "ipykernel_launcher", "-f", "{connection_file}"],
  "display_name": "Python 3", "language": "python"}
 JSON
-cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 07_animating_the_mechanism.ipynb
+cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 13_turning_the_knobs.ipynb
 ```
 
-**Trap 5 — `ffmpeg` is the snap build** and cannot write outside its confinement — it will
-not write into `/tmp/claude-*`. Write into the repo's gitignored `output/`, or extract
-frames with PIL.
+**Trap 5 — `ffmpeg` is the snap build** and cannot write into `/tmp/claude-*`. Write into
+the repo's gitignored `output/`.
 
-**Trap 6 — `pgrep -f "script.py"` matches its own command line**, and so does an `echo` of
-the same string in the same command. Use `ps` and check the output.
+**Trap 6 — a waiter that greps for a process matches itself.**
+`pgrep -f "run_full_dem.py --region ancash"` finds its own command line and spins forever.
+**Wait on a file or a log string, never on a process name.** Three zombies accumulated this
+way before the owner noticed.
 
-**Trap 7 — matplotlib backend.** A library must not choose it; CI asserts that importing
-`oroscope` leaves it untouched. When touching a figure path, **check images are actually
-produced** — count `image/png` outputs, or grep built HTML for `Figure size`. Do not trust
-a green build.
+**Trap 7 — `_ = figures.foo()` in a `jupyter-execute` block renders only in the first block
+of a page.** End the block with the figure as the last expression. Verify by counting
+`_images/` entries in the built HTML — do not trust a green build.
 
-**Trap 8 — notebook size.** `show_figure` picks JPEG over PNG above 250 KiB; terrain maps
-are photographic and PNG made the Arequipa notebook 4.2 MB. The animations notebook's
-stills use the same trick.
+**Trap 8 — escaping `\n` through the notebook generator.** The generator holds cell sources
+as ordinary Python strings, so `\n` is consumed when the notebook is built. Write `\\n`, or
+avoid it with a bare `print()`.
 
-**Trap 9 — a killed run leaves orphans.** The crashed search left two 339 MB
-`buffer_*.npy` scratch files and an output directory mixing two runs' artefacts. Check
-`output/<run>/` for `buffer_*.npy` and for mismatched timestamps before trusting it.
+**Trap 9 — the docs build runs `sphinx -W`.** A short title underline, an undocumented
+parameter, or an unreachable intersphinx inventory each fail it. **Build locally before
+pushing:**
 
-**Trap 10 — a red CI docs job may be a network flake, not a code bug.** Sphinx runs with
-`-W`, and intersphinx fetches an inventory per entry in `intersphinx_mapping` over the
-network. One unreachable host emits one warning and exits 1, with the real cause buried a
-hundred lines above `build finished with problems, 1 warning`. **Before investigating,
-grep the log for `failed to reach any of the inventories`.**
+```bash
+env -u MPLBACKEND JUPYTER_PATH=/tmp/k python -m sphinx -W -b html docs/source /tmp/db
+```
 
-This bit twice on 2026-08-16, both times on `docs.scipy.org`. Fixed by removing the scipy
-entry, which nothing referenced — no role in `docs/source` or `src/` resolved against it,
-and the only mention of the name was a plain-text dependency row. `numpy` and `python`
-stay, because docstring type fields do resolve against them; if either flakes the same
-way, cache the inventory rather than removing it.
+**Trap 10 — a killed run leaves orphans.** Check `output/<run>/` for `buffer_*.npy` and
+mismatched timestamps before trusting a directory.
 
-**Disk** was at 99% at one point this session and is now ~14 GB free. `old/` holds 3.5 GB
-of superseded material if room is ever needed.
+**Trap 11 — Overpass rate-limits.** A department-sized roads+places fetch takes several
+minutes and sometimes stalls. **Fetch context before starting a search** — a run resolves
+its map inputs once, at the beginning.
+
+**Disk** was at 99% at one point; now ~14 GB free. `old/` holds 3.5 GB of superseded
+material if room is needed.
 
 ---
 
-## 4. Repo map (what changed this session)
+## 4. Repo map
 
 | path | what |
 | --- | --- |
-| `tools/make_animations.py` | Eight animations now. Adds `_colca_ground()` (real DEM or synthetic fallback), `write_mp4_with_stills()`, and the four new builders. |
-| `tools/make_notebooks.py` | Adds `NB09`. **Edit here, never the `.ipynb`.** |
-| `notebooks/` | **Renumbered 2026-08-16.** 07 animations, 08 explaining a run, then a per-region block: 09 Arequipa, 10 Ancash, 11 reserved for Lima, 12 Peru. Generator variables are content-named (`NB_ANCASH`, not `NB10`) so the next region does not force a rename. 07–10 excluded from CI execution; 12 is not, and is written to survive a runner with no store. |
-| `src/oroscope/fetch_dem.py` | Adds the `peru` region (SRTMGL3), `--region`, `--output_dir`, `--config_dir`, `OPENTOPOGRAPHY_API_KEY`. No longer shells out to a `site_searcher.py` in the CWD — a pre-package leftover that broke it outside `src/`. |
-| `src/oroscope/site_searcher.py` | `preflight_memory` warns when the cap exceeds available memory and returns `cap_exceeds_available`. |
-| `config/grand_peru_survey.json` | **New.** The national survey. Every choice is commented with its reason. |
-| `input/dem/peru_SRTMGL3.tif` | Gitignored, 302 MB, downloaded this session. |
-| `tests/test_docs.py` | Checks the animations notebook's `ma.<name>` calls resolve and that it builds every `BUILDERS` entry and no others. Pins the CI exclusion list. |
-| `docs/ROADMAP.md` | §6.44–6.47. |
+| `src/oroscope/site_searcher.py` | Pipeline, CLI, config, screening, morphology, capacity, outputs, map furniture. Adds `estimate_visualisation_memory_gb`, `REFUSE_FRACTION`, and `preflight_memory(refuse=)`. |
+| `src/oroscope/combine_experiments.py` | The overlay. Adds `colocation_capacity` and `smallest_radius_for`. |
+| `src/oroscope/figures.py` | Physics figures plus three new schematics: `pipeline_stages`, `striding_and_closing`, `score_composition`. |
+| `src/oroscope/fetch_dem.py` | Four regions, `--region`, `OPENTOPOGRAPHY_API_KEY`, no longer shells out to a `site_searcher.py` in the CWD. |
+| `tools/run_full_dem.py` | Was `run_arequipa_full.py`. Region table: arequipa, ancash, lima, huaylas, cajatambo. |
+| `tools/compare_regions.py` | **New.** Regenerates `results/region_comparison.md` from the stores. |
+| `tools/make_notebooks.py` | Generates all 13 notebooks. **Edit here, never the `.ipynb`.** |
+| `docs/source/{howitworks,glossary,implementation,data}.rst` | **New.** |
+| `results/<region>_full/` | Committed small artefacts, including every `explanation.txt`. |
+| `results/region_comparison.md` | Every region against every other. |
 
 ---
 
 ## 5. Current numbers
 
-| | area km² | sites | capacity |
-| --- | --- | --- | --- |
-| GRAND, Colca crop | 4,580.2 | 1 | 5,317 |
-| TAMBO, Colca crop | 83.6 → **read as ~397** | 15 → 29 | 9,717 → **~45,856** |
-| GRAND, full Arequipa DEM | 88,527.5 | 1 | 101,948 |
-| TAMBO, full Arequipa DEM | 111.9 (low) | 26 | 9,024 |
-| joint, full Arequipa DEM | 50.2 | | Jaccard 0.0006 |
-| **GRAND, all of Peru (90 m)** | **563,411** | **17** | **633,655** |
+| | area km² | sites | capacity | sampling |
+| --- | --- | --- | --- | --- |
+| GRAND, Arequipa | 88,527.5 | 1 | 101,948 | 4 / 5 |
+| TAMBO, Arequipa | 111.9 | 26 | 9,024 | 4 / 5 |
+| GRAND, Ancash | 43,091.2 | 1 | 49,447 | 4 / 5 |
+| TAMBO, Ancash | 174.9 | 35 | 14,290 | 4 / 5 |
+| GRAND, Lima | 51,677.6 | 1 | 59,270 | 4 / 5 |
+| TAMBO, Lima | 190.9 | 40 | 15,775 | 4 / 5 |
+| GRAND, Peru (90 m) | 563,411 | 17 | 633,655 | 4 / 15 |
+| **GRAND, Huaylas crop** | **8,294.9** | 1 | **9,609** | **1 / 1** |
+| **TAMBO, Huaylas crop** | **855.1** | **109** | **98,696** | **1 / 1** |
+| **GRAND, Cajatambo crop** | **5,541.1** | 1 | **6,424** | **1 / 1** |
+| **TAMBO, Cajatambo crop** | **1,119.2** | **97** | **129,359** | **1 / 1** |
 
-**Quote these with their caveats.** TAMBO's areas are lower bounds by ~4.75× from striding
-and ~30% again from downsampling. The joint is limited by TAMBO's mask, so it is a floor.
-
-**Peru specifically.** Read the area as **4–6 × 10⁵ km²**: the stride-corrected accepted
-set is 407,805 km² and closing takes it to 563,411, a factor 1.38. And **"17 sites" is the
-number to distrust, not the area** — the largest site's bounding box is the entire DEM,
-because a 1.5 km element applied to a strided scatter over 339 Mpx merges the whole
-cordillera into one component. Its accepted candidates are Andean (mean altitude 2,446 m);
-the polygon enclosing them is not.
-
-**One prediction checked and wrong**, which is the useful part: 3 arc-seconds does *not*
-move the slope screen. On 20 Mpx of Arequipa the 3–25° band holds 67.6% of the map at 30 m
-and 67.4% at 90 m — what is lost at the ceiling is regained at the floor. So the survey's
-screening is a fact about Peru, not about the grid.
-
-**The joint-realization answer (§6.47).** Of the 50.1 km² joint Colca mask, 92.4% is
-TAMBO-band wall and only 3.63 km² is ground a GRAND antenna could stand on — in **1,702
-fragments whose largest is 0.038 km²**, against the 0.866 km² one 1 km lattice cell needs.
-**Not one fragment holds one antenna.** So an optimiser pointed at the intersection reports
-the realization impossible. It is not: 100 TAMBO units need 0.87 km² against 49.4 km²
-available, and GRAND-deployable ground sits a **median 0.92 km away** — inside a single
-GRAND cell. **Optimise over the union with a per-role band constraint; the coupling is
-shared line of sight, not shared footprint.**
+**Quote the crops, not the departments, for TAMBO.** The department numbers are lower
+bounds by a factor between 4.75 and 291. GRAND is unaffected either way. Peru is a survey:
+read its area as 4–6 × 10⁵ km², and distrust its site *count* more than its area — the
+largest "site" has the whole DEM as its bounding box.
 
 ---
 
 ## 6. Do not repeat
 
-- **The full Arequipa DEM run.** Done, 26 minutes, store populated, notebook 09 executed.
-- **The Ancash run.** Done, `results/ancash_full/`, notebook 10.
-- **The Peru survey at stride 15.** Done, four minutes, `output/grand_peru_survey/`.
-- **The stride-1 controls.** Both GRAND and TAMBO. §6.34.
-- **The sensitivity sweeps.** §6.20–6.21.
-- **The 90 m slope-band check.** Done, §6.46 — the answer was "no effect".
-- **The memory estimator investigation.** §6.26a.
-- **The road and place downloads** for Arequipa — in `input/roads/`.
+- **Any of the five searches above.** All stored, all committed.
+- **The Huaylas `4 / 5` control.** That is what measured 291×.
+- **The stride-1 controls at Colca**, the sensitivity sweeps, the memory-estimator
+  investigation, the 90 m slope-band check (answer: no effect), the road and place
+  downloads for all four regions.
 - **The animation candidate filter.** Six were rejected with reasons in §6.45.
-- **Everything in ROADMAP §6 and §7.** Read §6.26, §6.26a, §6.34–6.47 before measuring
-  anything.
+- **Everything in ROADMAP §6 and §7.** Read §6.26a, §6.34, §6.44–6.52 before measuring.
 
 ## 7. Still open
 
-1. **`A(E)`.** §0.4 above.
-2. **`tau_exit_probability`'s integration.** §0.2 above, §6.44.
-3. **Askaryan (charge-excess) emission is not modelled.** Only the geomagnetic term is
-   implemented, so `sin α → 0` scores exactly zero, and under a *product* composition that
-   zero rejects the site outright when charge-excess would leave it ~10–20% efficient.
-   Peru is near the magnetic equator, so it is precisely north–south geometries that get
-   zeroed. With a 0.14 floor the published 3.7× east-over-north ratio compresses to ~3.4×
-   and nothing lands on zero. Lesser omissions alongside it: tau decay branching (~17% to
-   muons, a flat normalisation), |B| magnitude (only sin α is used), galactic background.
-4. **`min_score` → `score_percentile`.** 0.35 ≡ percentile 22.8 on Colca, and a scan shows
-   **no knee**. Switching restates published numbers: the owner's call. §6.43 is the table
-   to decide against, and §6.45's finding that one component does nine tenths of the
-   collapse sharpens the case.
-5. **Nothing has been checked against an external simulation.** The Earth-absorption
-   prediction (window edge −4.4° at 100 PeV to −0.9° at 10 EeV) is the cheapest such test,
-   is ready to run, and now has an animation arguing it (`energy_window`).
-6. **A national TAMBO answer** needs 1 arc-second and tiling. Reasons it cannot be done at
-   90 m are in `config/grand_peru_survey.json` under `_comment_no_tambo`.
-7. **No release.** Nothing on PyPI.
+1. **`A(E)`**, §0 above.
+2. **`tau_exit_probability`'s integration**, §0 and §6.44.
+3. **Askaryan emission**, §0.
+4. **`min_score` → `score_percentile`**, §6.43 — the owner's call.
+5. **External validation** — nothing has been checked against a simulation.
+6. **A national TAMBO answer** needs 1 arc-second and tiling; reasons in
+   `config/grand_peru_survey.json`.
+7. **The joint-realization optimiser**, §6.52. Three steps in order: retain the per-pixel
+   score as a raster, then a placement routine given a **patch-aware** feasibility test,
+   then a real objective. **Optimise over the union, never the intersection** — the
+   measurement says a naive formulation gives a confidently wrong answer.
+8. **No release.** Nothing on PyPI.
