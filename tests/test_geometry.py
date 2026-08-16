@@ -96,7 +96,7 @@ class TestNonSquarePixelWarning(unittest.TestCase):
             import contextlib
             import io
             with contextlib.redirect_stdout(io.StringIO()):
-                deg, rows = ss.read_dem_geometry(path)
+                deg, rows, _ = ss.read_dem_geometry(path)
             self.assertAlmostEqual(deg, 0.00025, places=12)
             self.assertEqual(rows, 32)
         finally:

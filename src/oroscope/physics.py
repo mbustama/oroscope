@@ -1285,10 +1285,19 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
         was computed with. Says: *of the neutrinos that arrive, what fraction decays
         usefully?*
     ``"acceptance"``
-        :math:`w(E) = A(E)`. Says: *over the energies this detector actually responds
-        to, what fraction decays usefully?* -- a property of the instrument and the
-        terrain, with no assumed spectrum. Useful precisely because :math:`\gamma` is an
-        assumption and this removes it.
+        :math:`w(E) = A(E)`, per unit energy. Says: *over the energies this detector
+        actually responds to, what fraction decays usefully?*
+
+        **This does not remove the spectral assumption; it replaces it.** Weighting by
+        :math:`A(E)\,{\rm d}E` is weighting by :math:`A(E)` against a *flat* differential
+        flux, which is :math:`\gamma = 0` -- harder than any astrophysical spectrum, so
+        the average leans on the top of the range rather than sitting free of it.
+        Measured against TAMBO's rising :math:`A(E)` over 3 PeV - 1 EeV, **97.4% of the
+        weight lands above 100 PeV**, against 31.3% for ``flux``. That is a large part
+        of why weighting by acceptance alone emptied a search (roadmap 6.42), alongside
+        the shape of the inferred response itself. Read it as *a different assumption*,
+        useful for asking what the instrument's own band favours, and not as the
+        assumption-free option.
     ``"flux_times_acceptance"``
         :math:`w(E) = E^{-\gamma} A(E)`, the event-rate integrand itself, and the right
         one when both the spectrum and a response table are trusted.
@@ -1300,7 +1309,8 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     Note a steep spectrum weights low energies heavily, where the tau decays readily --
     so a soft spectrum drives :math:`P` toward 1 and the term stops discriminating. That
     is the physics rather than a defect, but it means the spectral index deserves the
-    same scrutiny as any other assumption, and it is the reason ``"acceptance"`` exists.
+    same scrutiny as any other assumption -- including the :math:`\gamma = 0` that
+    ``"acceptance"`` quietly substitutes for it.
 
     Parameters
     ----------

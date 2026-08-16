@@ -3597,6 +3597,77 @@ test a *ratio*, so they ask for a 1° pencil instead.
 
 669 tests.
 
+### 6.64 The morphology halo was half what closing needs ✅ delivered
+
+Closing and opening are each a dilation followed by an erosion. Each of those reaches
+half the structuring element, so the **pair reaches a whole one**: a pixel's result
+depends on the input up to `max(structure.shape)` away. `apply_morphology_pingpong`
+padded its tiles by `// 2` of that — the radius of one operation rather than of the
+pair — so the erosion ran into the edge of its own chunk and ate the core's border.
+
+Measured on a 5000×5000 mask at the shipped 2048 tile:
+
+| element | pixels differing from the untiled result |
+| --- | --- |
+| GRAND, 33 px (1 km) | **27,990 lost** — 0.132% of the closed mask |
+| TAMBO, 5 px (150 m) | 1 lost |
+
+Every one a loss, never a gain, aligned to the tile grid. With the halo widened the
+tiled result is **bit-identical** to the untiled one for both operations at every tile
+size tried, which is what `separable_closing`'s docstring had claimed all along — true
+of the factorisation, not of the tiling. The cost is about 3% more work per tile.
+
+This is the one change in this pass that moves a number, and the golden regression
+caught it: `tests/golden/arequipa_crop.json` gains 371 closed pixels and 1.02 km² of
+site area. Everything upstream of the morphology — DEM pixels, the slope screen, the
+stride, the accepted directions — is byte-identical, which independently confirms that
+§6.63 is score-neutral.
+
+### 6.65 Six smaller ones, found in the same pass ✅ delivered
+
+**A degree of latitude had two lengths inside one module.** `pixel_area_km2` used 110.6
+km; `colocation_capacity` used 111.32 — the *longitude* constant at the equator. The
+north–south scale ran 0.651% long, so the co-location disc was too tall and its pixel
+area and lattice row pitch carried the same error, and the two functions disagreed with
+each other. Both now use `ss.KM_PER_DEG_LAT`.
+
+**Colca was not in the region table.** The crop most of this project's *reasoning* rests
+on — the 2.29× closing inflation, the `min_score`-to-percentile equivalence, the `A(E)`
+weighting comparison, "`solid_angle` is the weakest component at every TAMBO site" —
+could not be re-run by `run_full_dem.py` at all. So its configs were changed to 150 m
+while its numbers went on being quoted from runs made at 100 m, with nothing to notice.
+It has an entry and a store now, for the same reason the others do.
+
+**The geomagnetic field was resolved at a point on no part of the DEM** — the centre
+*latitude* paired with the west-edge *longitude*. `MapGrid` gains `center_lon`, and
+`read_dem_geometry` returns the column count it needs. Worth 0.03° of inclination across
+a department and 0.20° across the Peru box.
+
+**`constraint_overlap` treated aspect as linear.** The screen handles a compass band
+that wraps — `min_aspect_deg > max_aspect_deg` means an arc through north — and this did
+not, so a 350°–10° window was compared as though it ran backwards and reported *no
+overlap* with 0°–90° when they plainly share 0°–10°. Latent, since no shipped config
+sets aspect bounds, and conservative in the direction it failed.
+
+**Per-site statistics were taken over the wrong set.** A site's extent comes from the
+*scored* candidates, grown by closing; the summary aggregated over the *geometric* ones,
+so candidates the cut had rejected re-entered a site's own medians wherever closing had
+grown the mask over them. Bounded in practice — all 85 Arequipa TAMBO site medians sit
+above the 0.35 cut — but the two sets are now the same set.
+
+**Provenance recorded no module-level physics state.** `physics.set_declination_model()`
+changes the geomagnetic score and is recommended by the run's own summary;
+`set_tau_energy_loss` changes β. Neither is a parameter, neither appears in `command`
+when set from a notebook, and a run made under either was indistinguishable from a
+default one. Both are in `provenance.json` now.
+
+**And `fresnel_buffer`, a flag removed months ago**, was still set in two shipped
+configs, where `config_to_pipeline_kwargs` dropped it on every run. There is a test
+guarding `cli.rst` against exactly this — added when the same flag outlived the code in
+the documentation — and none guarding `config/`. Now there is.
+
+669 → 672 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

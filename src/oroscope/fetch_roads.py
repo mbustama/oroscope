@@ -75,7 +75,7 @@ def dem_bounds(dem_path):
     import tifffile as tiff
     from oroscope import site_searcher as ss
 
-    cell_deg, rows = ss.read_dem_geometry(dem_path)
+    cell_deg, rows, _ = ss.read_dem_geometry(dem_path)
     lat, lon = ss.read_dem_origin(dem_path)
     if cell_deg is None or lat is None:
         raise SystemExit(f"{dem_path} carries no pixel scale or tiepoint; use --bbox")

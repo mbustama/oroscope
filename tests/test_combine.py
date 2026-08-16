@@ -335,6 +335,38 @@ class TestCombineRefusesBadRequests(unittest.TestCase):
         self.assertIn("world file", str(caught.exception))
 
 
+class TestOneDegreeOfLatitudeIsOneLength(unittest.TestCase):
+    """
+    Two functions in this module disagreed about how long a degree of latitude is.
+
+    ``pixel_area_km2`` used 110.6 km; ``colocation_capacity`` used 111.32, which is the
+    *longitude* constant at the equator. The north-south scale came out 0.651% long, so
+    the co-location disc was slightly too tall and its pixel area and lattice row pitch
+    carried the same error. Small, and entirely avoidable: there is one constant.
+    """
+
+    def test_the_pixel_area_matches_the_searcher_convention(self):
+        world = (1 / 3600, 0.0, 0.0, -1 / 3600, -72.0, -15.0)
+        got = ce.pixel_area_km2(world, -15.0)
+        expected = ((1 / 3600) * ss.KM_PER_DEG_LAT) * \
+                   ((1 / 3600) * 111.32 * math.cos(math.radians(-15.0)))
+        self.assertAlmostEqual(got, expected, places=12)
+
+    def test_colocation_uses_the_same_degree_as_the_pixel_area(self):
+        """
+        The two must agree: a disc measured with one scale and filled with pixels
+        measured by another reports an area that is neither.
+        """
+        world = (1 / 3600, 0.0, 0.0, -1 / 3600, -77.0, -10.0)
+        mask = np.ones((300, 300), dtype=bool)
+        rows = ce.colocation_capacity(mask, world, -10.02, -76.98,
+                                      radii_km=(50.0,), spacing_km=0.15)
+        # A radius that swallows the whole mask, so the area is every pixel.
+        self.assertAlmostEqual(rows[0]["area_km2"],
+                               mask.size * ce.pixel_area_km2(world, -10.02),
+                               places=6)
+
+
 class TestTheOverlayActuallyRenders(unittest.TestCase):
     """
     Every other test here passes ``--no_image``, so the figure had no coverage at all.

@@ -85,6 +85,19 @@ REGIONS = {
         "expect": "a few minutes each at stride 1",
         "configs": "{experiment}_cajatambo.json",
     },
+    # Colca Canyon, the crop most of this project's *reasoning* rests on even though it
+    # was never in this table: the 2.29x closing inflation, the min_score-to-percentile
+    # equivalence, the A(E) weighting comparison and "solid_angle is the weakest
+    # component at every TAMBO site" all come from here. Left out, its configs could be
+    # changed -- as they were, to 150 m -- while its numbers went on being quoted from
+    # runs made at the old spacing, with nothing to notice the gap. It belongs here for
+    # the same reason the others do: so that a config change and a stored result cannot
+    # drift apart in silence.
+    "colca": {
+        "dem": os.path.join(REPO, "input", "dem", "colca.tif"),
+        "expect": "a couple of minutes each (3.0 Mpx at stride 5)",
+        "configs": "{experiment}_colca_config.json",
+    },
     # A crop rather than a department, and the only one run unbiased: 11.4 Mpx is
     # small enough for downsample_factor 1 and candidate_stride 1, so neither the
     # ~30% area loss from downsampling nor the 4.75x from striding applies. Its

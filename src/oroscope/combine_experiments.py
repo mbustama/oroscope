@@ -364,7 +364,7 @@ def pixel_area_km2(world: tuple[float, ...], reference_latitude_deg: float) -> f
         Area of one pixel, in km^2.
     """
     cell_deg_x, _, _, cell_deg_y, _, _ = world
-    km_y = abs(cell_deg_y) * 110.6
+    km_y = abs(cell_deg_y) * ss.KM_PER_DEG_LAT
     km_x = abs(cell_deg_x) * 111.32 * np.cos(np.radians(reference_latitude_deg))
     return km_x * km_y
 
@@ -463,11 +463,17 @@ def colocation_capacity(partner_mask, world, centre_lat, centre_lon,
     rows, cols = np.indices(mask.shape)
     lat = upper_left_y + (rows + 0.5) * pixel_deg_y
     lon = upper_left_x + (cols + 0.5) * pixel_deg_x
+    # 110.6 km per degree of latitude, 111.32 per degree of longitude at the equator.
+    # These two were both 111.32 here, which is the *longitude* constant: the
+    # north-south scale came out 0.651% long, so the disc was slightly too tall, the
+    # pixel area 0.651% too large and the lattice row pitch off by the same. Small, but
+    # it also meant this function and `pixel_area_km2` in the same module disagreed
+    # about how many kilometres a degree of latitude is.
     km_per_deg_lon = 111.32 * np.cos(np.radians(centre_lat))
-    distance_km = np.hypot((lat - centre_lat) * 111.32,
+    distance_km = np.hypot((lat - centre_lat) * ss.KM_PER_DEG_LAT,
                            (lon - centre_lon) * km_per_deg_lon)
 
-    cell_y = abs(pixel_deg_y) * 111.32 * 1000.0
+    cell_y = abs(pixel_deg_y) * ss.KM_PER_DEG_LAT * 1000.0
     cell_x = abs(pixel_deg_x) * km_per_deg_lon * 1000.0
     per_pixel_km2 = (cell_y * cell_x) / 1.0e6
 

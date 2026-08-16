@@ -469,8 +469,8 @@ def collect_provenance(dem_path, map_grid):
     -------
     dict
         Git commit and dirty flag, DEM path, size and checksum, resolved grid
-        geometry, and third-party package versions -- enough to say what produced a
-        result months later.
+        geometry, third-party package versions, and the module-level physics state --
+        enough to say what produced a result months later.
     """
     dem_abs = os.path.abspath(dem_path)
     return {
@@ -492,6 +492,17 @@ def collect_provenance(dem_path, map_grid):
         },
         "packages": _package_versions(),
         "command": " ".join(sys.argv),
+        # Module-level physics state, which a library caller can change without it
+        # appearing anywhere else. `physics.set_declination_model` is recommended by
+        # the run's own summary and alters the geomagnetic score; `set_tau_energy_loss`
+        # alters beta. Neither is a parameter, neither shows up in `command` when set
+        # from a notebook or a script, and a run made under either was previously
+        # indistinguishable from a default one.
+        "physics_state": {
+            "tau_energy_loss": physics.tau_energy_loss_settings(),
+            "declination_model": (None if physics.declination_model() is None
+                                  else repr(physics.declination_model())),
+        },
     }
 
 
@@ -777,27 +788,27 @@ def read_dem_geometry(dem_path):
     Returns
     -------
     tuple
-        Pixel size in degrees and the number of rows. Either is ``None`` when the file
-        or the tag cannot be read, which is not an error: the caller falls back to an
-        explicit value or to 1 arc-second.
+        Pixel size in degrees, the number of rows and the number of columns. Any of
+        them is ``None`` when the file or the tag cannot be read, which is not an
+        error: the caller falls back to an explicit value or to 1 arc-second.
     """
     try:
         with tiff.TiffFile(dem_path) as tf:
             page = tf.pages[0]
-            n_rows = int(page.shape[0])
+            n_rows, n_cols = int(page.shape[0]), int(page.shape[1])
             tag = page.tags.get('ModelPixelScaleTag')
             if tag is None:
-                return None, n_rows
+                return None, n_rows, n_cols
             scale_x, scale_y = float(tag.value[0]), float(tag.value[1])
             if scale_y <= 0:
-                return None, n_rows
+                return None, n_rows, n_cols
             # A geographic grid is square in degrees; warn if the DEM says otherwise.
             if scale_x > 0 and abs(scale_x - scale_y) / scale_y > 1e-6:
                 print(f"      {C.WARN}{Icon.WARN}WARNING: Non-square DEM pixels "
                       f"({scale_x:.8f} x {scale_y:.8f} deg). Using the latitude scale.{C.RESET}")
-            return scale_y, n_rows
+            return scale_y, n_rows, n_cols
     except Exception:
-        return None, None
+        return None, None, None
 
 # Describes the sampling grid of the DEM. Angular pixel size is identical on both
 # axes (that is what "geographic" means), but the two metric sizes are not.
@@ -807,7 +818,8 @@ def read_dem_geometry(dem_path):
 RESULTS_PREFIX = "oroscope_results_"
 LEGACY_RESULTS_PREFIX = "grand_search_results_"
 
-MapGrid = namedtuple("MapGrid", "cell_size_deg cell_size_y cell_size_x center_lat source")
+MapGrid = namedtuple("MapGrid",
+                     "cell_size_deg cell_size_y cell_size_x center_lat center_lon source")
 MapGrid.__doc__ = """
 Resolved pixel geometry of a DEM.
 
@@ -828,7 +840,8 @@ source : str
     or defaulted. Recorded so a run's provenance says which.
 """
 
-def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
+def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None,
+                          origin_lon=None):
     """
     Determines the sampling geometry used by the whole pipeline.
 
@@ -865,7 +878,7 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     >>> f"{grid.cell_size_y:.1f} m x {grid.cell_size_x:.1f} m"
     '30.7 m x 29.8 m'
     """
-    detected_deg, n_rows = read_dem_geometry(dem_path)
+    detected_deg, n_rows, n_cols = read_dem_geometry(dem_path)
 
     if cell_size_deg is not None:
         source = "user-specified"
@@ -879,12 +892,19 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     center_lat = origin_lat
     if n_rows:
         center_lat = origin_lat - (n_rows / 2.0) * cell_size_deg
+    # The DEM's middle in both axes, so a model that varies with position is asked
+    # about the same point twice. The geomagnetic field was resolved at the centre
+    # *latitude* and the west-edge *longitude*, which is not anywhere on the DEM.
+    center_lon = None
+    if origin_lon is not None:
+        center_lon = origin_lon + ((n_cols / 2.0) * cell_size_deg if n_cols else 0.0)
 
     cell_size_y = cell_size_deg * KM_PER_DEG_LAT * 1000.0
     cell_size_x = cell_size_deg * KM_PER_DEG_LON_EQUATOR * math.cos(math.radians(center_lat)) * 1000.0
 
     return MapGrid(float(cell_size_deg), float(cell_size_y), float(cell_size_x),
-                   float(center_lat), source)
+                   float(center_lat),
+                   None if center_lon is None else float(center_lon), source)
 
 # Values below this are ocean or void in the DEMs this tool reads
 NODATA_BELOW_M = -100.0
@@ -1326,6 +1346,12 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
         accepted = viable & (total >= min_score)
         cut = f"score >= {min_score:g}" if min_score > 0 else None
     n_hits = int(np.count_nonzero(accepted))
+    # Which candidates the run actually kept, so per-site statistics can be taken over
+    # them. Not the same as `cells > 0`: that is the geometry alone, and a site's
+    # extent comes from the *scored* set, grown by closing. Summarising over the
+    # geometric set let candidates the cut had rejected back into the site's own
+    # numbers, wherever closing had grown the mask over them.
+    observables["accepted"] = accepted
 
     # Two counts, not one. The geometry and the score cut are separate questions and
     # the funnel exists to tell them apart; recording n_hits under both names made the
@@ -1375,7 +1401,15 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     if observables is None or candidates_arr is None or len(site_ids) == 0:
         return {}
 
-    accepted = observables["cells"] > 0
+    # The candidates the run kept, which is the scored set where a cut applied and the
+    # geometric set otherwise. `cells > 0` alone is the geometry, and a site is defined
+    # by the scored set: taking statistics over the geometry let rejected candidates
+    # into a site's own medians wherever closing had grown its mask over them. Older
+    # observables dictionaries carry no `accepted`, so the geometry remains the
+    # fallback and a pre-existing caller still works.
+    accepted = observables.get("accepted")
+    if accepted is None:
+        accepted = observables["cells"] > 0
     if not np.any(accepted):
         return {}
 
@@ -1456,8 +1490,18 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
     rows, cols = shape
     
     with tqdm(total=(rows//tile_size + 1)*(cols//tile_size + 1), desc=f"   {desc}", unit="tile", colour='magenta' if USE_COLOR else None) as pbar:
-        # Pad the chunk by half the structure size to prevent edge artifacts between chunks
-        pad = max(structure.shape) // 2
+        # Halo, so a tile boundary cannot change the answer.
+        #
+        # Closing and opening are each a dilation followed by an erosion, and each of
+        # those reaches half the element, so the composition reaches a *whole* element:
+        # a pixel's result depends on the input up to `max(structure.shape)` away, not
+        # half that. This read `// 2`, which is the radius of one operation rather than
+        # of the pair, so the erosion ran into the edge of its own chunk and ate the
+        # core's border. Measured on a 5000 x 5000 mask at the default 2048 tile with
+        # GRAND's 33-pixel element: 27,990 pixels lost against the untiled result --
+        # every one a loss, never a gain, and aligned to the tile grid. TAMBO's 5-pixel
+        # element lost 1. The cost of the wider halo is about 3% more work per tile.
+        pad = max(structure.shape)
         for r in range(0, rows, tile_size):
             for c in range(0, cols, tile_size):
                 r_end = min(r + tile_size, rows)
@@ -4435,7 +4479,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     candidate_stride = int(candidate_stride)
 
     # Establish the sampling geometry before anything else depends on it
-    map_grid = resolve_grid_geometry(dem_path, origin_lat, cell_size_deg)
+    map_grid = resolve_grid_geometry(dem_path, origin_lat, cell_size_deg,
+                                     origin_lon=origin_lon)
     cell_size_deg = map_grid.cell_size_deg
     cell_size_y, cell_size_x = map_grid.cell_size_y, map_grid.cell_size_x
 
@@ -4483,8 +4528,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             f"published curves and aperture.infer_response() for recovering A(E) from "
             f"one of them.")
 
+    # The DEM's centre in *both* axes. This passed `origin_lon`, the west edge, beside
+    # the centre latitude -- a point on no part of the DEM. Harmless for a constant
+    # field and wrong for any model that varies with longitude: 0.03 degrees of
+    # inclination across a department, 0.20 across the Peru box.
     geomag_declination_deg, geomag_inclination_deg = physics.default_field_for_site(
-        map_grid.center_lat, origin_lon, geomag_declination_deg, geomag_inclination_deg)
+        map_grid.center_lat,
+        map_grid.center_lon if map_grid.center_lon is not None else origin_lon,
+        geomag_declination_deg, geomag_inclination_deg)
 
     # RFI sources as pixel coordinates, weighted by radius as a crude strength proxy.
     # The scan can then drop the ones terrain hides, which a circular exclusion cannot.

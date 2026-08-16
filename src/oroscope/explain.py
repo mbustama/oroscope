@@ -407,18 +407,44 @@ def constraint_overlap(params_a, params_b, bands=None):
         b_lo, b_hi = _get(params_b, lo_key), _get(params_b, hi_key)
         if None in (a_lo, a_hi, b_lo, b_hi):
             continue                       # unset on one side is not a constraint
-        lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
-        width_a, width_b = a_hi - a_lo, b_hi - b_lo
+        a_parts, width_a = _band_intervals(a_lo, a_hi, label)
+        b_parts, width_b = _band_intervals(b_lo, b_hi, label)
+        pieces = [(max(x0, y0), min(x1, y1))
+                  for x0, x1 in a_parts for y0, y1 in b_parts
+                  if min(x1, y1) > max(x0, y0)]
+        total = sum(hi - lo for lo, hi in pieces)
         narrower = min(width_a, width_b)
-        overlap = (lo, hi) if hi > lo else None
         out.append({
             "label": label, "unit": unit,
             "a": (a_lo, a_hi), "b": (b_lo, b_hi),
-            "overlap": overlap,
-            "width": (hi - lo) if overlap else 0.0,
-            "share_of_narrower": ((hi - lo) / narrower) if overlap and narrower else 0.0,
+            # The widest piece, which is the one worth quoting. `width` is the total
+            # across all pieces, and they differ only for a band that wraps.
+            "overlap": max(pieces, key=lambda p: p[1] - p[0]) if pieces else None,
+            "width": total,
+            "share_of_narrower": (total / narrower) if pieces and narrower else 0.0,
         })
     return out
+
+
+# Bands measured on a compass wrap; the others do not. Aspect is the only one here,
+# and the screen already handles it -- `min_aspect_deg > max_aspect_deg` means an arc
+# through north, and `get_candidates_chunked` reads it that way. This did not, so a
+# north-facing window of 350-10 degrees was compared as though it ran *backwards* from
+# 350 to 10, and reported no overlap with 0-90 when they plainly share 0-10.
+_CIRCULAR_BANDS = ("aspect",)
+_FULL_CIRCLE_DEG = 360.0
+
+
+def _band_intervals(lo, hi, label):
+    """
+    A band as one or two ordinary intervals, plus its true width.
+
+    A wrapping compass band becomes two pieces, so an intersection can be taken with
+    ordinary arithmetic and the pieces summed.
+    """
+    if label in _CIRCULAR_BANDS and lo > hi:
+        return [(lo, _FULL_CIRCLE_DEG), (0.0, hi)], (_FULL_CIRCLE_DEG - lo) + hi
+    return [(lo, hi)], hi - lo
 
 
 def weakest_component(arrival_scan, statistic="p50"):

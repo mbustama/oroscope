@@ -85,6 +85,30 @@ class TestTheCliPageDocumentsTheCli(unittest.TestCase):
         phantom = sorted(self.documented - self.flags - self.OTHER_TOOLS)
         self.assertEqual(phantom, [], f"cli.rst documents non-existent flags: {phantom}")
 
+    def test_no_shipped_config_sets_a_key_the_pipeline_does_not_take(self):
+        """
+        The same drift as the line above, one directory over and unguarded.
+
+        ``--fresnel_buffer`` was removed from the code and from ``cli.rst`` -- which
+        that test has watched ever since -- but it stayed in two shipped configs for
+        the same months, where ``config_to_pipeline_kwargs`` dropped it on every run.
+        A key the pipeline does not take is a request that silently does nothing, so
+        the configs deserve the guard the documentation already has.
+        """
+        import glob
+        import json
+        known = set(ss.default_config())
+        offenders = {}
+        for path in sorted(glob.glob(os.path.join(REPO_ROOT, "config", "*.json"))):
+            with open(path) as f:
+                cfg = json.load(f)
+            unknown = sorted(k for k in cfg
+                             if k not in known and not k.startswith("_"))
+            if unknown:
+                offenders[os.path.basename(path)] = unknown
+        self.assertEqual(offenders, {},
+                         f"configs set keys default_config() does not know: {offenders}")
+
     def test_the_option_table_carries_types_and_defaults(self):
         """A reference without defaults sends the reader to the source anyway."""
         self.assertIn("- Default", self.page)

@@ -12,7 +12,6 @@
     "min_dist_km": 10.0,
     "max_dist_km": 80.0,
     "grid_type": "hex",
-    "fresnel_buffer": 200.0,
     "downsample_factor": 4,
     "cell_size_deg": null,
     "candidate_stride": 5,

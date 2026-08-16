@@ -1,12 +1,12 @@
 {
   "funnel": {
     "DEM pixels": 810000,
-    "after gap closing": 701599,
-    "after pruning (< 1.0 km wide)": 700432,
+    "after gap closing": 701970,
+    "after pruning (< 1.0 km wide)": 701347,
     "directions accepted": 78527,
     "finite elevation": 810000,
     "kept by stride 5": 116033,
-    "pixels in selected sites (est.)": 700032,
+    "pixels in selected sites (est.)": 701144,
     "slope 3.0-25.0 deg": 580129
   },
   "regions": {
@@ -19,7 +19,7 @@
   },
   "sites": [
     {
-      "area_km2": 641.23,
+      "area_km2": 642.25,
       "capacity_exact": 745,
       "facing_direction": "S"
     }
