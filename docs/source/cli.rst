@@ -159,16 +159,63 @@ Read this before quoting a capacity. Several criteria sit near cliffs.
 
 .. code-block:: shell
 
-   oroscope-fetch-dem --open_topography_api_key YOUR_KEY
+   oroscope-fetch-dem --region arequipa --open_topography_api_key YOUR_KEY
+   oroscope-fetch-dem --region peru                     # key from the environment
+   oroscope-fetch-dem                                   # all three regions
 
-Fetches the bundled regions — Lima and Arequipa — into ``input/dem/`` and writes a
-ready-to-run configuration for each. The key is free from
-`OpenTopography <https://portal.opentopography.org/myopentopo>`_.
+Fetches a bundled region into ``input/dem/`` and writes a ready-to-run configuration
+for it.
 
-Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/``, both relative
-to the working directory. Unlike the search, this one has not been made
-config-relative — there is no configuration file to be relative *to* — so it still
-needs a directory one level below the repository root.
+.. list-table::
+   :header-rows: 1
+   :widths: 12 16 14 58
+
+   * - ``--region``
+     - dataset
+     - size
+     -
+   * - ``arequipa``
+     - SRTMGL1, 30 m
+     - 148 MB
+     - The department. Every published number in this project comes from it or from a
+       crop of it.
+   * - ``lima``
+     - AW3D30, 30 m
+     - 110 MB
+     - Coastal, and a useful contrast: the criteria that bind there are not the ones
+       that bind in the Andes.
+   * - ``peru``
+     - SRTMGL3, 90 m
+     - 302 MB
+     - The whole country. 3 arc-seconds, not by preference — see
+       ``config/grand_peru_survey.json``.
+
+**Getting a key.** It is free and takes a minute.
+
+1. Register at `OpenTopography <https://portal.opentopography.org/myopentopo>`_ and
+   sign in.
+2. Open **myOpenTopo Authorizations and API Key** from the account menu.
+3. Copy the key.
+
+Pass it as ``--open_topography_api_key``, or set ``OPENTOPOGRAPHY_API_KEY`` in the
+environment — which keeps it out of your shell history, and out of any file that might
+be committed by accident.
+
+.. warning::
+
+   **Requests are capped by area, per dataset:** 450,000 km² for every 30 m dataset and
+   4,050,000 km² for the 90 m ones. Peru's bounding box is about 2.86 million km², six
+   times over the 30 m limit, which is one of the two reasons ``peru`` is 3 arc-seconds.
+   The other is memory.
+
+Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/`` by default, both
+relative to the working directory. Pass ``--output_dir`` and ``--config_dir`` to run it
+from anywhere else. Unlike the search, this one is not config-relative — there is no
+configuration file to be relative *to*.
+
+The configuration it writes is a **default template** pointed at the DEM. The tuned
+configurations that produced this project's numbers are committed in ``config/``
+alongside it, and those are the ones to run.
 
 
 ``oroscope-fetch-roads`` — road geometry for the map

@@ -2588,6 +2588,165 @@ directions long after its average has fallen below the cut. Read the reported
 will do to it. TAMBO's configured 25° costs 8%, which is consistent with §10 calling it
 a deliberately permissive floor.
 
+### 6.46 Peru, all of it, in four minutes — and what `--max_memory_gb` actually caps
+
+The first search over a whole country. `config/grand_peru_survey.json`, GRAND's criteria
+copied unchanged from `grand_arequipa_full.json` so the two are comparable, over
+`input/dem/peru_SRTMGL3.tif` — 22,080 × 15,360 = **339.1 Mpx** at 3 arc-seconds, a
+92.17 × 91.57 m pixel.
+
+**3 arc-seconds is forced twice over, not chosen.** By memory: the same box is 3,052 Mpx
+at 1 arc-second, and `estimate_peak_memory_gb` puts even 3 arc-seconds at 12.4 GiB at
+`downsample_factor` 1 / `candidate_stride` 5. And by the API, which caps a request at
+4,050,000 km² for 90 m datasets and 450,000 km² for every 30 m one; this box is about
+2.86 million km², six times over the 30 m limit. Run at `downsample_factor` 4 and
+`candidate_stride` 15, estimated 4.77 GiB.
+
+| stage | time |
+| --- | --- |
+| load DEM | 4.6 s |
+| topographic screen | 14.7 s |
+| ray tracing | 200.1 s |
+| morphology | 20.6 s |
+| capacity | 8.3 s |
+
+**Four minutes for a country**, against 26.8 minutes for the Arequipa DEM at 30 m —
+2.6× the pixels but a ninth the candidates, and the candidates are the cost.
+
+| | DEM pixels | slope band | after stride | directions accepted | rate |
+| --- | --- | --- | --- | --- | --- |
+| Peru, 90 m, stride 15 | 339,148,800 | 112,156,858 | 7,477,157 | 3,221,209 | **43.1%** |
+| Arequipa, 30 m, stride 5 | 128,600,000 | — | — | — | 61.6% |
+
+**17 sites, 563,411 km², 633,655 antenna positions** at 1 km hexagonal spacing. That is
+43.8% of Peru's 1,285,216 km². One site holds 94.8% of it — 533,861 km² centred at
+−10.23, −75.03, on the eastern Andean flank — and the next largest is 4,834 km².
+
+**Read the area as a survey number, and here is the width of the bracket.** The 3,221,209
+accepted strided pixels each stand for 15, which is 48.3 Mpx or **407,805 km²**; the
+run reports 66.75 Mpx or 563,411 km² after closing, pruning and selection, a factor
+**1.38** higher. Some of that gap is closing doing its job — filling holes inside
+accepted ground, which the stride correction also does — and some is a 1.5 km element
+bridging ground that was genuinely rejected. Both estimates are approximations and the
+honest statement is **4–6 × 10⁵ km²**.
+
+**"17 sites" is the number to distrust, not the area.** The largest site's bounding box
+is the *entire DEM* — north −0.006, south −18.396, west −81.134, east −68.604 — so a
+1.5 km closing element applied to a strided scatter across 339 Mpx has merged the whole
+cordillera into one connected component, which `min_width_km: 2.0` then had no reason to
+break up. Its accepted candidates are Andean (mean altitude 2,446 m, p50 2,256, p90
+4,546) while the polygon enclosing them reaches the coast and the basin. Site *count*
+and site *extent* from this run are artefacts of the element; the accepted-candidate
+statistics inside them are not.
+
+**One thing that was checked and turned out fine.** The obvious worry is that 3
+arc-seconds changes the slope distribution itself — smoothing steep ground into the
+3–25° band and roughening flat ground into it — which would make the whole screen a
+resolution artefact. Measured on 20 Mpx of Arequipa, comparing the native grid against a
+3×3 block mean of the same ground:
+
+| grid | in 3–25° | slope quartiles |
+| --- | --- | --- |
+| 30 m | 67.6% | 5.2 / 11.7 / 21.4 |
+| 90 m | 67.4% | 4.4 / 10.4 / 19.2 |
+
+The quartiles do shift down, as smoothing must make them, but the *band fraction* moves
+by 0.2 points: what is lost at the 25° ceiling is regained at the 3° floor. So the
+screen's 74%-of-Peru is a fact about Peru and not about the grid. The prediction here
+was wrong and the measurement is the useful part.
+
+Peru accepts a *lower* fraction of its screened candidates than Arequipa does (43.1% vs
+61.6%), which is the expected direction: the national box adds coastal desert below the
+3° floor, high Andes above the 25° ceiling, and Amazon lowlands that are flat.
+
+**No TAMBO counterpart, deliberately.** A 90 m pixel cannot resolve the geometry TAMBO
+depends on — Colca's floor is ~1 km wide, so a canyon is ~11 pixels across and the wall
+the array stands on is a handful, with the 20–60° band measured on a slope the grid has
+already averaged. And TAMBO's 100 m closing element against this run's 1,382 m stride
+gap is a ratio of 13.8; raising `gap_close_km` to 1.5 km to survive that is fifteen times
+the array's own scale, so the mask would smear across the canyon instead of tracing the
+wall — wrong in the opposite direction from §6.34. A national TAMBO answer needs 1
+arc-second and tiling, and that is a different job.
+
+**`--max_memory_gb` caps virtual address space, not resident memory.** The first attempt
+ran the whole search successfully at `max_memory_gb 7.0` and then failed on the *map*
+with `Unable to allocate 40.8 MiB`. Nothing was near exhausting 7 GiB of RAM. The cap is
+`RLIMIT_AS`, which counts every mapping — including the 1.36 GB memory-mapped `.npy` and
+the ping-pong buffers, all of it file-backed and evictable — while
+`estimate_peak_memory_gb` deliberately estimates only *anonymous* memory and says so.
+On a 339 Mpx DEM those two quantities differ by more than 2 GiB, so a cap set from the
+estimate is tight by exactly the amount the estimate excludes. The run completed at 11.0.
+**Set `--max_memory_gb` above the estimate by roughly the mapped size of the DEM**, and
+note the failure mode is benign but late: the search finishes, the JSON and the GeoTIFF
+are written, and the picture is the thing you lose.
+
+### 6.47 A joint site is not one polygon, and an optimiser told to work inside it finds nothing
+
+The question asked was whether the code can lay out a *specific realization* at a
+combined site — roughly 100 TAMBO units with a few GRAND antennas among them. The
+answer is that it cannot yet, and the interesting part is not the missing placement
+routine. It is that **the region a placement routine would obviously be pointed at is
+the wrong region.**
+
+Measured on the stored Colca combination, per pixel, against each experiment's own
+deployable slope band:
+
+| ground inside the 50.1 km² joint mask | px | share | km² |
+| --- | --- | --- | --- |
+| GRAND's band 3–25° only | 596 | 1.1% | 0.55 |
+| both bands, 20–25° | 3,372 | 6.2% | 3.09 |
+| TAMBO's band 20–60° only | 50,565 | 92.4% | 46.27 |
+| neither | 195 | 0.4% | 0.18 |
+
+The joint mask's slope quartiles are 31.1° / 36.3° / 41.8°. It is canyon wall. **Only
+3.63 km² of it is ground a GRAND antenna could stand on**, and that 3.63 km² is
+**1,702 disconnected fragments whose largest is 0.038 km²** — against the 0.866 km² a
+single cell of a 1 km hexagonal lattice occupies. Not one fragment holds one antenna
+position. `count_grid_capacity` reports 1 for the whole joint mask, and for once that is
+not the anchored-not-fitted caveat understating things: the continuum limit is 4.2 and
+even a perfectly fitted lattice could not reach it.
+
+So an optimiser handed the intersection would report that a few GRAND antennas cannot be
+placed at all, and it would be answering the question it was asked rather than the
+question that was meant.
+
+**The realization is buildable; it is just not one polygon.** The two halves are
+unconstrained and adjacent rather than competing:
+
+- **TAMBO.** 100 units at 100 m hexagonal spacing need 0.87 km². There are 49.4 km² of
+  TAMBO-band ground inside the joint mask — 57× the room required. Siting them is not a
+  constraint, it is a choice.
+- **GRAND.** 10 antennas at 1 km need 8.66 km², which is not in the joint mask. It is
+  next door: of GRAND's 4,580 km² Colca-crop mask, 2,995 km² is in the 3–25° band and
+  2,744 km² of that lies in 48 patches large enough to hold a lattice cell. From joint
+  ground the nearest such patch is a **median 0.92 km away; 53% of the joint mask is
+  within 1 km of one and 84% within 3 km.**
+
+Under one kilometre is *inside a single GRAND cell*. From GRAND's point of view the two
+arrays are co-located; from the mask's point of view they never overlap. That is the
+whole content of the "joint" idea, and it is why the Jaccard index of 0.0006 reported in
+§6.26 reads as a failure and is not one.
+
+**What this says about building the thing.** The three gaps named in the handover are
+real and unchanged — the per-pixel score is aggregated to mean/median/p90 by
+`summarize_observables_by_site` and never rastered; there is no placement routine; and
+the score is a ranking proxy rather than an event rate, which still waits on `A(E)`
+(§9.1, and see §6.42 for why an inferred table is unsafe). But the *domain* matters
+before any of them:
+
+1. Optimise over the **union** with a per-role band constraint, never over the
+   intersection. The intersection is TAMBO ground that GRAND's region happens to
+   enclose.
+2. The coupling term is **shared line of sight**, not shared footprint. What makes a
+   pairing joint is that both arrays watch the same wall, and that is a property the
+   arrival scan already computes and the combination step currently discards.
+3. A GRAND antenna's constraint is **patch size**, not area. 3.63 km² that never
+   assembles 0.87 km² in one piece holds nothing, and a routine that reasons in total
+   area will not notice.
+
+Still analysis. Nothing here is implemented, and the placement routine remains unwritten
+by choice rather than by oversight.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

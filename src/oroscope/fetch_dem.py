@@ -2,11 +2,25 @@
 """
 Downloads the elevation models a search needs, and writes configurations for them.
 
-Fetches the bundled regions -- Lima (AW3D30) and Arequipa (SRTMGL1) -- from
-OpenTopography into ``input/dem/``, and generates a ready-to-run JSON config for each
-in ``config/``. An API key is required and free: register at
-https://portal.opentopography.org/myopentopo and pass it as
-``--open_topography_api_key``.
+Fetches the bundled regions from OpenTopography into ``input/dem/`` and generates a
+ready-to-run JSON config for each in ``config/``::
+
+    oroscope-fetch-dem --region arequipa --open_topography_api_key KEY
+
+Three regions are defined: ``arequipa`` (SRTMGL1, 1 arc-second, 148 MB), ``lima``
+(AW3D30, 1 arc-second, 110 MB) and ``peru`` (SRTMGL3, 3 arc-seconds, 302 MB) -- the
+whole country, at the only resolution that fits either a desktop's memory or the API's
+own area limit. Omit ``--region`` to fetch all of them.
+
+**Getting a key.** It is free and takes a minute. Register at
+https://portal.opentopography.org/myopentopo, sign in, then open *myOpenTopo
+Authorizations and API Key* from the account menu and copy the key. Pass it as
+``--open_topography_api_key``, or set ``OPENTOPOGRAPHY_API_KEY`` in the environment,
+which keeps it out of your shell history and out of any file that might be committed.
+
+**Requests are capped by area,** and the cap is per dataset: 450,000 km² for every 30 m
+dataset, 4,050,000 km² for the 90 m ones. That is why ``peru`` is SRTMGL3 -- its
+bounding box is about 2.86 million km², six times over the 30 m limit.
 
 For any other region, download the tiles from the OpenTopography portal, merge them
 into one GeoTIFF if the area spans several, and cut the window you want with
@@ -23,7 +37,6 @@ import os
 import urllib.request
 import urllib.error
 import json
-import subprocess
 from tqdm import tqdm
 
 # ==========================================
@@ -85,6 +98,26 @@ REGIONS = {
         "filename": "arequipa_SRTMGL1.tif",
         "preset": "arequipa",
         "demtype": "SRTMGL1"
+    },
+    # The whole country, at 3 arc-seconds rather than 1. Not a preference, and it is
+    # forced twice over. By memory: 18.4 by 12.8 degrees is 3,052 Mpx at 1 arc-second
+    # and 339 Mpx at 3, and only the latter fits in a desktop in one run -- see
+    # config/grand_peru_survey.json for the arithmetic. And by the API, which caps a
+    # request at "4,050,000 km2 for SRTM GL3, COP90 (90m resolution), and 450,000 km2
+    # for all 30m resolution datasets" (opentopography.org/developers). This box is
+    # ~2.86 million km2: inside the 90 m limit, six times over the 30 m one.
+    #
+    # A 90 m pixel is a survey instrument. It resolves the plateaux and ranges GRAND
+    # deploys on; it does not resolve a canyon wall, so it is not the grid to run TAMBO
+    # on. If SRTMGL3 is ever rejected, COP90 is the same resolution and the same limit.
+    "peru": {
+        "west": -81.4,
+        "east": -68.6,
+        "south": -18.4,
+        "north": 0.0,
+        "filename": "peru_SRTMGL3.tif",
+        "preset": "default",
+        "demtype": "SRTMGL3"
     }
 }
 
@@ -130,25 +163,41 @@ def download_dem(region_name, bounds, api_key, output_dir):
         print(f"      {Icon.CROSS}{C.FAIL}Download failed: {e}{C.RESET}")
         return None
 
-def generate_and_patch_config(region_name, preset, dem_filepath):
-    """Calls site_searcher.py to generate a template, then updates the DEM path."""
-    config_dir = os.path.join("..", "config")
+def generate_and_patch_config(region_name, preset, dem_filepath, config_dir=None):
+    """
+    Writes a default config for the region and points it at the DEM just downloaded.
+
+    This used to shell out to ``site_searcher.py`` in the current directory, which was
+    right when the modules were flat and is wrong now that they are a package: an
+    installed copy has no such file anywhere, so the config step failed for every user
+    who was not standing in ``src/``. :func:`site_searcher.generate_config` is the same
+    code path the ``--generate_config`` flag takes.
+
+    Parameters
+    ----------
+    region_name : str
+        Key in :data:`REGIONS`; names the config file.
+    preset : str
+        Config preset to seed from, one of ``site_searcher.CONFIG_PRESETS``.
+    dem_filepath : str
+        The DEM to point ``dem_path`` at.
+    config_dir : str, optional
+        Where to write. Defaults to ``../config`` for continuity with the old layout.
+    """
+    config_dir = config_dir or os.path.join("..", "config")
     os.makedirs(config_dir, exist_ok=True)
     config_filename = os.path.join(config_dir, f"{region_name}_config.json")
-    
-    print(f"   {Icon.GEAR}Generating config file via site_searcher.py...")
-    
-    # 1. Generate the raw config using the main script
+
+    print(f"   {Icon.GEAR}Generating config file...")
+
+    # 1. Generate the raw config through the library
     try:
-        subprocess.run([
-            sys.executable, "site_searcher.py", 
-            "--generate_config", config_filename, 
-            "--config_preset", preset
-        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError:
-        print(f"      {Icon.CROSS}{C.FAIL}Failed to generate config. Ensure 'site_searcher.py' is in this directory.{C.RESET}")
+        from oroscope import site_searcher as ss
+        ss.generate_config(config_filename, preset)
+    except Exception as e:
+        print(f"      {Icon.CROSS}{C.FAIL}Failed to generate config: {e}{C.RESET}")
         return
-        
+
     # 2. Patch the JSON to point to the newly downloaded DEM
     try:
         with open(config_filename, 'r') as f:
@@ -178,37 +227,43 @@ def main():
     to call.
     """
     parser = argparse.ArgumentParser(description="Oroscope - DEM download and configuration setup")
-    parser.add_argument("--open_topography_api_key", type=str, default=None, 
-                        help="Your OpenTopography API key (Required to download DEMs).")
-    
+    parser.add_argument("--open_topography_api_key", type=str, default=None,
+                        help="Your OpenTopography API key (Required to download DEMs). Free, from https://portal.opentopography.org/myopentopo -- register, then 'myOpenTopo Authorizations and API Key'. Read from the OPENTOPOGRAPHY_API_KEY environment variable if this flag is not given, which keeps it out of your shell history.")
+    parser.add_argument("--region", type=str, default=None, choices=sorted(REGIONS),
+                        help="Download one region rather than all of them. Peru is 302 MB and the whole set is over 550; asking for everything to get one is the wrong default and used to be the only option.")
+    parser.add_argument("--output_dir", type=str, default=os.path.join("..", "input", "dem"),
+                        help="Where the DEMs land. Default ../input/dem, which is right when standing in src/.")
+    parser.add_argument("--config_dir", type=str, default=os.path.join("..", "config"),
+                        help="Where the generated configs land. Default ../config.")
+
     args = parser.parse_args()
+    api_key = args.open_topography_api_key or os.environ.get("OPENTOPOGRAPHY_API_KEY")
 
     print(f"\n{C.HEADER}===================================================={C.RESET}")
     print(f"{C.BOLD}   OROSCOPE OPENTOPOGRAPHY DEM SETUP{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
 
     # Explicit enforcement of the API Key
-    if not args.open_topography_api_key:
+    if not api_key:
         print(f"\n{C.FAIL}{Icon.CROSS}ERROR: Missing Required Parameter.{C.RESET}")
-        print(f"{C.WARN}The flag {C.BOLD}--open_topography_api_key{C.RESET}{C.WARN} must be provided.{C.RESET}")
-        print("If you do not have an API key, you cannot use this setup script and must download the TIF files manually from OpenTopography.")
+        print(f"{C.WARN}Pass {C.BOLD}--open_topography_api_key{C.RESET}{C.WARN}, or set OPENTOPOGRAPHY_API_KEY in the environment.{C.RESET}")
+        print("The key is free. Register at the link below, then open 'myOpenTopo Authorizations")
+        print("and API Key' and copy the key from there. Without one you must download the TIF")
+        print("files by hand from the OpenTopography portal.")
         print(f"Register for a free key at: {C.MAGENTA}https://portal.opentopography.org/myopentopo{C.RESET}\n")
         sys.exit(1)
 
-    # Ensure target script exists
-    if not os.path.exists("site_searcher.py"):
-        print(f"\n{C.FAIL}{Icon.CROSS}ERROR: 'site_searcher.py' not found.{C.RESET}")
-        print(f"{C.WARN}Please run this setup script from the same directory as your main code.{C.RESET}\n")
-        sys.exit(1)
-
-    # Dependency check using generate_env.py
+    # Dependency check using generate_env.py. Against the installed module rather than a
+    # site_searcher.py in the current directory: there used to be a hard exit here if
+    # that file was not beside you, which made the whole tool unusable from anywhere but
+    # the old flat src/ layout.
     try:
-        from oroscope import generate_env
+        from oroscope import generate_env, site_searcher
         print(f"\n{C.HEADER}===================================================={C.RESET}")
         print(f"{C.BOLD}   DEPENDENCY CHECK{C.RESET}")
         print(f"{C.HEADER}===================================================={C.RESET}")
-        print(f"   {Icon.GEAR}Scanning 'site_searcher.py' for dependencies...")
-        deps = generate_env.extract_dependencies("site_searcher.py")
+        print(f"   {Icon.GEAR}Scanning the searcher for dependencies...")
+        deps = generate_env.extract_dependencies(site_searcher.__file__)
         satisfied, missing = generate_env.check_installed_modules(deps)
         
         if missing:
@@ -225,22 +280,32 @@ def main():
     print(f"\n{C.HEADER}===================================================={C.RESET}")
     print(f"{C.BOLD}   DOWNLOADING ASSETS{C.RESET}")
     print(f"{C.HEADER}===================================================={C.RESET}")
-    output_dir = os.path.join("..", "input", "dem")
+    output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
     print(f"   {Icon.DISK}Target directory verified: {C.MAGENTA}{os.path.abspath(output_dir)}{C.RESET}")
 
-    # Process each region
-    for region, bounds in REGIONS.items():
-        downloaded_path = download_dem(region, bounds, args.open_topography_api_key, output_dir)
-        
+    wanted = [args.region] if args.region else list(REGIONS)
+    written = []
+    for region in wanted:
+        bounds = REGIONS[region]
+        downloaded_path = download_dem(region, bounds, api_key, output_dir)
+
         if downloaded_path:
-            generate_and_patch_config(region, bounds['preset'], downloaded_path)
-            
+            generate_and_patch_config(region, bounds['preset'], downloaded_path,
+                                      args.config_dir)
+            written.append(region)
+
     print(f"\n{C.HEADER}===================================================={C.RESET}")
     print(f"{C.OK}{Icon.CHECK}{C.BOLD}Setup Complete.{C.RESET}")
-    print("You can now run the main script using your new configs:")
-    print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/lima_config.json{C.RESET}")
-    print(f"  {C.MAGENTA}python site_searcher.py --config_path ../config/arequipa_config.json{C.RESET}\n")
+    if written:
+        print("You can now run a search against a generated config:")
+        for region in written:
+            print(f"  {C.MAGENTA}oroscope --config_path "
+                  f"{os.path.join(args.config_dir, region + '_config.json')}{C.RESET}")
+        print("\nThe generated config is a default template. The tuned ones that produced")
+        print("this project's published numbers live beside it in config/ -- for Peru,")
+        print(f"  {C.MAGENTA}oroscope --config_path "
+              f"{os.path.join(args.config_dir, 'grand_peru_survey.json')}{C.RESET}\n")
 
 
 if __name__ == "__main__":
