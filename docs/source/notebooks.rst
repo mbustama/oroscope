@@ -1,7 +1,7 @@
 Tutorial notebooks
 ==================
 
-Eleven worked notebooks live in `notebooks/
+Twelve worked notebooks live in `notebooks/
 <https://github.com/mbustama/oroscope/tree/main/notebooks>`_, numbered in reading
 order. Each carries its figures inline, so they can be read on GitHub without being
 run, and each ends with links to the previous and next.
@@ -104,6 +104,16 @@ than running the searches itself.
    minutes. As much about reading a coarse answer honestly as about Peru: why the
    resolution is forced rather than chosen, why the area is a bracket and the site
    count is worse than the area, and one worry that was checked and came back fine.
+
+Going deeper
+-----------
+
+`13. Turning the knobs <https://github.com/mbustama/oroscope/blob/main/notebooks/13_turning_the_knobs.ipynb>`_
+   Each parameter turned, and what moves. Two of the five sit on cliffs and a third
+   changes one reported number while leaving another alone. The striding penalty is
+   shown to depend on **how thin the accepted ground is**, which is why the same knob
+   costs 4.75× at Colca and 291× on the Callejón de Huaylas. Runs in seconds on terrain
+   it builds itself.
 
 .. note::
 
