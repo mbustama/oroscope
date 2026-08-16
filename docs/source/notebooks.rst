@@ -1,7 +1,7 @@
 Tutorial notebooks
 ==================
 
-Nine worked notebooks live in `notebooks/
+Ten worked notebooks live in `notebooks/
 <https://github.com/mbustama/oroscope/tree/main/notebooks>`_, numbered in reading
 order. Each carries its figures inline, so they can be read on GitHub without being
 run, and each ends with links to the previous and next.
@@ -84,6 +84,14 @@ Running one
    figure. Ends with how to turn the MP4s into animated GIFs, both through the tool and
    with plain ``ffmpeg``.
 
+`10. Peru, all of it <https://github.com/mbustama/oroscope/blob/main/notebooks/10_the_peru_survey.ipynb>`_
+   The search run over a whole country — 339 million pixels at 3 arc-seconds, in four
+   minutes. As much about reading a coarse answer honestly as about Peru: why the
+   resolution is forced rather than chosen, why the area is a bracket and the site
+   count is worse than the area, and one worry that was checked and came back fine.
+   Like 8 it **reads** stored results rather than running the search, but everything
+   else in it computes.
+
 .. note::
 
    Notebooks 7, 8 and 9 are not executed in CI. Seven and eight drive whole searches,
@@ -92,3 +100,8 @@ Running one
    are run locally when a configuration changes; ``tests/test_docs.py`` checks
    statically that the API names they call still exist, which is the drift the
    execution would have caught.
+
+   Notebook 10 *is* executed, despite reading a store it will not find there. Every
+   cell that needs the store is guarded and every other cell computes from the library,
+   so on a bare runner it degrades to the prose and the arithmetic rather than failing —
+   which is the behaviour worth having checked on every push.

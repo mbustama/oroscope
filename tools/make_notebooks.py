@@ -1972,8 +1972,315 @@ print(f"{len(stills)} stills at the video's own frame size, "
 - **[4. Criteria and scoring](04_criteria_and_scoring.ipynb)** — the component shapes
   that `product_collapse` multiplies together.
 - **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — what the whole machine
-  produced when it was finally pointed at everything."""),
-("md", footer(prev=("08_the_full_dem.ipynb", "The full Arequipa DEM"))),
+  produced when it was finally pointed at everything.
+- **[10. Peru, all of it](10_the_peru_survey.ipynb)** — the same machine pointed at a
+  country, and how to read a coarse answer honestly."""),
+("md", footer(prev=("08_the_full_dem.ipynb", "The full Arequipa DEM"),
+              nxt=("10_the_peru_survey.ipynb", "Peru, all of it"))),
+]
+
+# --------------------------------------------------------------------------- 10
+NB10 = [
+("md", """# 10. Peru, all of it
+
+Every other notebook here works on a crop, or on one department. This one is the search
+run over **a whole country** — 22,080 × 15,360 pixels, 339 million of them, from the
+Ecuadorian border to the Chilean one and from the Pacific to the Brazilian lowlands.
+
+It is a **survey**, and the word is doing real work. The criteria are copied unchanged
+from the full-Arequipa run so the two are comparable, but the grid is 3 arc-seconds
+rather than 1, and almost everything worth knowing about the answer is a consequence of
+that. This notebook is as much about reading a coarse result honestly as it is about
+Peru."""),
+("code", PREAMBLE_NO_PLOT + """import json
+import os
+
+from oroscope import site_searcher as ss"""),
+("md", """## Read, not run
+
+The cells below open results produced locally and stored in
+`output/grand_peru_survey/`. They do not start a search — it needs a 302 MB DEM that is
+not in the repository, and four minutes of eight cores.
+
+To produce them yourself:
+
+```bash
+# 1. A free OpenTopography key: register at portal.opentopography.org/myopentopo,
+#    then open "myOpenTopo Authorizations and API Key" and copy it.
+export OPENTOPOGRAPHY_API_KEY=...
+
+# 2. The DEM (302 MB) and a template config
+cd src && oroscope-fetch-dem --region peru
+
+# 3. The survey, about four minutes
+oroscope --config_path ../config/grand_peru_survey.json
+```
+
+Everything below degrades gracefully if the store is absent: the figures are saved in
+this notebook, so it reads either way."""),
+("code", """STORE = os.path.abspath(os.path.join("..", "output", "grand_peru_survey"))
+RESULTS = os.path.join(STORE, "oroscope_results_peru_SRTMGL3.json")
+
+run = json.load(open(RESULTS)) if os.path.exists(RESULTS) else None
+print("stored run found" if run else f"not here yet: {os.path.relpath(RESULTS)}")"""),
+("md", """## Why 3 arc-seconds, and why that is not a preference
+
+Two independent limits force it, and it is worth seeing both because they bracket what
+is possible on a desktop.
+
+**The API.** OpenTopography caps a single request by area, per dataset: 450,000 km² for
+every 30 m dataset and 4,050,000 km² for the 90 m ones. Peru's bounding box is about
+2.86 million km² — comfortably inside the 90 m limit and six times over the 30 m one.
+A 1 arc-second national DEM is not one download.
+
+**Memory.** `estimate_peak_memory_gb` answers this directly, and the shape of its answer
+is the useful part."""),
+("code", """rows, cols = 22080, 15360            # Peru at 3 arc-seconds
+print(f"{rows:,} x {cols:,} = {rows*cols/1e6:,.0f} Mpx\\n")
+print("estimated peak anonymous memory, GiB")
+print(f"{'':>8}" + "".join(f"{'stride ' + str(s):>12}" for s in (10, 15, 30)))
+for ds in (1, 2, 4):
+    row = "".join(f"{ss.estimate_peak_memory_gb(rows, cols, ds, s):>12.2f}"
+                  for s in (10, 15, 30))
+    print(f"  ds {ds:<4}" + row)"""),
+("md", """Read down a column rather than across a row. **`candidate_stride` is the memory lever,
+not `downsample_factor`** — candidates are taken on the *native* grid, so downsampling
+scales the labelling arrays as its inverse square but barely touches the dominant term.
+That is the single most useful fact for planning a large run, and it is the opposite of
+what most people reach for first.
+
+At 1 arc-second the same country is 3,052 Mpx, nine times this table. The chosen cell is
+`downsample_factor` 4 with `candidate_stride` 15: **4.77 GiB**, against roughly 8 GiB
+available on the machine this ran on."""),
+("md", """## Raising the stride costs area unless the closing element keeps up
+
+This is the trap that made a published TAMBO area 4.75× too low
+([notebook 9](09_animating_the_mechanism.ipynb) animates it as `stride_and_closing`).
+Striding marks one surviving pixel in N; the mask is then closed morphologically before
+area is measured. If the closing element cannot bridge the gap the stride leaves, the
+mask never reconnects — it stays a scatter of isolated pixels, small regions fall under
+the size thresholds, and the area collapses.
+
+At 3 arc-seconds the pixel is ~92 m, so the gap grows with it."""),
+("code", """grid = ss.resolve_grid_geometry("no-such-file.tif", -9.2, cell_size_deg=3/3600)
+print(f"pixel: {grid.cell_size_y:.1f} m N-S, {grid.cell_size_x:.1f} m E-W\\n")
+
+for stride in (10, 15, 30):
+    gap = ss.stride_gap_m(stride, grid.cell_size_y)
+    print(f"stride {stride:>2}  gap {gap:>6,.0f} m")
+    for element_km in (1.0, 1.5, 3.0):
+        verdict = ss.warn_stride_outruns_closing(stride, grid.cell_size_y,
+                                                 element_km, 1.0, quiet=True)
+        state = "ok" if verdict is None else f"WARNS, {verdict['ratio']:.2f}x short"
+        print(f"    closing {element_km:>4} km : {state}")"""),
+("md", """So stride 15 needs an element of at least ~1.4 km. The run uses **1.5 km**, which is
+1.5× GRAND's own 1 km antenna spacing.
+
+That is a declared bias, and its direction is the opposite of the TAMBO failure: an
+element larger than the array's own scale will bridge some gaps that are *real*, so the
+area comes out slightly high rather than catastrophically low. For a survey that is the
+right way to be wrong, and saying so is the price of using it."""),
+("md", """## What the run found"""),
+("code", """if run:
+    t = run["timings_sec"]
+    for stage, seconds in t.items():
+        print(f"  {stage:<22} {seconds:>7.1f} s")
+    print(f"  {'TOTAL':<22} {sum(t.values()):>7.1f} s")"""),
+("md", """**Four minutes for a country**, against 26.8 minutes for the Arequipa DEM at 1
+arc-second. Peru is 2.6× the pixels but a ninth of the candidates, and the candidates
+are what the ray tracing costs — which is the same lesson the memory table taught,
+arriving from the other direction."""),
+("code", """if run:
+    funnel = run["funnel"]
+    first = next(iter(funnel.values()))
+    prev = None
+    for stage, n in funnel.items():
+        step = f"{100*n/prev:6.1f}% of previous" if prev else ""
+        print(f"  {stage:<34} {n:>13,}  {step}")
+        prev = n"""),
+("md", """Two rows deserve attention.
+
+**`directions accepted` over `kept by stride 15` is the acceptance rate: 43.1%.** The
+full Arequipa DEM gave 61.6% for the same criteria. Lower is the expected direction —
+the national box adds coastal desert below the 3° slope floor, high Andes above the 25°
+ceiling, and Amazon lowlands that are simply flat.
+
+**`after gap closing` is larger than `directions accepted` by a factor of 24.** Closing
+is not a filter; it is the step that undoes striding, and most of that factor is the 15
+pixels each kept candidate stands for."""),
+("code", """if run:
+    r = run["results"]
+    sites = sorted(r["sites"], key=lambda s: -s["area_km2"])
+    print(f"{r['total_sites']} sites, "
+          f"{sum(s['area_km2'] for s in sites):,.0f} km2, "
+          f"{r['total_capacity']:,} antenna positions at 1 km\\n")
+    print(f"{'area km2':>12} {'capacity':>10}   centre")
+    for s in sites[:6]:
+        print(f"{s['area_km2']:>12,.0f} {s['capacity_exact']:>10,}   "
+              f"{s['center_lat']:7.2f}, {s['center_lon']:8.2f}")
+    print(f"{'...':>12}   and {len(sites)-6} smaller")"""),
+("md", """## The map"""),
+("code", SHOW_HELPER),
+("code", """show_figure(os.path.join(STORE, "oroscope_results_peru_SRTMGL3.png"),
+            caption="GRAND over the whole of Peru, 3 arc-seconds")"""),
+("md", """The Pacific is the flat ground bottom-left, the Amazon basin the low blue to the
+north-east, and the accepted terrain follows the cordillera between them — which is what
+it should do, and is the first thing to check on any result of this size."""),
+("md", """## Now read it honestly
+
+Three caveats, in descending order of how much they should change what you say.
+
+### 1. The area is a bracket, not a number
+
+The stride-corrected accepted set and the reported area disagree by 38%, and both are
+approximations."""),
+("code", """if run:
+    px_km2 = grid.cell_size_y * grid.cell_size_x / 1e6
+    accepted = run["funnel"]["directions accepted"]
+    selected = run["funnel"]["pixels in selected sites (est.)"]
+    stride_corrected = accepted * 15 * px_km2
+    reported = selected * px_km2
+    print(f"  accepted, stride-corrected : {stride_corrected:>10,.0f} km2")
+    print(f"  reported after closing     : {reported:>10,.0f} km2")
+    print(f"  ratio                      : {reported/stride_corrected:>10.2f}")
+    print(f"\\n  quote this as 4-6 x 10^5 km2, or {100*reported/1_285_216:.0f}% of Peru "
+          f"with the bracket attached")"""),
+("md", """Some of that factor is closing doing its job — filling holes *inside* accepted ground,
+which the stride correction also does — and some is the 1.5 km element bridging ground
+that was genuinely rejected. Nothing in this run separates them.
+
+### 2. "17 sites" is the number to distrust — more than the area
+
+A site is a connected component of the closed mask. At this scale, with a 1.5 km
+element applied to a strided scatter across 339 Mpx, components merge."""),
+("code", """if run:
+    big = max(run["results"]["sites"], key=lambda s: s["area_km2"])
+    b = big["bounds"]
+    print(f"largest site: {big['area_km2']:,.0f} km2 "
+          f"({100*big['area_km2']/sum(s['area_km2'] for s in run['results']['sites']):.1f}%"
+          f" of the total)")
+    print(f"  its bounding box: {b['north']:.2f} to {b['south']:.2f} lat, "
+          f"{b['west']:.2f} to {b['east']:.2f} lon")
+    print("  the DEM's own:    0.00 to -18.40 lat, -81.40 to -68.60 lon")
+    print(f"\\n  mean altitude of its accepted candidates: "
+          f"{big['arrival_scan']['altitude_m_mean']:,.0f} m")"""),
+("md", """**The largest site's bounding box is the entire DEM.** One connected component holds
+94.8% of the area, and `min_width_km: 2.0` had no reason to break it up. Its accepted
+candidates are Andean — mean altitude 2,446 m — while the polygon enclosing them reaches
+the coast and the basin.
+
+So the *candidate* statistics inside a site are meaningful and its *extent* is not. Site
+count and site geometry from a run at this stride are artefacts of the closing element.
+
+### 3. The one that was checked and came back fine
+
+The obvious worry about 3 arc-seconds is that it moves the slope screen itself —
+smoothing steep ground down into the 3–25° band and roughening flat ground up into it —
+which would make the whole result an artefact of resampling.
+
+That is testable directly: take real terrain at its native resolution, block-mean it to
+three times the pixel, and compare."""),
+("code", """def band_fraction(z, cell_y, cell_x, lo=3.0, hi=25.0):
+    \"\"\"Share of a DEM inside a slope band, and its slope quartiles.\"\"\"
+    dy, dx = np.gradient(np.asarray(z, dtype=np.float64), cell_y, cell_x)
+    slope = np.degrees(np.arctan(np.hypot(dy, dx)))
+    return 100.0 * ((slope >= lo) & (slope <= hi)).mean(), np.percentile(slope, [25, 50, 75])
+
+
+AREQUIPA = os.path.abspath(os.path.join("..", "input", "dem", "arequipa_SRTMGL1.npy"))
+if os.path.exists(AREQUIPA):
+    z30 = np.asarray(np.load(AREQUIPA, mmap_mode="r")[3000:7000, 4000:9000], dtype=np.float64)
+    # The DEM's own geometry, not a nominal arc-second, so this agrees to the digit
+    # with the same measurement quoted in ROADMAP 6.46.
+    g = ss.resolve_grid_geometry(AREQUIPA.replace(".npy", ".tif"), -14.5553)
+    source = "20 Mpx of the Arequipa DEM"
+else:
+    g = ss.resolve_grid_geometry("no-such-file.tif", -14.56, cell_size_deg=1/3600)
+    # No DEM here. Rough terrain built in place rather than imported, so this cell runs
+    # on a bare clone -- the numbers will not be Peru's, but the comparison is the point.
+    rng = np.random.default_rng(0)
+    yy, xx = np.mgrid[0:1200, 0:1200] * g.cell_size_x
+    z30 = (900.0 * np.sin(xx / 7000.0) * np.cos(yy / 9000.0)
+           + 250.0 * np.sin(xx / 1300.0) + rng.normal(0.0, 6.0, (1200, 1200)))
+    source = "synthetic terrain (no DEM present)"
+
+h, w = (z30.shape[0] // 3) * 3, (z30.shape[1] // 3) * 3
+z90 = z30[:h, :w].reshape(h // 3, 3, w // 3, 3).mean(axis=(1, 3))
+
+f30, q30 = band_fraction(z30, g.cell_size_y, g.cell_size_x)
+f90, q90 = band_fraction(z90, g.cell_size_y * 3, g.cell_size_x * 3)
+print(f"{source}\\n")
+print(f"{'grid':<8}{'in 3-25 deg':>14}   slope quartiles")
+print(f"{'30 m':<8}{f30:>13.1f}%   {np.round(q30, 1)}")
+print(f"{'90 m':<8}{f90:>13.1f}%   {np.round(q90, 1)}")
+print(f"\\nband moves by {f90-f30:+.1f} points")"""),
+("md", """On the real DEM the quartiles do shift down — smoothing must make them — but the *band
+fraction* moves by 0.2 points: 67.6% at 30 m against 67.4% at 90 m. **What is lost at the
+25° ceiling is regained at the 3° floor.**
+
+So the screen's reach is a fact about Peru rather than about the grid. The prediction
+here was that resampling would dominate, and it was wrong; that is the useful part, and
+it is why the check is in the notebook rather than the assumption."""),
+("md", """## Why there is no TAMBO counterpart
+
+`config/` holds `grand_peru_survey.json` and deliberately no TAMBO equivalent. Two
+reasons, both about the grid rather than about Peru.
+
+**The geometry is below the pixel.** Colca's floor is about 1 km wide and its rim-to-rim
+separation about 4.5 km. At 92 m a canyon is roughly eleven pixels across the floor, and
+the wall the array stands on — where the 20–60° slope band is measured — is a handful.
+The grid has averaged away the thing being screened for.
+
+**The closing element cannot be made to work.** TAMBO's 100 m antenna spacing sets a
+100 m element against this run's 1,382 m stride gap."""),
+("code", """gap = ss.stride_gap_m(15, grid.cell_size_y)
+print(f"stride 15 leaves a {gap:,.0f} m gap\\n")
+
+for label, element_km in (("TAMBO's own, 100 m", 0.1), ("raised to 1.5 km", 1.5)):
+    v = ss.warn_stride_outruns_closing(15, grid.cell_size_y, element_km, 0.1, quiet=True)
+    state = "ok" if v is None else f"WARNS, {v['ratio']:.1f}x short"
+    print(f"  {label:<20} {state}")
+
+print(f"\\n...but 1.5 km is {1500/100:.0f}x TAMBO's own array scale, so a mask closed")
+print("with it smears across the canyon instead of tracing the wall.")"""),
+("md", """Wrong in the opposite direction from the 4.75× under-report, and no less wrong. **A
+national TAMBO answer needs 1 arc-second and tiling**, and that is a different job.
+
+## One more thing this run taught, the hard way
+
+`--max_memory_gb` is applied as `RLIMIT_AS`, which caps **virtual** address space — so it
+counts every mapping, including the memory-mapped DEM and the scratch buffers. But
+`estimate_peak_memory_gb` estimates **anonymous** memory and deliberately excludes them,
+because the kernel can evict a file-backed page.
+
+On a 339 Mpx DEM those two quantities differ by more than 2 GiB. The first attempt set
+the cap from the estimate, ran the entire search successfully, and then died on the
+*map* with `Unable to allocate 40.8 MiB` — with the JSON and the GeoTIFF already
+written, so only the picture was lost.
+
+The obvious fix is to raise the cap. Raising it too far is worse than not setting it:
+**a cap above available memory is not a cap**, because the OOM killer arrives before the
+limit can fire. A later run set it at 13 GiB on a machine with 8.7 GiB available and
+took the machine down.
+
+`preflight_memory` now reports both numbers and says when they cannot be reconciled."""),
+("code", """report = ss.preflight_memory("no-such-file.tif", downsample_factor=4,
+                             candidate_stride=15, max_memory_gb=0)
+print({k: (round(v, 2) if isinstance(v, float) else v) for k, v in report.items()})
+print("\\n(max_memory_gb=0 disables capping, which is what makes this safe to run here)")"""),
+("md", """When the cap cannot both clear the mapped DEM and stay under available memory, **the
+configuration does not fit** — and the answer is a coarser search, raising
+`candidate_stride`, rather than a bigger number in the cap.
+
+## Where to go next
+
+- **[8. The full Arequipa DEM](08_the_full_dem.ipynb)** — the same machine at 1
+  arc-second, where the areas are quotable rather than bracketed.
+- **[9. Animating the mechanism](09_animating_the_mechanism.ipynb)** —
+  `stride_and_closing` is the trap in this notebook, animated.
+- **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — what a
+  criterion costs, which is the sweep this survey never ran."""),
+("md", footer(prev=("09_animating_the_mechanism.ipynb", "Animating the mechanism"))),
 ]
 
 NOTEBOOKS = {
@@ -1986,6 +2293,7 @@ NOTEBOOKS = {
     "07_explaining_a_run.ipynb": NB07,
     "08_the_full_dem.ipynb": NB08,
     "09_animating_the_mechanism.ipynb": NB09,
+    "10_the_peru_survey.ipynb": NB10,
 }
 
 
