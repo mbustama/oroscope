@@ -2676,9 +2676,37 @@ the ping-pong buffers, all of it file-backed and evictable — while
 `estimate_peak_memory_gb` deliberately estimates only *anonymous* memory and says so.
 On a 339 Mpx DEM those two quantities differ by more than 2 GiB, so a cap set from the
 estimate is tight by exactly the amount the estimate excludes. The run completed at 11.0.
-**Set `--max_memory_gb` above the estimate by roughly the mapped size of the DEM**, and
-note the failure mode is benign but late: the search finishes, the JSON and the GeoTIFF
-are written, and the picture is the thing you lose.
+The failure mode is benign but late: the search finishes, the JSON and the GeoTIFF are
+written, and the picture is the thing you lose.
+
+**Then that advice, followed once more, took the machine down** — and the pair is the
+real lesson, so both halves are recorded here. A follow-up run at `candidate_stride` 10
+(estimate 6.74 GiB) with the cap raised again to 13.0 died in the labelling stage and
+killed the session with it. 13.0 was above the ~8.7 GiB the machine had available, and
+**a cap above available memory is not a cap**: RLIMIT_AS aborts the process only if it
+is reached before the kernel runs out of memory to give, and above that line the OOM
+killer always gets there first. The limit was set, reported, and could never fire.
+
+The two constraints pull opposite ways — clear the estimate by the mapped size of the
+DEM, *and* stay under what the machine has — and nothing in the pre-flight said when
+they could not both be met. `preflight_memory` now checks it, warns, and returns
+`cap_exceeds_available` so a library caller can act on it:
+
+```
+⚙️  Estimated peak memory: 6.7 GiB, available 8.7 GiB
+⚙️  Address space capped at 13.0 GiB (max_memory_gb=0 disables)
+⚠️  That cap is above the 8.7 GiB currently available, so it cannot protect this
+    machine: a runaway reaches the OOM killer before the limit fires.
+```
+
+Note that the *estimate* warning would not have fired: 6.74 against 8.71 available is
+77%, just under the 80% threshold. The cap check is the one that catches this.
+
+**When the two constraints cannot both be met, the configuration does not fit**, and the
+answer is a coarser search — `candidate_stride` is the memory lever (§6.26a) — not a
+bigger number in the cap. The committed config is now 8.0: above the measured ~7.0
+virtual high-water mark, below available. The stride-10 variant was not retried and its
+numbers are unknown; the committed survey is stride 15.
 
 ### 6.47 A joint site is not one polygon, and an optimiser told to work inside it finds nothing
 

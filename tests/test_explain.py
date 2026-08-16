@@ -632,6 +632,34 @@ class TestLibraryParity(unittest.TestCase):
         self.assertGreater(report["estimate_gb"], 0.0)
         self.assertFalse(report["capped"], "max_memory_gb=0 must disable the cap")
 
+    def test_the_preflight_says_when_the_cap_cannot_protect_the_machine(self):
+        """
+        A cap above the available memory is not a cap: the OOM killer arrives before
+        RLIMIT_AS fires. Easy to set by accident, because the estimate counts only
+        anonymous memory, so on a large DEM the cap must clear it by the size of the
+        memory-mapped file -- and raising it for that reason can carry it past what the
+        machine has. A 339 Mpx search capped at 13.0 GiB against 8.0 GiB available took
+        the machine down; nothing said a word.
+        """
+        import resource
+
+        keep = resource.getrlimit(resource.RLIMIT_AS)
+        try:
+            with quiet():
+                # Far above any real machine, so the comparison is deterministic, and
+                # high enough that applying it constrains nothing.
+                report = ss.preflight_memory("nonexistent.tif", max_memory_gb=1.0e6)
+            self.assertTrue(report["capped"])
+            self.assertTrue(report["cap_exceeds_available"],
+                            "a cap of 1e6 GiB must be reported as unprotective")
+        finally:
+            resource.setrlimit(resource.RLIMIT_AS, keep)
+
+        with quiet():
+            report = ss.preflight_memory("nonexistent.tif", max_memory_gb=0)
+        self.assertFalse(report["cap_exceeds_available"],
+                         "no cap applied means nothing to warn about")
+
     def test_the_preflight_survives_a_dem_it_cannot_measure(self):
         with quiet():
             report = ss.preflight_memory("nonexistent.tif", max_memory_gb=0)

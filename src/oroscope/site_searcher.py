@@ -3151,14 +3151,27 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
     Returns
     -------
     dict
-        ``{"estimate_gb", "available_gb", "cap_gb", "capped"}``. ``estimate_gb`` is
-        ``None`` when the DEM could not be measured.
+        ``{"estimate_gb", "available_gb", "cap_gb", "capped", "cap_exceeds_available"}``.
+        ``estimate_gb`` is ``None`` when the DEM could not be measured.
 
     Notes
     -----
     The estimate is rough by construction -- it assumes a survival fraction the
     topographic screen has not yet measured -- so an over-large search is warned about
     rather than refused.
+
+    **A cap above what is available is not a cap.** ``RLIMIT_AS`` protects the machine
+    only if the process hits it *before* the kernel runs out of memory to give; set
+    above the available figure, the OOM killer arrives first and the limit never fires.
+    This is easy to do by accident, because the two pieces of advice around it pull
+    opposite ways: the estimate counts only *anonymous* memory, so on a large DEM the
+    cap has to clear it by the size of the memory-mapped file (roadmap 6.46), and
+    raising it for that reason can quietly carry it past the available figure. It
+    happened here -- a 339 Mpx search capped at 13.0 GiB on a machine with 8.0 GiB
+    available, which took the machine down. When the two constraints cannot both be
+    met, the configuration does not fit and the answer is a coarser one, not a bigger
+    number. Warned about rather than refused, for the same reason as the estimate: the
+    available figure moves while the run is being set up.
     """
     rows = cols = None
     try:
@@ -3188,11 +3201,20 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         # leaving room for the address space numba and BLAS reserve without touching.
         cap = 0.8 * have if have else None
     capped = bool(cap and apply_memory_cap(cap))
+    over = bool(capped and have and cap > have)
     if capped and not quiet:
         print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
               f" (max_memory_gb=0 disables)")
+    if over and not quiet:
+        print(f"{C.WARN}{Icon.WARN}That cap is above the {have:.1f} GiB currently "
+              f"available, so it cannot protect this machine: a runaway reaches the "
+              f"OOM killer before the limit fires. Lower --max_memory_gb below "
+              f"{have:.1f}, and if the search then does not fit, make it coarser "
+              f"(raise --candidate_stride, which is the memory lever) rather than "
+              f"raising the cap again.{C.RESET}")
     return {"estimate_gb": need, "available_gb": have,
-            "cap_gb": cap if capped else None, "capped": capped}
+            "cap_gb": cap if capped else None, "capped": capped,
+            "cap_exceeds_available": over}
 
 
 def validate_parameters(params):
