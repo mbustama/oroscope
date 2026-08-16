@@ -217,17 +217,23 @@ data by copying the picture.
 
 .. code-block:: shell
 
-   python tools/make_animations.py                    # all four, MP4 and GIF
+   python tools/make_animations.py                    # all eight, MP4 and GIF
    python tools/make_animations.py --only the_walk
    python tools/make_animations.py --format gif --out docs/source/_static
 
-Four animations, each showing a *process* whose intermediate states are the point —
+Eight animations, each showing a *process* whose intermediate states are the point —
 anything that is a single state is already a figure in :mod:`oroscope.figures`.
+:doc:`Notebook 9 <notebooks>` builds all of them and explains what each is for.
 
 ``the_walk``
    One backward ray sweeping down through the elevation window: the first intersection
    sliding along the profile and the column depth accumulating behind it. This is the
    mechanism the whole search rests on.
+
+``the_azimuth_fan``
+   The other half of that mechanism. ``the_walk`` sweeps elevation at one bearing; this
+   sweeps the bearing, and reports whether each one finds a wall at the accepted range,
+   the candidate's own hillside a few hundred metres off, or sky.
 
 ``the_funnel``
    The map draining stage by stage. The funnel table says where the candidates went;
@@ -237,13 +243,34 @@ anything that is a single state is already a figure in :mod:`oroscope.figures`.
    Why a closing element smaller than the stride gap loses the mask. Shown on the
    :doc:`assumptions` page.
 
+``product_collapse``
+   Why a threshold on a product is treacherous, and why the reason is dynamic: each
+   component multiplied in walks the population toward zero while the cut stays put.
+   Measured on Colca, 100% of candidates survive the cut before any component and 32%
+   after six — but the fall is not evenly shared, and one component contributes nothing
+   at all.
+
+``slope_criterion``
+   Where a criterion bites, as opposed to how much it costs. The accepted mask over
+   Colca as ``min_target_slope_deg`` climbs through the wall-slope distribution.
+
+``tau_in_rock``
+   More rock is not better. A tau's energy and survival falling as it burrows, against
+   the depth that maximises production and escape together — 5.7×10⁶ g/cm², about 22 km
+   of standard rock, at 1 EeV.
+
 ``energy_window``
    The arrival window narrowing as Earth absorption bites, its lower edge climbing from
    −4.4° at 100 PeV to −0.9° at 10 EeV.
 
-Everything is built from committed code and synthetic terrain, so these reproduce on
-any clone with no DEM present. MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs
-land in ``output/animations/``, which is gitignored.
+MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs land in ``output/animations/``,
+which is gitignored.
+
+Five of the eight are built from committed code and synthetic terrain and reproduce on
+any clone. The three that are about what happens on *real* ground —
+``the_azimuth_fan``, ``product_collapse`` and ``slope_criterion`` — read
+``input/dem/colca.tif`` when it is present and fall back to synthetic terrain when it
+is not, saying on the figure which they used.
 
 
 ``tools/run_arequipa_full.py`` — the full-DEM run

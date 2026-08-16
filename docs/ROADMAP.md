@@ -2483,6 +2483,111 @@ TAMBO assumptions to check with the collaboration, and this is the table to chec
 against. If it is switched, `score_percentile: 22.8` reproduces the current selection
 most closely.
 
+### 6.44 `tau_exit_probability` under-resolves its own integral at large depth
+
+Found while building `tau_in_rock` (§6.45), not looked for. `physics.tau_exit_probability`
+integrates over the interaction depth with `x = np.linspace(0, X, samples)` — a fixed
+number of points spread over the **whole** depth. But only interactions within roughly
+one tau range of the far surface contribute anything, so as `X` grows the sample spacing
+outruns the only region that matters and the trapezoid rule reports the area of a spike
+it never resolved.
+
+Measured at 3 PeV, where the tau range is 3.1×10⁴ g/cm² so the effect starts early:
+
+| `samples` | X = 10⁷ | 10⁸ | 10⁹ |
+| --- | --- | --- | --- |
+| 2000 *(default)* | 2.335e−05 | 2.628e−05 | **8.884e−05** |
+| 20,000 | 2.330e−05 | 2.181e−05 | 1.328e−05 |
+| 200,000 | 2.330e−05 | 2.176e−05 | 1.103e−05 |
+| 2,000,000 | 2.330e−05 | 2.176e−05 | 1.100e−05 |
+
+At X = 10⁹ the default is **8× the converged value**, and worse than the magnitude: it
+inverts the sign of the trend. Converged, the exit probability *falls* with depth, as it
+must; at the default it *rises*, so the curve has a spurious maximum at the grid edge.
+
+**The knock-on is `depth_band_from_energy`,** which locates the band by the half-maximum
+of that curve. It returns (5.6×10⁷, 2.9×10⁸) for TAMBO's configured 3 PeV – 1 EeV range —
+a band that excludes the true 1 EeV optimum of 5.7×10⁶ by more than an order of
+magnitude, and whose low edge *rises* when the minimum energy is *lowered*
+(100 PeV – 10 EeV gives 5.2×10⁵; 3 PeV – 10 EeV gives 5.6×10⁷). The docstring's stated
+"roughly 5e5 to 2.6e8 across 100 PeV to 10 EeV" is the well-behaved case.
+
+**No published number is affected.** Every config leaves `depth_band_gcm2` null, so runs
+score against the default (10⁵, 10⁷) and never call this. `production_escape_optimum_gcm2`
+searches to 10⁹ but its answers are in the resolved regime at ≥100 PeV: 3.30×10⁶ at
+100 PeV, 5.71×10⁶ at 1 EeV, 6.23×10⁶ at 10 EeV, all reproducing published values.
+
+**Not fixed.** The fix is a substitution — integrate in `u = X − x` on a log grid, or
+truncate to a few tau ranges below the surface — and it changes a physics function's
+outputs, so it wants its own change with a test that pins the converged values. Left to
+the owner. `tools/make_animations.py` scores against the default band and says so.
+
+### 6.45 Four more animations, and the two things building them measured
+
+Added to `tools/make_animations.py`, taking it to eight: `the_azimuth_fan`,
+`product_collapse`, `slope_criterion`, `tau_in_rock`. Notebook 9 builds all of them.
+The filter was whether the *intermediate states carry the argument*; six candidates
+were rejected because a static figure does them better, and those reasons are in the
+handover rather than here.
+
+Three of the eight now read `input/dem/colca.tif` when it is present, because they are
+about what a criterion does to real ground, and fall back to synthetic terrain — saying
+so on the figure — when it is not. The fallback is honest but degenerate for
+`slope_criterion`: `synthetic.colca_like` has every wall at exactly 40.6°, so the
+criterion flips between 39° and 42° instead of eroding.
+
+**(a) The product collapse is real but is not evenly shared.** The premise was that each
+component multiplied in drags the whole population toward zero. Measured over the central
+40% of the Colca DEM, 119,788 candidates screened and 98,343 viable, against TAMBO's own
+`min_score` of 0.35:
+
+| after multiplying in | median score | above the cut |
+| --- | --- | --- |
+| *(nothing)* | 1.000 | 100.0% |
+| `depth` | 1.000 | 100.0% |
+| `solid_angle` | 0.233 | 35.9% |
+| `distance` | 0.233 | 35.9% |
+| `shower` | 0.228 | 34.3% |
+| `decay` | 0.218 | 32.3% |
+| `footprint` | 0.214 | 32.2% |
+
+The collapse happens — 100% to 32.2%, median 1.000 to 0.214 — but **one component does
+nine tenths of it** and two do nothing measurable. `depth` is ~1 everywhere because
+Colca's canyon walls sit inside the default band. `distance` is **provably** inert: the
+scan already applied the same 2–5 km window as a hard criterion, so every surviving
+candidate scores 1 on it by construction. Scoring a criterion the scan has already
+enforced is free, but it is also empty, and the funnel does not show it because the
+candidates were gone before scoring saw them.
+
+This does not weaken §6.43's case against thresholding a product — it sharpens it. The
+cut moves from harmless to decisive on the addition of a single term, and which term
+that is depends on the terrain, not on the configuration.
+
+**(b) Where the wall-slope criterion bites.** `min_target_slope_deg` swept over the same
+crop, against a wall-slope distribution whose quartiles are 22.2° / 29.7° / 34.6° and
+whose 95th percentile is 41.2°:
+
+| `min_target_slope_deg` | candidates accepting a direction | of no criterion at all |
+| --- | --- | --- |
+| unset | 106,926 | 100% |
+| 15 | 103,725 | 97% |
+| 25 *(TAMBO's value)* | 98,343 | 92% |
+| 30 | 93,465 | 87% |
+| 40 | 77,139 | 72% |
+| 45 | 66,586 | 62% |
+| 50 | 54,693 | 51% |
+| 60 | 27,773 | 26% |
+| 69 | 7,423 | 7% |
+
+**The mask outlives its own median by 20°.** Half the candidates see a mean wall slope
+below 29.7°, yet a 30° floor still keeps 87% of them, and the half-way point is not
+reached until 50°. The criterion is applied *per direction* while the observable is a
+mean over each candidate's accepted directions, so a candidate keeps its steepest
+directions long after its average has fallen below the cut. Read the reported
+`target_slope_deg` as a description of a candidate, never as a predictor of what a cut
+will do to it. TAMBO's configured 25° costs 8%, which is consistent with §10 calling it
+a deliberately permissive floor.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
