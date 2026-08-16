@@ -3232,6 +3232,38 @@ now an error rather than an empty `np.stack`.
 
 613 → 622 tests.
 
+### 6.55 The pre-flight was sized against the cheaper of the two searches ✅ delivered
+
+Found by audit; latent, not live. `run_full_dem.py` runs one pre-flight and then two
+searches, so the estimate has to cover whichever costs more. It read:
+
+```python
+downsample = max(int(c.get("downsample_factor") or 1) for c in sampling)
+stride     = max(int(c.get("candidate_stride")  or 1) for c in sampling)
+```
+
+Both knobs scale memory **inversely** — a larger stride means fewer candidates, a
+larger `downsample_factor` means smaller labelling arrays — so the costliest
+configuration is the one with the *smallest* values and the answer is a `min`. As
+written, a GRAND config at 4/5 beside a TAMBO config at 1/1 would have been pre-flighted
+at 4/5 and the 1/1 run waved through unchecked.
+
+It sits directly beneath a comment describing the same failure — the sampling hard-coded
+at 4 and 5, "silently wrong for the huaylas crop, which runs at 1 and 1" — so the fix for
+that bug reintroduced it in a new form. Every config pair in `config/` matches today, so
+`min` and `max` agree on all of them and nothing has actually been mis-sized.
+
+**Fixed**, and made testable: the choice is now `costliest_sampling`, a pure function
+with its own examples. `tools/` had **no tests at all** before this, which is why a
+regression in the one number standing between a run that does not fit and the OOM killer
+went unnoticed. `tests/test_tools.py` adds nine, including one that asserts the property
+rather than the implementation — no shipped config may run at a sampling finer than the
+one estimated for it — and three that pin the monotonicity of
+`estimate_peak_memory_gb` and `estimate_visualisation_memory_gb` in both knobs, since
+`min` is only the right answer while those hold.
+
+622 → 631 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

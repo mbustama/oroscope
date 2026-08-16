@@ -117,6 +117,49 @@ def region_paths(region):
     }
 
 
+def costliest_sampling(configs):
+    """
+    The ``(downsample_factor, candidate_stride)`` the pre-flight has to cover.
+
+    One pre-flight is run for a region and several searches follow it, so the estimate
+    has to be sized against whichever of them costs the most. Both knobs scale memory
+    *inversely* -- a larger ``candidate_stride`` means fewer candidates, and a larger
+    ``downsample_factor`` means smaller labelling arrays -- so the costliest
+    configuration is the one with the **smallest** values, and the answer is a minimum.
+
+    Parameters
+    ----------
+    configs : iterable of dict
+        Loaded configurations, one per search.
+
+    Returns
+    -------
+    tuple of int
+        ``(downsample_factor, candidate_stride)``, each the smallest across the
+        configurations, defaulting to 1 where absent.
+
+    Notes
+    -----
+    This was ``max`` on both, which sized the pre-flight against whichever search was
+    *cheaper* and would have let the other one through unchecked. That is the same
+    failure as hard-coding 4 and 5 -- the estimate came out low on the one number whose
+    whole job is to stop a run that will not fit -- reintroduced by the change that
+    fixed it. Latent rather than live: every configuration pair in ``config/`` matches
+    today, so ``min`` and ``max`` agree on all of them.
+
+    Examples
+    --------
+    >>> costliest_sampling([{"downsample_factor": 4, "candidate_stride": 5},
+    ...                     {"downsample_factor": 1, "candidate_stride": 1}])
+    (1, 1)
+    >>> costliest_sampling([{}])
+    (1, 1)
+    """
+    configs = list(configs)
+    return (min((int(c.get("downsample_factor") or 1) for c in configs), default=1),
+            min((int(c.get("candidate_stride") or 1) for c in configs), default=1))
+
+
 def default_map_context(dem):
     """
     Road and place files for this DEM, when oroscope-fetch-roads has produced them.
@@ -281,14 +324,8 @@ def main():
 
     labels = [args.only] if args.only else list(EXPERIMENTS)
 
-    # Read the sampling off the configuration rather than assuming it. These were
-    # hard-coded at 4 and 5, which was right for the two department runs and silently
-    # wrong for the huaylas crop, which runs at 1 and 1 -- the estimate came out 3x
-    # low, on the one number whose whole job is to stop a run that will not fit.
     sampling = [ss.load_config(c) for c in paths["configs"].values()]
-    downsample = max((int(c.get("downsample_factor") or 1) for c in sampling),
-                     default=1)
-    stride = max((int(c.get("candidate_stride") or 1) for c in sampling), default=1)
+    downsample, stride = costliest_sampling(sampling)
     # refuse=True on the real run: this file has taken the machine down twice by
     # warning and proceeding. A dry run allocates nothing, so it only reports.
     if args.max_memory_gb == 0:
