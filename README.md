@@ -1,7 +1,7 @@
 <p align="center">
   <!-- Absolute raw URL, not a relative path: this file is also the PyPI
        long_description, where relative links do not resolve. -->
-  <img src="https://raw.githubusercontent.com/mbustama/oroscope/main/docs/source/_static/oroscope_logo.svg"
+  <img src="https://raw.githubusercontent.com/mbustama/oroscope/main/docs/source/_static/oroscope_logo.png"
        alt="Oroscope" width="200">
 </p>
 

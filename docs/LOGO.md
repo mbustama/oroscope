@@ -4,10 +4,12 @@ Feed the paragraph below to an image-generation session. It is deliberately desc
 about the physics and deliberately restrictive about the drawing: the failure mode for
 this logo is busyness, not blandness.
 
-Destination: `docs/source/_static/oroscope_logo.png` (plus an SVG if the tool offers
-one). `docs/source/conf.py` has the `html_logo` line commented out, ready to enable.
-It will also sit at the top of the GitHub README, so it has to survive being 200 px wide
-on a white background *and* on a dark one.
+Destination: `docs/source/_static/oroscope_logo.png`, and **PNG only** — PyPI does not
+render SVG, and a project carrying both formats eventually ships two different logos.
+Square and large (the current one is 1024×1024 RGBA) so it downscales cleanly, and
+transparent outside its disc so it needs no matte. `docs/source/conf.py` points
+`html_logo` at it. It also sits at the top of the GitHub README, so it has to survive
+being 200 px wide on a white background *and* on a dark one.
 
 ---
 
