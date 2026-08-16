@@ -65,7 +65,23 @@ RUNS = {
 }
 
 
-def run_one(label, config_path, out_root, max_memory_gb=None):
+def default_map_context():
+    """
+    Road and place files for this DEM, when oroscope-fetch-roads has produced them.
+
+    Both are optional context. A search does not need them and none of its numbers
+    move; a map without them cannot say whether the good ground is reachable or what
+    the nearest town is called, which is the question a site count leaves open.
+    """
+    stem = os.path.splitext(os.path.basename(DEM))[0]
+    roads = os.path.join(REPO, "input", "roads", f"{stem}.geojson")
+    places = os.path.join(REPO, "input", "roads", f"{stem}_places.geojson")
+    return (roads if os.path.exists(roads) else None,
+            places if os.path.exists(places) else None)
+
+
+def run_one(label, config_path, out_root, max_memory_gb=None,
+            roads=None, places=None):
     """
     Runs one configuration over the full DEM and returns its results dictionary.
 
@@ -79,6 +95,10 @@ def run_one(label, config_path, out_root, max_memory_gb=None):
     overrides = {"dem_path": DEM}
     if max_memory_gb is not None:
         overrides["max_memory_gb"] = max_memory_gb
+    if roads:
+        overrides["roads_geojson"] = roads
+    if places:
+        overrides["settlements"] = places
 
     out_dir = os.path.join(out_root, f"arequipa_full_{label}")
     print(f"\n=== {label.upper()} ===")
@@ -109,7 +129,7 @@ def store(label, out_dir):
     return kept
 
 
-def combine(out_root):
+def combine(out_root, roads=None, places=None, reveal=True):
     """Overlays the two runs and stores the combined report."""
     dirs = [os.path.join(out_root, f"arequipa_full_{label}") for label in RUNS]
     missing = [d for d in dirs if not os.path.exists(d)]
@@ -122,6 +142,12 @@ def combine(out_root):
     argv = sys.argv
     sys.argv = ["combine_experiments.py", *dirs,
                 "--labels", "GRAND", "TAMBO", "--out", out_dir]
+    if roads:
+        sys.argv += ["--roads", roads]
+    if places:
+        sys.argv += ["--settlements", places]
+    if reveal:
+        sys.argv += ["--reveal"]
     try:
         ce.main()
     finally:
@@ -201,13 +227,18 @@ def main():
         print(f"store:     {os.path.relpath(STORE, REPO)}")
         return
 
+    roads, places = default_map_context()
+    for what, path in (("roads", roads), ("places", places)):
+        print(f"map {what}: {os.path.relpath(path, REPO) if path else 'none found'}")
+
     kept = []
     for label in labels:
-        _, out_dir = run_one(label, RUNS[label], args.out, args.max_memory_gb)
+        _, out_dir = run_one(label, RUNS[label], args.out, args.max_memory_gb,
+                             roads=roads, places=places)
         kept += store(label, out_dir)
 
     if not args.only:
-        kept += combine(args.out) or []
+        kept += combine(args.out, roads=roads, places=places) or []
 
     write_manifest(kept)
     print(f"stored {len(kept)} files in {os.path.relpath(STORE, REPO)}")

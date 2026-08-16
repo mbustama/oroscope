@@ -411,6 +411,11 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--reveal", action="store_true",
+                    help="Also write the overlay as three frames -- first experiment, "
+                         "second experiment, both -- for uncovering a result "
+                         "progressively in a talk. Everything but the categories is "
+                         "identical in all three, so nothing shifts between slides.")
     ap.add_argument("--roads", type=str, default=None,
                     help="GeoJSON of road geometry to draw as context, from "
                          "oroscope-fetch-roads. Access is the question a joint area "
@@ -528,131 +533,142 @@ def main():
         _centre_lat = 0.5 * (extent[2] + extent[3])
         _aspect = 1.0 / np.cos(np.radians(_centre_lat))
         _ratio = abs(extent[3] - extent[2]) * _aspect / abs(extent[1] - extent[0])
-        fig, ax = plt.subplots(figsize=(11.0, max(3.5, min(13.0, 11.0 * _ratio))))
-
-        # Altitude in greyscale, shaded for relief, with a colour bar that reads it.
-        #
-        # Grey rather than a terrain ramp, deliberately, and it is the whole reason this
-        # figure works: the categories are the only hues on the map, so nothing competes
-        # with them. A terrain ramp underneath put tan and brown next to TAMBO's orange
-        # and the two became hard to tell apart -- the overlay started looking like
-        # geology. Grey costs nothing here because altitude is on the bar.
-        dem_path = next((p for p in (dem_for_run(r) for r in runs) if p), None)
-        elevation = elevation_for_mask(dem_path, code.shape) if dem_path else None
-        im = None
-        if elevation is not None:
-            vmin, vmax = ss.altitude_limits(elevation)
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            # Light greys only, so the darkest ground still sits well behind the
-            # overlay rather than competing with it for contrast.
-            grey = matplotlib.colors.LinearSegmentedColormap.from_list(
-                "altitude_grey", ["#3C3C3C", "#F2F2F2"])
-            shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).shade(
-                np.nan_to_num(elevation, nan=vmin), cmap=grey, norm=norm,
-                blend_mode="soft", vert_exag=2.0, dx=1.0, dy=1.0)
-            # Water is water, not the bottom of the ramp, where flat ocean hillshades to
-            # a featureless tone that reads as land with no data. And nodata is neither:
-            # filling NaN with vmin before shading painted it as dark low ground, which
-            # is why the corner of the Arequipa DEM came out as a grey rectangle.
-            water = elevation <= ss.SEA_LEVEL_M
-            missing = ~np.isfinite(elevation)
-            shaded[water & ~missing, :3] = matplotlib.colors.to_rgb(ss.WATER_COLOUR)
-            shaded[missing, :3] = matplotlib.colors.to_rgb(ss.NODATA_COLOUR)
-            ax.imshow(shaded, extent=extent, origin="upper",
-                      interpolation="bilinear", zorder=0)
-            im = matplotlib.cm.ScalarMappable(norm=norm, cmap=grey)
-        base_alpha = 0.55 if elevation is not None else 1.0
-
         only_a = masks[a] & ~masks[b]
         only_b = masks[b] & ~masks[a]
         both = masks[a] & masks[b]
-
-        # A class covering most of the frame is outlined, not filled. Once the terrain
-        # underneath carries altitude in colour, a translucent wash over 80% of the map
-        # turns the whole thing to mud and makes the other classes look like terrain --
-        # so the big one gets a boundary and the small ones, which are what a reader is
-        # hunting for, keep their solid colour.
-        fill_limit = 0.40 * code.size
-        outlined = []
-        for mask, colour, alpha, order in ((only_a, "#1B6CA8", base_alpha, 1),
-                                           (only_b, "#C8621B", 0.95, 2),
-                                           (both, "#E8189B", 1.0, 3)):
-            if not mask.any():
-                continue
-            if mask.sum() > fill_limit and elevation is not None:
-                ax.contour(mask.astype(float), levels=[0.5], colors=[colour],
-                           linewidths=1.4, extent=extent, origin="upper", zorder=order)
-                outlined.append(colour)
-                continue
-            rgba = np.zeros(code.shape + (4,), dtype=np.float64)
-            rgba[..., :3] = matplotlib.colors.to_rgb(colour)
-            rgba[..., 3] = np.where(mask, alpha, 0.0)
-            ax.imshow(rgba, extent=extent, origin="upper",
-                      interpolation="nearest", zorder=order)
-
         joint_km2 = float(both.sum()) * px_km2
-        # No title: the joint number belongs in the legend, where a reader looking up
-        # what magenta means finds it, and the rest belongs in the caption.
-        ax.set_xlabel("Longitude (°)")
-        ax.set_ylabel("Latitude (°)")
-        ax.tick_params(direction="out", length=4)
-        centre_lat = _centre_lat
-        # Deliberately "auto" rather than set_aspect(1/cos(lat)). The divider that
-        # attach_colorbar uses pins the axes position, so a fixed aspect is satisfied by
-        # widening the data limits rather than shrinking the box -- padding the map with
-        # empty degrees until it looks like the raster failed to fill its frame, which
-        # both adjustable modes did. The figure was shaped to the ground above, so
-        # letting the axes fill it gives those proportions with nothing left over.
-        ax.set_aspect("auto")
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
-        ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
-        ss.add_north_arrow(ax)
+
+        dem_path = next((p for p in (dem_for_run(r) for r in runs) if p), None)
+        elevation = elevation_for_mask(dem_path, code.shape) if dem_path else None
+        base_alpha = 0.55 if elevation is not None else 1.0
+
+        # A class covering most of the frame is outlined, not filled: a translucent
+        # wash over 80% of a map turns the whole thing to mud and makes the other
+        # classes look like terrain. Decided ONCE, from the full set, so a stage that
+        # omits a class still draws and labels the rest exactly as the final figure
+        # does -- otherwise the legend would change shape between slides.
+        fill_limit = 0.40 * code.size
+        layers = (("a", only_a, "#1B6CA8", base_alpha, 1),
+                  ("b", only_b, "#C8621B", 0.95, 2),
+                  ("both", both, "#E8189B", 1.0, 3))
+        outlined = {colour for _, mask, colour, _, _ in layers
+                    if mask.any() and mask.sum() > fill_limit and elevation is not None}
+
+        def key(colour, label, alpha=1.0):
+            """A filled patch, or a line when that class is outlined rather than filled."""
+            if colour in outlined:
+                return Line2D([0], [0], color=colour, lw=1.6, label=f"{label} (outline)")
+            return Patch(facecolor=colour, alpha=alpha, label=label)
+
+        places = ss.resolve_settlements(
+            args.settlements, (extent[2], extent[3], extent[0], extent[1]))
 
         def to_deg(lat, lon):
             """This overlay's axes are already degrees."""
             return (lon, lat)
 
-        road_count, road_credit = 0, ""
-        if args.roads:
-            from oroscope import fetch_roads as fetch_roads_mod
-            roads = fetch_roads_mod.load_roads(args.roads)
-            road_count = ss.add_roads(ax, roads, to_deg)
-            if road_count:
-                # ODbL requires attribution, and a figure travels away from the file it
-                # was made from, so it goes on the picture rather than only in the data.
-                road_credit = (roads or {}).get("attribution", "")
-                ax.text(0.995, -0.135, road_credit, transform=ax.transAxes,
-                        ha="right", va="top", fontsize=7, color="#6B6B6B")
+        def draw(visible, path):
+            """
+            Draws the overlay showing only ``visible`` categories, and saves it.
 
-        places = ss.resolve_settlements(
-            args.settlements, (extent[2], extent[3], extent[0], extent[1]))
-        ss.add_settlements(ax, places, to_deg)
+            Everything outside the categories -- the terrain, the colour bar, the
+            roads, the towns, the scale bar, the legend -- is built identically every
+            time. That is the point: these are frames of a progressive reveal for a
+            talk, so nothing may shift as one is replaced by the next.
+            """
+            fig, ax = plt.subplots(
+                figsize=(11.0, max(3.5, min(13.0, 11.0 * _ratio))))
 
-        if im is not None:
-            ss.attach_colorbar(fig, ax, im, "Altitude (m)")
+            im = None
+            if elevation is not None:
+                vmin, vmax = ss.altitude_limits(elevation)
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                # Light greys only, so the darkest ground still sits well behind the
+                # overlay rather than competing with it for contrast.
+                grey = matplotlib.colors.LinearSegmentedColormap.from_list(
+                    "altitude_grey", ["#3C3C3C", "#F2F2F2"])
+                shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).shade(
+                    np.nan_to_num(elevation, nan=vmin), cmap=grey, norm=norm,
+                    blend_mode="soft", vert_exag=2.0, dx=1.0, dy=1.0)
+                # Water is water, not the bottom of the ramp. And nodata is neither:
+                # filling NaN with vmin before shading painted the empty corner of the
+                # Arequipa DEM as dark low ground.
+                water = elevation <= ss.SEA_LEVEL_M
+                missing = ~np.isfinite(elevation)
+                shaded[water & ~missing, :3] = matplotlib.colors.to_rgb(ss.WATER_COLOUR)
+                shaded[missing, :3] = matplotlib.colors.to_rgb(ss.NODATA_COLOUR)
+                ax.imshow(shaded, extent=extent, origin="upper",
+                          interpolation="bilinear", zorder=0)
+                im = matplotlib.cm.ScalarMappable(norm=norm, cmap=grey)
 
-        def key(colour, label, alpha=1.0):
-            """A filled patch, or a line when that class was outlined rather than filled."""
-            if colour in outlined:
-                return Line2D([0], [0], color=colour, lw=1.6, label=f"{label} (outline)")
-            return Patch(facecolor=colour, alpha=alpha, label=label)
+            for name, mask, colour, alpha, order in layers:
+                if name not in visible or not mask.any():
+                    continue
+                if colour in outlined:
+                    ax.contour(mask.astype(float), levels=[0.5], colors=[colour],
+                               linewidths=1.4, extent=extent, origin="upper",
+                               zorder=order)
+                    continue
+                rgba = np.zeros(code.shape + (4,), dtype=np.float64)
+                rgba[..., :3] = matplotlib.colors.to_rgb(colour)
+                rgba[..., 3] = np.where(mask, alpha, 0.0)
+                ax.imshow(rgba, extent=extent, origin="upper",
+                          interpolation="nearest", zorder=order)
 
-        handles = [
-            key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²", base_alpha),
-            key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
-            key("#E8189B", f"Both — {joint_km2:,.1f} km²"),
-        ]
-        if road_count:
-            handles.append(Line2D([0], [0], color=ss.ROAD_COLOUR, lw=1.0, alpha=0.7,
-                                  label="Roads"))
-        ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=3,
-                  loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
-                  columnspacing=1.6)
-        png = os.path.join(out_dir, "combined_overview.png")
-        fig.savefig(png, dpi=140, bbox_inches="tight")
-        plt.close(fig)
-        written.append(png)
+            ax.set_xlabel("Longitude (°)")
+            ax.set_ylabel("Latitude (°)")
+            ax.tick_params(direction="out", length=4)
+            # "auto" rather than set_aspect(1/cos(lat)): attach_colorbar's divider pins
+            # the axes position, so a fixed aspect is satisfied by widening the data
+            # limits rather than shrinking the box, padding the map with empty degrees.
+            # The figure was shaped to the ground above, so letting the axes fill it
+            # gives those proportions with nothing left over.
+            ax.set_aspect("auto")
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
+            ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(_centre_lat)))
+            ss.add_north_arrow(ax)
+
+            roads_drawn = 0
+            if args.roads:
+                from oroscope import fetch_roads as fetch_roads_mod
+                roads_drawn = ss.add_roads(
+                    ax, fetch_roads_mod.load_roads(args.roads), to_deg)
+                # No attribution on the figure: it belongs in the caption, where a
+                # reader of the paper or the slide will see it. The loader still keeps
+                # it inside the GeoJSON, so it is not lost with the picture.
+            ss.add_settlements(ax, places, to_deg)
+
+            if im is not None:
+                ss.attach_colorbar(fig, ax, im, "Altitude (m)")
+
+            handles = [
+                key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²",
+                    base_alpha),
+                key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
+                key("#E8189B", f"Both — {joint_km2:,.1f} km²"),
+            ]
+            if roads_drawn:
+                handles.append(Line2D([0], [0], color=ss.ROAD_COLOUR, lw=1.0,
+                                      alpha=0.7, label="Roads"))
+            ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=4,
+                      loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
+                      columnspacing=1.6)
+            fig.savefig(path, dpi=140, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
+
+        everything = {"a", "b", "both"}
+        draw(everything, os.path.join(out_dir, "combined_overview.png"))
+        if args.reveal:
+            # Frames for uncovering a result progressively in a talk. The legend, the
+            # axes, the colour bar and the roads are identical in all three, so only
+            # the categories appear as one frame replaces the next.
+            for suffix, visible in ((f"1_{a.lower()}", {"a"}),
+                                    (f"2_{b.lower()}", {"b"}),
+                                    ("3_both", everything)):
+                draw(visible, os.path.join(out_dir, f"combined_overview_{suffix}.png"))
+
         if elevation is None:
             print(f"   {ss.C.WARN}{ss.Icon.WARN}No DEM found for either run, so the overview "
                   f"has no relief. The path is recorded in each run's results and "

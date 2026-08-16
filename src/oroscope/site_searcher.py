@@ -2131,11 +2131,6 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                 legend_handles.append(Line2D([0], [0], color=ROAD_COLOUR, lw=1.0,
                                              alpha=0.7))
                 legend_labels.append("Roads")
-                # ODbL requires attribution, and a figure travels away from the file
-                # it was made from -- so it goes on the picture, not just in the data.
-                ax.text(0.995, -0.135, roads.get("attribution", ""),
-                        transform=ax.transAxes, ha="right", va="top",
-                        fontsize=7, color="#6B6B6B")
             elif roads is None:
                 print(f"      {C.WARN}{Icon.WARN}No roads read from {roads_geojson}{C.RESET}")
 
@@ -2153,7 +2148,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         fs = 'small' if len(legend_labels) > 8 else 'medium'
         if legend_labels:
             ax.legend(legend_handles, legend_labels, fontsize=fs, framealpha=0.9,
-                      loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=3,
+                      loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=4,
                       borderaxespad=0.0, columnspacing=1.6)
         
         img_name = os.path.join(run_output_dir, base_filename + "." + output_image_format.strip('.'))
