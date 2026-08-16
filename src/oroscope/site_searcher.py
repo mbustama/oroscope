@@ -2396,12 +2396,38 @@ def stride_gap_m(candidate_stride, cell_size_y_m):
 
     ``candidate_stride`` subsamples the *list* of surviving pixels rather than the map,
     so the gap it leaves is a stride's worth of pixels along a scanline.
+
+    Parameters
+    ----------
+    candidate_stride : int
+        Keeps every Nth surviving pixel.
+    cell_size_y_m : float
+        Metric pixel size, N-S.
+
+    Returns
+    -------
+    float
+        Gap between kept candidates, in metres.
     """
     return float(max(1, int(candidate_stride))) * float(cell_size_y_m)
 
 
 def closing_element_m(gap_close_km, antenna_spacing_km):
-    """Size of the morphological closing element in metres, defaulting as the pipeline does."""
+    """
+    Size of the morphological closing element in metres, defaulting as the pipeline does.
+
+    Parameters
+    ----------
+    gap_close_km : float or None
+        Closing element in km. ``None`` defaults to ``antenna_spacing_km``.
+    antenna_spacing_km : float
+        Detector spacing, which the closing element defaults to.
+
+    Returns
+    -------
+    float
+        Closing element size, in metres.
+    """
     km = antenna_spacing_km if gap_close_km is None else gap_close_km
     return float(km) * 1000.0
 
@@ -3429,12 +3455,22 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         setting larger for a short-range search: column depth accumulates over the
         whole walk, so tying the two makes the reported depth a property of where the
         walk stopped rather than of the target's thickness.
-
     score_percentile : float, optional
         Keep this percentage of viable candidates, ranked by score, instead of cutting
         at an absolute ``min_score``. Preferred, and for the same reason: a rank is
         scale-free, so it does not move when the composition or the number of
         components changes.
+
+    decay_weight_by : {'flux', 'acceptance', 'flux_times_acceptance'}, optional
+        What weights the spectrum-folded decay probability. ``'flux'`` asks what
+        fraction of arriving neutrinos decays usefully and is the default;
+        ``'acceptance'`` asks the same over the energies the detector responds to, with
+        no assumed spectrum; ``'flux_times_acceptance'`` is the event-rate integrand.
+        The latter two require ``decay_response_csv``.
+    decay_response_csv : str or callable, optional
+        Detection response ``A(E)`` for the acceptance weightings: a path to a
+        two-column CSV of energy in PeV against relative response, or a callable.
+        :func:`aperture.infer_response` recovers one from a published integral curve.
 
     stop_at_target : bool, optional
         In distributed mode, stop selecting sites once ``target_antennas`` is reached.
