@@ -106,7 +106,7 @@ than running the searches itself.
    count is worse than the area, and one worry that was checked and came back fine.
 
 Going deeper
------------
+------------
 
 `13. Turning the knobs <https://github.com/mbustama/oroscope/blob/main/notebooks/13_turning_the_knobs.ipynb>`_
    Each parameter turned, and what moves. Two of the five sit on cliffs and a third
