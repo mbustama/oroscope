@@ -415,6 +415,12 @@ or one experiment at a time:
 
    python tools/run_full_dem.py --region ancash --only grand
 
+Afterwards, refresh the cross-region table:
+
+.. code-block:: shell
+
+   python tools/compare_regions.py
+
 **Run it when a configuration changes, not otherwise.** The store carries a manifest
 naming the configurations and the time, so a stale one is detectable rather than merely
 suspected — which matters, because the whole premise of storing rather than recomputing
