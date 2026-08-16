@@ -3133,6 +3133,61 @@ would need as its objective.
 Not implemented, and deliberately so: the measurement above says a naive formulation
 would give a confidently wrong answer.
 
+### 6.53 The score cut was invisible in its own funnel, and `--explain` blamed the geometry ✅ delivered
+
+Found by audit, not by a failure. `run_arrival_scan` applies the score cut *before*
+counting, and the pipeline then wrote that one post-cut number under **both** funnel
+names:
+
+```python
+funnel.add("directions accepted", n_hits)
+if min_score > 0:
+    funnel.add(f"score >= {min_score:g}", n_hits)   # the same number
+```
+
+All twelve stored runs confirm it — the two rows are byte-identical wherever both
+appear. TAMBO Arequipa: `directions accepted` 517,312, `score >= 0.35` 517,312.
+
+**Three consequences, of rising severity.**
+
+*The score row carries no information.* It is 100.000% of the stage above it by
+construction, in every run that has one.
+
+*The geometric acceptance is unrecorded whenever a cut is in force.* `directions
+accepted` named the geometry and held the geometry-and-score product. Only runs with a
+cut are affected: `min_score` 0 accepts every viable candidate, so `viable & (total >=
+0)` is `viable` and every GRAND run in the store already held the right number.
+
+*`--explain` gives advice that cannot work.* `binding_constraint` compares each stage
+against the one before it, so a stage keeping exactly 100% can never be named however
+much it removed. The `STAGE_KNOBS` entry pointing at `min_score` was unreachable code.
+Driven with a funnel that `min_score` had emptied, the summary named `directions
+accepted` and told the reader to change *the arrival window, the distance window,
+`min_column_depth_gcm2` and `min_target_slope_deg`* — four knobs, none of them the one
+that emptied the search. Under `score_percentile` it was worse: no row was written at
+all, so a percentile keeping the top 22.8% made the arrival geometry look four times
+less accepting than it is.
+
+**Fixed.** `run_arrival_scan` takes the funnel and records the two counts it actually
+decides: `directions accepted` from `viable` alone, and — only when a cut applies — a
+row named for the cut that made it, `score >= 0.35` or `score in top 25%`. `STAGE_KNOBS`
+gains the percentile label, so the binding constraint now names `score_percentile` when
+that is what bound. Four tests pin it, including the two misdiagnoses above.
+
+**A published figure was asserting the defect.** `figures.pipeline_stages` — the
+schematic in `howitworks.rst` — hardcodes that Ancash run, so it drew *Arrival scan
+1,022,530* above *Scoring 1,022,530*: two bars of identical width, the lower one
+captioned "cut at `min_score`". The picture said the cut removed nothing; it removed a
+great deal. The stored run cannot separate them and re-running it was not in scope, so
+the two stages are drawn as one honestly-labelled bar rather than given an invented
+number. A run made after this fix can be drawn as seven stages again.
+
+**Stored results are not regenerated.** They carry the old meaning under `directions
+accepted`, and `results/*/manifest.json` records the commit that produced them.
+`tools/compare_regions.py` reads that key for its acceptance column, so a regeneration
+against new runs would mix the two meanings — that column compares geometry-and-score
+for TAMBO and geometry alone for GRAND, both before and after this change.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

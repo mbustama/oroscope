@@ -371,7 +371,7 @@ def decay_and_shower(energies_pev=(3.0, 10.0, 55.0, 100.0, 1000.0),
 
 def pipeline_stages(figsize=(9.2, 5.4)):
     r"""
-    How a DEM becomes a list of sites: the seven stages, and what each one removes.
+    How a DEM becomes a list of sites: the stages, and what each one removes.
 
     The vocabulary this project uses --- *screening*, *striding*, *the arrival scan*,
     *scoring*, *closing*, *pruning* --- is introduced nowhere in one place, and the
@@ -382,10 +382,18 @@ def pipeline_stages(figsize=(9.2, 5.4)):
     visible bar and six slivers. The numbers are a real run: TAMBO over the full Ancash
     DEM, 68.6 Mpx.
 
-    Read it as two halves. Everything above ``directions accepted`` **removes**
-    candidates; everything below **rebuilds a map from them**, which is why the count
-    rises again at closing. Confusing those two halves is the single commonest way to
-    misread a funnel table.
+    Read it as two halves. Everything down to the arrival scan **removes** candidates;
+    everything below **rebuilds a map from them**, which is why the count rises again at
+    closing. Confusing those two halves is the single commonest way to misread a funnel
+    table.
+
+    The arrival scan and the scoring share one bar because that run cannot separate
+    them. Its funnel recorded the post-cut count under both names --- the defect fixed
+    in :func:`~oroscope.site_searcher.run_arrival_scan` --- so drawing them as two
+    stages showed a scoring bar exactly as wide as the one above it, which asserts that
+    the ``min_score`` cut removed nothing. It removed a great deal. A run made after the
+    fix records the two counts separately and can be drawn as separate stages; this one
+    is quoted as stored rather than re-run, so it is drawn as what it actually measured.
 
     Parameters
     ----------
@@ -409,16 +417,16 @@ def pipeline_stages(figsize=(9.2, 5.4)):
                                      "and not so steep it cannot be built."),
         ("Striding", 6_788_807, "One surviving pixel in N is kept as a candidate.\n"
                                 "Cost control, not a criterion."),
-        ("Arrival scan", 1_022_530, "For each candidate, walk outward along several\n"
-                                    "bearings: is there a target at the right range?"),
-        ("Scoring", 1_022_530, "Named components in [0, 1], multiplied, cut at\n"
-                               "min_score."),
+        ("Arrival scan\n+ scoring", 1_022_530,
+         "Walk outward along several bearings: is there a\n"
+         "target at the right range? Score what there is on\n"
+         "named components in [0, 1], and cut at min_score."),
         ("Closing", 2_543_406, "Morphology fills the holes striding left.\n"
                                "The count RISES here."),
         ("Pruning + selection", 186_704, "Regions too small or too poor in detectors\n"
                                          "are dropped."),
     ]
-    colours = [MUTED, ROCK_EDGE, ROCK_EDGE, WINDOW, WINDOW, DETECTOR, DETECTOR]
+    colours = [MUTED, ROCK_EDGE, ROCK_EDGE, WINDOW, DETECTOR, DETECTOR]
 
     with _styled():
         fig, ax = plt.subplots(figsize=figsize)
@@ -439,17 +447,17 @@ def pipeline_stages(figsize=(9.2, 5.4)):
 
         # Which half of the pipeline each stage belongs to.
         bracket = centre - span - 0.78
-        ax.plot([bracket, bracket], [-0.35, -4.35], color=ROCK_EDGE, lw=2.0, alpha=0.6)
-        ax.text(bracket - 0.05, -2.35, "Removes\ncandidates", ha="right", va="center",
+        ax.plot([bracket, bracket], [-0.35, -3.35], color=ROCK_EDGE, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -1.85, "Removes\ncandidates", ha="right", va="center",
                 fontsize=9, color=ROCK_EDGE, weight="bold", linespacing=1.35)
-        ax.plot([bracket, bracket], [-4.65, -6.35], color=DETECTOR, lw=2.0, alpha=0.6)
-        ax.text(bracket - 0.05, -5.5, "Rebuilds\na map", ha="right", va="center",
+        ax.plot([bracket, bracket], [-3.65, -5.35], color=DETECTOR, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -4.5, "Rebuilds\na map", ha="right", va="center",
                 fontsize=9, color=DETECTOR, weight="bold", linespacing=1.35)
 
         ax.set_xlim(bracket - 0.95, centre + span + 2.05)
-        ax.set_ylim(-7.0, 0.55)
+        ax.set_ylim(-6.0, 0.55)
         ax.axis("off")
-        ax.text(centre, -6.85, "TAMBO over the full Ancash DEM. Bar widths are "
+        ax.text(centre, -5.85, "TAMBO over the full Ancash DEM. Bar widths are "
                                "logarithmic in the survivor count.",
                 ha="center", va="center", fontsize=8.5, color=MUTED)
         fig.tight_layout()

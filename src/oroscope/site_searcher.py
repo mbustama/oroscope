@@ -1230,7 +1230,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
 
 def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
                      score_config=None, min_score=0.0, rfi_zones_px=None,
-                     score_percentile=None):
+                     score_percentile=None, funnel=None):
     """
     Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
 
@@ -1261,14 +1261,33 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     score_percentile : float, optional
         Keep this percentage of viable candidates, by score. Rank-based and so
         scale-free: preferred over ``min_score`` for exactly the reason above.
+    funnel : Funnel, optional
+        Records the two stages this function decides: ``directions accepted``, the
+        candidates the *geometry* accepted, and -- only when a score cut is in force --
+        how many of those the cut kept.
 
     Returns
     -------
     n_hits : int
-        Number of accepted candidates.
+        Number of accepted candidates, after the score cut when one applies.
     observables : dict
         Per-candidate arrays, including the scores and their named components, kept
         for per-site aggregation.
+
+    Notes
+    -----
+    ``directions accepted`` counts the geometry alone. It previously carried the
+    post-cut count, identical to the score row beside it, which made the score stage
+    invisible: :func:`~oroscope.explain.binding_constraint` compares each stage against
+    the one before, so a stage that keeps exactly 100% can never be named the binding
+    constraint however much it removed. A run emptied by ``min_score`` was therefore
+    blamed on the arrival geometry, and the summary told the reader to widen the
+    arrival and distance windows -- advice that could not help.
+
+    Stored results written before this carry the post-cut count under
+    ``directions accepted``. Only runs with a cut are affected: ``min_score`` 0 accepts
+    every viable candidate, so every GRAND run in the store already held the geometric
+    number and is unchanged.
     """
     observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
 
@@ -1301,9 +1320,21 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     if score_percentile is not None and np.any(viable):
         floor = float(np.percentile(total[viable], 100.0 - float(score_percentile)))
         accepted = viable & (total >= floor)
+        cut = f"score in top {float(score_percentile):g}%"
     else:
         accepted = viable & (total >= min_score)
+        cut = f"score >= {min_score:g}" if min_score > 0 else None
     n_hits = int(np.count_nonzero(accepted))
+
+    # Two counts, not one. The geometry and the score cut are separate questions and
+    # the funnel exists to tell them apart; recording n_hits under both names made the
+    # score row a tautology -- 100.000% of the previous stage in all twelve stored runs
+    # -- and left the geometric acceptance unrecorded whenever a cut was in force.
+    if funnel is not None:
+        funnel.add("directions accepted", int(np.count_nonzero(viable)))
+        if cut:
+            funnel.add(cut, n_hits)
+
     if n_hits:
         buf_a[candidates_arr[accepted, 0].astype(np.int64),
               candidates_arr[accepted, 1].astype(np.int64)] = True
@@ -4606,10 +4637,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
                 min_score=min_score, rfi_zones_px=rfi_zones_px,
-                score_percentile=score_percentile)
-            funnel.add("directions accepted", n_hits)
-            if min_score > 0:
-                funnel.add(f"score >= {min_score:g}", n_hits)
+                score_percentile=score_percentile, funnel=funnel)
             timings["ray_tracing"] = time.time() - t0
             print(f"      Time: {timings['ray_tracing']:.2f}s")
         else:

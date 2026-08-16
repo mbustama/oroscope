@@ -44,6 +44,11 @@ Everything down to *scoring* **removes** candidates. Everything below it **rebui
 from what survived**, which is why the count rises again at closing. Reading a funnel
 table as though every row were a filter is the commonest way to misread one.
 
+The arrival scan and the scoring share a bar because *that* run cannot tell them apart:
+its funnel recorded the same count under both names. A run made after that was fixed
+separates them, and its funnel shows how much of the loss belongs to the geometry and how
+much to ``min_score``.
+
 Stage by stage:
 
 **1. Screening.** A cheap per-pixel test: slope inside the experiment's deployable band,

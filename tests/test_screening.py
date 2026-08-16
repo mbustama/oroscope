@@ -6,6 +6,7 @@ and the funnel accounting.
 import contextlib
 import io
 import os
+import tempfile
 import unittest
 
 import numpy as np
@@ -212,6 +213,85 @@ class TestFunnelAccounting(unittest.TestCase):
 
     def test_funnel_renders_without_stages(self):
         self.assertEqual(ss.Funnel().render(), "")
+
+
+class TestFunnelSeparatesGeometryFromTheScoreCut(unittest.TestCase):
+    """
+    ``directions accepted`` counts the geometry; the score row counts what the cut kept.
+
+    Both rows once carried the post-cut count, which made the score row a tautology --
+    100.000% of the stage above it in every stored run -- and hid the geometric
+    acceptance whenever a cut was in force. Worse, a stage that keeps exactly 100% can
+    never be the binding constraint, so a search emptied by ``min_score`` was blamed on
+    the arrival geometry and the summary advised widening windows that were not the
+    problem.
+    """
+
+    def setUp(self):
+        self.grid = make_grid()
+        n = 240
+        self.elevation = synthetic.colca_like(n, self.grid.cell_size_x)
+        # Candidates down one canyon wall, facing across it
+        rows = np.arange(40, 200, 2, dtype=np.float64)
+        cols = np.full(rows.shape, 70.0)
+        self.candidates = np.column_stack([rows, cols, np.full(rows.shape, 90.0)])
+        self.scan_params = dict(n_azimuths=8, half_width_deg=30.0,
+                                elev_min_deg=-20.0, elev_max_deg=20.0, n_elev_bins=9,
+                                max_range_m=12000.0, min_dist_km=0.5, max_dist_km=6.0)
+
+    def scan(self, tmp, **kwargs):
+        buf = np.lib.format.open_memmap(
+            os.path.join(tmp, "buf.npy"), mode="w+",
+            dtype=bool, shape=self.elevation.shape)
+        funnel = ss.Funnel()
+        with contextlib.redirect_stdout(io.StringIO()):
+            n_hits, _ = ss.run_arrival_scan(
+                self.candidates, self.elevation, self.grid, buf, self.scan_params,
+                funnel=funnel, **kwargs)
+        del buf
+        return n_hits, funnel.as_dict()
+
+    def test_no_cut_records_the_geometry_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            n_hits, counts = self.scan(tmp, min_score=0.0)
+        # min_score 0 accepts every viable candidate, so there is no cut to report and
+        # the geometric count is the whole answer. This is why every stored GRAND run
+        # already held the right number under this name.
+        self.assertEqual(counts["directions accepted"], n_hits)
+        self.assertEqual([k for k in counts if k.startswith("score")], [])
+
+    def test_a_cut_is_recorded_below_the_geometry_it_cut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            loose, _ = self.scan(tmp, min_score=0.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            n_hits, counts = self.scan(tmp, min_score=0.35)
+        self.assertGreater(loose, 0, "fixture accepts nothing; the test proves nothing")
+        # The geometry is unchanged by the threshold: only the second row moves.
+        self.assertEqual(counts["directions accepted"], loose)
+        self.assertEqual(counts["score >= 0.35"], n_hits)
+        self.assertLess(counts["score >= 0.35"], counts["directions accepted"])
+
+    def test_a_percentile_cut_names_its_own_knob(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            n_hits, counts = self.scan(tmp, score_percentile=25.0)
+        self.assertEqual(counts["score in top 25%"], n_hits)
+        self.assertLess(n_hits, counts["directions accepted"])
+        # Previously a percentile cut added no row at all, and its removals were
+        # silently attributed to the arrival geometry.
+        from oroscope import explain
+        binding = explain.binding_constraint(counts)
+        self.assertEqual(binding["stage"], "score in top 25%")
+        self.assertEqual(binding["knob"], "score_percentile")
+
+    def test_a_cut_that_empties_the_search_names_min_score(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            n_hits, counts = self.scan(tmp, min_score=1.0e9)
+        self.assertEqual(n_hits, 0)
+        from oroscope import explain
+        binding = explain.binding_constraint(counts)
+        self.assertEqual(binding["stage"], "score >= 1e+09")
+        self.assertTrue(binding["fatal"])
+        self.assertIn("min_score", binding["knob"])
 
 
 if __name__ == "__main__":

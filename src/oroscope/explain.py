@@ -134,6 +134,7 @@ STAGE_KNOBS = (
                             "distance window (min_dist_km/max_dist_km), "
                             "min_column_depth_gcm2 and min_target_slope_deg"),
     ("score >=", "min_score -- or switch to --score_percentile, which is rank-based"),
+    ("score in top", "score_percentile"),
     ("after gap closing", "gap_close_km"),
     ("after pruning", "min_width_km"),
     ("pixels in selected sites", "min_sub_array_size and target_antennas"),
