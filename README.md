@@ -265,8 +265,11 @@ report = ss.preflight_memory("input/dem/arequipa_SRTMGL1.tif",
 print(report["estimate_gb"], report["available_gb"])
 ```
 
-The estimate is what decides `downsample_factor`: the full Arequipa DEM needs 4.5 GiB at
-1 and 2.3 GiB at 4, since the labelling arrays scale as its inverse square. Passing
+The estimate is what decides `downsample_factor` and `candidate_stride`: the full
+Arequipa DEM needs 7.2 GiB at 1 and 5.1 GiB at 4. Downsampling helps less than it looks —
+it scales the labelling arrays as its inverse square but not the candidates, which are
+taken on the native grid and dominate at this scale, so `candidate_stride` is the lever
+on the larger term. Passing
 `max_memory_gb` to a search caps its address space, so one that outgrows the machine
 fails with `MemoryError` naming itself rather than inviting the OOM killer to pick a
 victim.

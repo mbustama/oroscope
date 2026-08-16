@@ -2,11 +2,14 @@
 """
 Runs the full Arequipa DEM locally and stores the small artefacts for the notebook.
 
-Notebook 8 reads results rather than producing them, for one reason: these searches
-take roughly half an hour each and CI executes every notebook on every push. A tutorial
-that costs ninety minutes of compute per commit is not a tutorial, it is a bill. So the
+Notebook 8 reads results rather than producing them, for one reason: GRAND over this
+DEM takes about 25 minutes and CI executes every notebook on every push. A tutorial
+that costs half an hour of compute per commit is not a tutorial, it is a bill. So the
 expensive part runs here, on a machine that already has the DEM, and what it leaves
 behind is a few hundred kilobytes of JSON that the notebook opens instantly.
+
+(TAMBO is the cheap one at about a minute: its targets are 2-5 km away against GRAND's
+10-40, so the profile walks are a fraction as long. The cost is GRAND's alone.)
 
 **Run this when the configuration changes, not otherwise.** The stored results record
 which commit and which parameters produced them, so a stale store is detectable rather
@@ -62,7 +65,7 @@ RUNS = {
 }
 
 
-def run_one(label, config_path, out_root):
+def run_one(label, config_path, out_root, max_memory_gb=None):
     """Runs one configuration over the full DEM and returns its results dictionary."""
     config = ss.load_config(config_path)
     params = {k: v for k, v in config.items() if not k.startswith("_")}
@@ -75,6 +78,8 @@ def run_one(label, config_path, out_root):
     params["dem_path"] = DEM
     params["origin_lat"] = params.get("origin_lat")
     params["origin_lon"] = params.get("origin_lon")
+    if max_memory_gb is not None:
+        params["max_memory_gb"] = max_memory_gb
     if params.get("score_weights") is not None:
         params["score_weights"] = ss.parse_score_weights(params["score_weights"])
     for key in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
@@ -158,7 +163,9 @@ def write_manifest(kept):
         "configs": {k: os.path.relpath(v, REPO) for k, v in RUNS.items()},
         "files": sorted(kept),
         "note": ("Regenerate when a configuration changes. Notebook 8 reads these and "
-                 "does not run the searches itself: each takes about half an hour."),
+                 "does not run the searches itself: grand takes about 25 minutes, "
+                 "tambo about 1 (its targets are 2-5 km away against grand's 10-40, "
+                 "so the profile walks are far shorter)."),
     }
     path = os.path.join(STORE, "manifest.json")
     with open(path, "w") as f:
@@ -172,6 +179,13 @@ def main():
                         help="run just one of the searches")
     parser.add_argument("--out", default=os.path.join(REPO, "output"),
                         help="where the full outputs go (default: output/)")
+    parser.add_argument("--max-memory-gb", type=float, default=None,
+                        help="Address-space ceiling in GiB, passed to the pipeline. The "
+                             "default (None) uses 80%% of what the system reports "
+                             "available, which is not enough on a machine whose desktop "
+                             "already holds half of RAM: this DEM needs about 6 GiB at "
+                             "the scoring stage. 0 disables the cap, which risks the OOM "
+                             "killer rather than a clean MemoryError -- prefer a number.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Report what the real run would cost, then stop without "
                              "starting a search, writing a file or touching the store. "
@@ -197,13 +211,13 @@ def main():
         print(f"available: {report['available_gb']:.1f} GiB"
               if report["available_gb"] else "available: unknown")
         print(f"would run: {', '.join(labels)}, then combine")
-        print("expected:  ~25-30 minutes each")
+        print("expected:  ~25 min for grand, ~1 min for tambo")
         print(f"store:     {os.path.relpath(STORE, REPO)}")
         return
 
     kept = []
     for label in labels:
-        _, out_dir = run_one(label, RUNS[label], args.out)
+        _, out_dir = run_one(label, RUNS[label], args.out, args.max_memory_gb)
         kept += store(label, out_dir)
 
     if not args.only:

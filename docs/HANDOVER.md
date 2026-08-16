@@ -2,77 +2,124 @@
 
 Written to be fed into a fresh session. It assumes no memory of the previous one.
 
-**Repository:** `mbustama/oroscope` (renamed from `site-search`; GitHub redirects the old
-name). Local path `~/Research/GRAND/oroscope`, with a `site_search` symlink left beside
-it for anything that still points at the old path — **delete it when convenient.**
+**Repository:** `mbustama/oroscope`, **public**. Local path `~/Research/GRAND/oroscope`,
+with a `site_search` symlink beside it for anything still pointing at the old path —
+**delete it when convenient.**
 
-**Branch:** `dev`, 39 commits ahead of `main`, all pushed. **Head at handover: `34887d9`.**
-**Tests:** 434, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
+**Branch:** `dev`. **Head at handover: `8c108b1`.** `main` contains everything on `dev`
+(merged as PR #2), so the two are level apart from merge commits.
+**Tests:** 541, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
+**Documentation:** live at <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
 `main` is protected by a repository ruleset: no direct push, no force-push, no deletion,
-pull request required, seven status checks. **You cannot push to `main`** — work on `dev`
-and open a PR.
+pull request required, seven status checks, **zero approvals**. So you *can* land work
+yourself — open a PR from `dev`, wait for the checks, merge — but you cannot push to
+`main` directly.
 
 ---
 
-> **Status update.** Both immediate tasks in §1 are **delivered** — see `docs/ROADMAP.md`
-> §6.23 (`--explain`) and §6.24 (CLI/library parity). Doing so turned up a bug in
-> `oroscope-combine` that makes **the §5.1 table below wrong for TAMBO**; the corrected
-> numbers are in that table and in ROADMAP §6.23b. §1 is kept as the record of what was
-> asked for.
+## 1. The full Arequipa DEM ✅ done
 
-## 1. The immediate tasks
+**Run on 2026-08-16.** The store is populated, notebook 8 shows the real numbers, and the
+findings are in `docs/ROADMAP.md` §6.26. Headline: GRAND 88,527.5 km² in one region with
+101,948 detectors; TAMBO 111.9 km² across 26 sites spread over 310 km; joint 50.2 km²,
+which is the same 50 km² the Colca crop already had. Both experiments are bound by the
+same funnel stage the crops were, so the crops were representative — but TAMBO's
+acceptance halves at full scale (9.7% against 17.5%), which says Colca is exceptional
+canyon rather than typical.
 
-### 1.1 `--explain`, on by default
+Read §6.26 before re-running anything here. What follows is how to reproduce it.
 
-The owner asked for a human-readable summary of a run: *"here is what was found and
-why"*. Everything needed is already in the results JSON, but a reader has to assemble
-the story themselves, and these runs are meant to be handed to other people.
+**It cost 26 minutes, not ninety:** GRAND 24.2 min, TAMBO 1.2 min. TAMBO is cheap because
+its targets are 2-5 km away against GRAND's 10-40.
 
-**It must default to on.** The owner was explicit. Add `--no_explain` to suppress.
+**It needs `--max-memory-gb`.** The first attempt died 23 minutes in against the default
+cap, because the memory estimator under-predicted by 2.5×. That is fixed (§6.26a), but
+the default ceiling is still 80% of available, which is not enough on this machine when
+the desktop holds half of RAM. Pass the flag.
 
-What it should draw on, all of which already exists:
+### 1.1 How to run it
 
-- the **funnel** (`results["funnel"]`) — survivors after each filter. The line where the
-  count collapses is the constraint responsible, and that is the single most useful
-  thing to say when a search returns little or nothing.
-- `results["regions"]` — labelled regions → past area threshold → past capacity
-  threshold → selected.
-- per-site records, already sorted by capacity, each with 34 `arrival_scan` fields
-  (mean/median/p90 of solid angle, exit distance, column depth, horizon, grammage,
-  Earth chord, altitude, far-wall slope, score and its named components).
-- `results["parameters"]` — every resolved knob, so the summary can name the ones that
-  did the work.
-- `provenance.json` — git commit, DEM sha256, package versions.
+```bash
+conda activate sssearch
+cd ~/Research/GRAND/oroscope
+python tools/run_arequipa_full.py --dry-run                  # costs nothing, starts nothing
+python tools/run_arequipa_full.py --max-memory-gb 7.0        # GRAND, TAMBO, then the combination
+```
 
-Worth saying in the output, because they are the things a reader will otherwise get
-wrong: that **reported area is ~2.3× the physics-accepted area** (morphological
-closing, §5.2), that the score components are named so a weak site can be *attributed*,
-and which parameters are assumptions rather than measurements.
+The dry run printed this on 2026-08-16, and is the check to repeat first:
 
-Write it as a function that takes the results dict and returns a string, called by the
-CLI — not as printing scattered through the pipeline. That way the library gets it too
-(see §1.2) and it is testable without running a search.
+```text
+DEM:       input/dem/arequipa_SRTMGL1.tif
+estimate:  5.08 GiB at downsample_factor 4
+available: 6.4 GiB
+would run: grand, tambo, then combine
+expected:  ~25 min for grand, ~1 min for tambo
+store:     results/arequipa_full
+```
 
-### 1.2 Everything the CLI can do, the library must do too
+**Set the cap deliberately.** 7.0 GiB worked against ~7.9 GiB free and a measured
+5.68 GiB peak. Do not pass 0 — that disables the cap and invites the OOM killer, which
+is trap 1. And note that `conda activate` may need `conda init` first; calling
+`~/anaconda3/envs/sssearch/bin/python` directly is equivalent and avoids it.
 
-The owner asked for full parity. Measured, the CLI flags with no
-`find_grand_regions_interactive()` equivalent are:
+`--only grand` or `--only tambo` runs one search and skips the combination, if you would
+rather do them separately.
 
-| flag | status |
-| --- | --- |
-| `--max_memory_gb` | **A real gap.** Applied only in `main()`; a library user must call `apply_memory_cap()` themselves. |
-| `--nearest_sampling`, `--no_geomagnetic`, `--require_sky`, `--include_near_field`, `--no_print_info` | Fine — negative-form aliases whose positive form (`bilinear_sampling`, `use_geomagnetic`, `require_terrain`, `exclude_near_field`, `print_info`) is a library parameter. |
-| `--config_path`, `--config_preset`, `--generate_config`, `--output_directory_base_with_given_json` | CLI-level concerns, but a library user would reasonably want `load_config(path)` and `generate_config(path, preset)` as functions. Worth adding. |
+**It writes two places.** The full outputs — GeoTIFF, world file, KML, PNG, log — land in
+`output/arequipa_full_{grand,tambo,combined}/`, which is gitignored. The small artefacts
+— results JSON, provenance, explanation, a few hundred KB — are copied into
+`results/arequipa_full/`, **which is committed**, along with a `manifest.json` recording
+when and from what. That store is currently **empty except for its README**.
 
-Also only in `main()` and worth moving into the library: the **pre-flight memory
-estimate and warning**, and the **origin resolution print**. Both are useful to anyone
-driving the pipeline in a loop.
+### 1.2 Why the store exists
 
-The pipeline function returns `None`. It writes files and the caller reads the JSON
-back. **Returning the results dict** would make the library genuinely usable and costs
-nothing — `tests/_support.py` and `sensitivity.py` both currently re-read the file it
-just wrote.
+[Notebook 8](../notebooks/08_the_full_dem.ipynb) *reads* those results rather than
+producing them. Three searches at half an hour each, against CI that executes every
+notebook on every push, is ninety minutes of compute per commit for something that
+changes only when a configuration does. This works only because
+`explain.explain_results()` is a pure function of the results dictionary — no DEM,
+nothing re-run.
+
+Notebooks 7 and 8 are therefore **excluded from the CI execution job**, and
+`tests/test_docs.py` checks statically that every API name they call still exists.
+
+After the run: re-execute notebook 8 so its stored outputs show the real numbers.
+
+```bash
+cd notebooks && env -u MPLBACKEND jupyter nbconvert --execute --inplace 08_the_full_dem.ipynb
+```
+
+### 1.3 The configurations
+
+`config/grand_arequipa_full.json` and `config/tambo_arequipa_full.json`. They are the
+Colca crop configs with exactly three changes: the full DEM, `origin_lat`/`origin_lon`
+null so the corner is read from the file's own tiepoint, and `downsample_factor: 4`
+instead of 1. Every criterion is otherwise unchanged, **deliberately** — the point of
+this run is scale, not a different question.
+
+`downsample_factor: 4` has a price worth stating wherever the numbers are read: area is
+measured on the downsampled mask while capacity is measured at full resolution, so a
+feature a few pixels wide keeps its detectors and loses area. That matters more for
+TAMBO's canyon strips than for GRAND's blobs. **Read these areas as lower bounds.**
+
+### 1.4 What to look at when it finishes, in this order
+
+1. **Is the binding constraint the same one the crops found?** This is the most
+   consequential question in the whole run. If a full DEM is bound by a different funnel
+   stage than its crops were, the crops were not representative and every number derived
+   from them needs re-reading. For comparison, at Colca both were bound by
+   `directions accepted` — GRAND keeping 60.1%, TAMBO 17.5%.
+2. **The area**, against the crop scaled up, and against the closing factor *this run
+   reports for itself* rather than the 2.29× quoted from Colca.
+3. **The site count and their spread.** A crop cannot say whether the good ground is one
+   region or fifty scattered ones. That is a deployment question, not a physics one.
+4. **The weakest score component.** On the crops it is `solid_angle` at 15 of 15 TAMBO
+   sites and at GRAND's single site. If that holds at full scale it is a statement about
+   the criterion — about `solid_angle_half_sr` — rather than about Peru.
+
+Record the answers in `docs/ROADMAP.md` §6.26, which is where the expectation is written
+down, and correct §6.26 if the run contradicts it.
 
 ---
 
@@ -83,62 +130,101 @@ machine.
 
 **Do not re-run:**
 
-- **The benchmark baseline.** `bench/baseline.json` was refreshed at head `34887d9` on a
-  quiet machine (1-minute load 0.89) and matches the current code. Only re-run after a
-  change that should move a stage timing, with `python bench/benchmark.py --update`.
-- **The Colca searches.** Both configs were run at this head; the outputs in
+- **The Colca searches.** Both configs were re-run at this head; the outputs in
   `output/grand_colca_config/`, `output/tambo_colca_config/` and
-  `output/combined_colca/` are current. Numbers in §5.
-- **The sensitivity sweeps.** Both the single-energy and the spectrum-folded sweeps are
-  recorded in `docs/ROADMAP.md` §6.20–6.21 with their tables. Re-running costs ~10
-  minutes and will reproduce them.
-- **The stride-1 control run.** `config/grand_colca_stride1.json` exists and its result
-  is recorded (§5.2): striding is unbiased, closing inflates 2.29×.
-- **The notebooks.** All six are committed *with their outputs*. Regenerate only if you
-  change `tools/make_notebooks.py`, and then re-execute — but note the trap in §3.
+  `output/combined_colca/` are current, and carry the site coordinates and named score
+  components added this session. Numbers in §5.
+- **The sensitivity sweeps.** Both the single-energy and spectrum-folded sweeps are in
+  `docs/ROADMAP.md` §6.20–6.21 with their tables. Re-running costs ~10 minutes and will
+  reproduce them.
+- **The stride-1 control run** at GRAND settings. `config/grand_colca_stride1.json`
+  exists and its result is recorded: striding is unbiased, closing inflates 2.29×. **But
+  see §9.9 — that was never measured at TAMBO's element size, and should be.**
+- **The notebooks.** All eight are committed *with their outputs* and were executed
+  against the installed package at this head.
 - **DEM downloads.** `input/dem/` holds `arequipa_SRTMGL1.tif`, `lima_AW3D30.tif` and the
   derived `colca.tif` crop. **The Arequipa DEM already covers Colca Canyon** — verified,
-  1673 m of incision against the published ~1.5 km. No new download is needed for either
-  experiment.
+  1673 m of incision against the published ~1.5 km.
 
-**Do not re-derive:** everything in §6. Those are measured facts, several of which
-contradicted a confident prior.
+**The benchmark baseline is a special case.** `bench/baseline.json` has *not* been
+refreshed since `capacity_analysis` legitimately slowed by 1.62× (measured properly, A/B
+alternating in one process; +48 ms against a 19 s search). It was left alone
+deliberately, because this machine could not resolve the difference — two consecutive
+passes over *identical* code reported `synthetic_1800/ray_tracing` at +3.4% and then
++72.1%. **Refresh it on a quiet machine**, and expect `capacity_analysis` to be the only
+stage that legitimately moved. See ROADMAP §6.25.
 
-**Do not retry:** everything in §7. Those were tried and rejected with numbers.
+**Do not re-derive:** everything in §6. **Do not retry:** everything in §7.
 
 ---
 
-## 3. Environment, machine, and three traps
+## 3. Environment, machine, and the traps
 
 - **Use the conda env `sssearch`**: `conda activate sssearch`. It has numpy, scipy,
   numba, tifffile, imagecodecs, matplotlib, tqdm, sphinx and the docs stack, coverage,
   ruff, jupyter. It does **not** have pytest, which is why the suite is stdlib
   `unittest`.
-- The package is installed editable (`pip install -e .`), so `import physics` works from
-  anywhere and the five console scripts (`oroscope`, `oroscope-combine`,
-  `oroscope-crop`, `oroscope-sensitivity`, `oroscope-fetch-dem`) are on `PATH`.
+- The package is installed editable (`pip install -e .`), so `import oroscope` works from
+  anywhere and the five console scripts (`oroscope`, `oroscope-combine`, `oroscope-crop`,
+  `oroscope-sensitivity`, `oroscope-fetch-dem`) are on `PATH`.
 - **Cap parallelism at 8 cores.** The machine has 12 but is shared.
+- **The bundled configs resolve `dem_path` relative to `src/`.** Run them from there, or
+  pass an absolute path. This is a known wart, §9.11.
 
 **Trap 1 — memory.** A ten-point sensitivity sweep once reached 6.9 GB and was killed by
-the OOM killer, taking other work with it. The cause was ours (a leaked matplotlib
-figure per run) and is fixed, but the safeguards matter: every run now prints an
-estimate against available memory, caps its own address space at 80% of available, and
-`sensitivity.py` runs each point in a subprocess. The machine has 15 GB with typically
-~6 free. **For the full DEM use `downsample_factor: 4`** — the estimator says 2.3 GiB
-against 4.5 GiB at `downsample_factor: 1`.
+the OOM killer, taking other work with it. The cause was ours (a leaked matplotlib figure
+per run) and is fixed, but the safeguards matter: every run prints an estimate against
+available memory, caps its own address space at 80% of available, and `sensitivity.py`
+runs each point in a subprocess. The machine has 15 GB with 6–7 typically free.
 
-**Trap 2 — timings are unreliable here.** It is a hybrid CPU: 2 P-cores (4.6 GHz, CPUs
-0–3) and 8 E-cores (3.4 GHz), running at about a third of rated clock under load. The
-same unchanged code measured 43.6 s and 39.8 s in consecutive runs. **A/B alternating
-inside one process, single-threaded, on a subsample.** See ROADMAP §6.12.
+**Trap 2 — timings are unreliable here.** A hybrid CPU: 2 P-cores (4.6 GHz) and 8
+E-cores (3.4 GHz), running at about a third of rated clock under load. **A/B alternating
+inside one process, single-threaded, on a subsample.** Never trust a before/after taken
+in consecutive whole-suite runs. See ROADMAP §6.12 and §6.25.
 
-**Trap 3 — forcing a matplotlib backend breaks image capture, silently.** This bit twice.
-Setting `MPLBACKEND=Agg` as an environment variable propagates into child kernels and
-overrides the inline backend, so notebooks stored no figures and documentation pages
-rendered figures as the text `<Figure size ...>`. Both built clean and reported no
-error. `conf.py` now uses `matplotlib.use('Agg')` — module-level, not inherited — and
-the docs carry a `%matplotlib inline` setup cell. **If you touch either, check that
-images are actually produced**, don't trust a green build.
+**Trap 3 — the matplotlib backend, which has now bitten three times.**
+
+1. `MPLBACKEND=Agg` as an *environment variable* propagates into child kernels and
+   overrides the inline backend, so notebooks stored no figures and documentation pages
+   rendered figures as the text `<Figure size ...>`. Both built clean and reported no
+   error.
+2. `index.rst` lacked the `%matplotlib inline` setup cell the other pages carry, so the
+   front-page diagram published as that same literal text.
+3. **`import oroscope` forced the backend.** `combine_experiments` called
+   `matplotlib.use("Agg")` at module level — harmless for a standalone module, fatal for
+   a package front door, where it reached into every caller's session and killed inline
+   figure capture in all eight notebooks.
+
+The rule: **a library must not decide how its user's figures are rendered.** The CI
+packaging job now asserts that importing `oroscope` leaves the backend untouched. And
+whenever you touch a figure path, **check that images are actually produced** — count
+`image/png` outputs in the notebooks, or grep the built HTML for `Figure size`. Do not
+trust a green build.
+
+**Trap 4 — lint the way CI does.** `ruff check .` from the repository root. It lints the
+notebooks too, and `ruff check src/ tests/` does not — an unused `plt` import in a
+notebook that draws nothing failed CI after a local check had passed.
+
+**Trap 5 — `pgrep -f "some/script.py"` matches its own command line.** A wait loop built
+on it never exits, because it is waiting for itself. Two zombie tasks this session.
+
+**Trap 6 — notebooks 7 and 8 cannot be executed locally with the repo's kernelspec.**
+The `python3` kernel registered on this machine points at `~/anaconda3/bin/python3`,
+which is base and has no `oroscope`, so `jupyter nbconvert --execute` fails with
+`ModuleNotFoundError` on the import cell. CI does not hit this because it installs the
+package into the runner's default python — and notebooks 7 and 8 are the two CI never
+executes, so nothing catches it. This appeared when the flat modules became a package
+and the notebooks' `sys.path` insert was removed. Either register a kernelspec for
+`sssearch`, or point `JUPYTER_PATH` at one:
+
+```bash
+mkdir -p /tmp/k/kernels/python3 && cat > /tmp/k/kernels/python3/kernel.json <<'JSON'
+{"argv": ["/home/mbustamante/anaconda3/envs/sssearch/bin/python", "-m",
+          "ipykernel_launcher", "-f", "{connection_file}"],
+ "display_name": "Python 3", "language": "python"}
+JSON
+cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execute --inplace 08_the_full_dem.ipynb
+```
 
 ---
 
@@ -146,72 +232,74 @@ images are actually produced**, don't trust a green build.
 
 | path | what |
 | --- | --- |
-| `src/oroscope/site_searcher.py` | 3875 lines. Pipeline, CLI, config files, screening, morphology, capacity, outputs, memory guards. |
+| `src/oroscope/__init__.py` | The package front door: re-exports 131 names. `import oroscope` is the whole setup. |
+| `src/oroscope/site_searcher.py` | 3945 lines. Pipeline, CLI, config files, screening, morphology, capacity, outputs, memory guards. |
 | `src/oroscope/arrival_scan.py` | The scan kernel: profile walking, column depth, Fresnel, RFI line-of-sight. Numba. |
 | `src/oroscope/physics.py` | Closed-form physics, no terrain: atmosphere, shower profile, Earth chord, tau range and decay, geomagnetic, Cherenkov. |
+| `src/oroscope/explain.py` | The run summary and the combination summary. Pure functions of the results dict. |
 | `src/oroscope/scoring.py` | Score shapes (band, saturating, ramp) and composition. |
-| `src/oroscope/explain.py` | The run summary: binding constraint, per-site attribution, closing factor, assumptions. Pure function of the results dict. |
 | `src/oroscope/aperture.py` | Aperture estimate, tabulated response, `infer_response()`. |
 | `src/oroscope/combine_experiments.py` | Overlays two or more runs: joint, union, co-location. |
 | `src/oroscope/crop_dem.py` | Cuts a lat/lon window out of a DEM. |
 | `src/oroscope/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
-| `src/oroscope/figures.py` | The publication figures, as functions returning `Figure`. |
+| `src/oroscope/figures.py` | The publication figures. **States the label convention** (§8.9). |
 | `src/oroscope/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
-| `tests/` | 370 tests. `synthetic.py` builds terrain with closed-form answers. |
-| `tools/make_notebooks.py` | Generates the seven tutorials. Edit here, not the `.ipynb`. |
-| `docs/source/` | Sphinx. `physics.rst` derives the criteria; `assumptions.rst` is the blunt list of what the numbers rest on. |
-| `docs/ROADMAP.md` | ~1500 lines. The durable record: every phase, every measurement, every negative result. **Read §6.11, §6.12, §6.20–6.22.** |
+| `tests/` | 541 tests across 14 files. `synthetic.py` builds terrain with closed-form answers. |
+| `tools/make_notebooks.py` | Generates the eight tutorials. **Edit here, not the `.ipynb`.** Only rewrites what changed. |
+| `tools/run_arequipa_full.py` | The full-DEM runner. §1. |
+| `results/arequipa_full/` | The committed store notebook 8 reads. Currently empty but for its README. |
+| `docs/source/cli.rst` | The command line, with the complete 82-option reference generated from the parser. |
+| `docs/source/assumptions.rst` | The blunt list of what the numbers rest on. |
+| `docs/ROADMAP.md` | ~2000 lines. The durable record. **Read §6.11, §6.12, §6.20–6.33.** |
 | `bench/benchmark.py` | Per-stage timings and peak RSS, gated at 30% regression. |
-| `config/` | `grand_colca_config.json`, `tambo_colca_config.json` (same crop, combinable), plus arequipa/lima and the stride-1 diagnostic. |
 
-## 5. What the tool does now, and its current numbers
+## 5. Current numbers, at this head
 
-It screens a DEM by slope/aspect/altitude/exclusion zones, scans arrival directions from
-each survivor, scores against per-experiment criteria, cleans up morphologically, labels
-sites and places detectors on a lattice, then writes GeoTIFF/world file/KML/PNG/JSON plus
-a funnel and a provenance record.
+| | area | sites | capacity |
+| --- | --- | --- | --- |
+| GRAND, Colca crop | 4580.2 km² | 1 | 5317 |
+| TAMBO, Colca crop | 83.6 km² | 15 | 9717 |
+| **joint** | 50.1 km² | | Jaccard 0.0109 |
+| **union** | 4613.7 km² | | |
+| GRAND, full DEM | 88,527.5 km² | 1 | 101,948 |
+| TAMBO, full DEM | 111.9 km² | 26 | 9024 |
+| **joint, full DEM** | 50.2 km² | | Jaccard 0.0006 |
+| **union, full DEM** | 88,589.2 km² | | |
 
-**GRAND and TAMBO are configurations, not code paths.** That was the phase 2 claim and it
-held: adding an experiment means writing a JSON file.
-
-### 5.1 Colca, at this head
-
-**Corrected.** The figures first written here came from `oroscope-combine` reading a
-stale mask — it took the alphabetically first `.tif`, and the pre-rename
-`grand_search_results_*` prefix sorts before `oroscope_results_*`. Fixed; see ROADMAP
-§6.23b. GRAND's own numbers were unaffected.
-
-| | area | sites | capacity | of its own area in the joint |
-| --- | --- | --- | --- | --- |
-| GRAND | 4580.2 km² | 1 | 5317 | 1.1% *(was 0.6%)* |
-| TAMBO | **83.6 km²** *(was 44.5)* | 15 | 9717 | 59.9% *(was 59.3%)* |
-| **joint** | **50.1 km²** *(was 26.4)* | | | |
-| **union** | **4613.7 km²** *(was 4598.3)* | | | |
+The crop rows are measured at `downsample_factor: 1` and the full-DEM rows at 4, so
+**TAMBO's two areas are not commensurable** — a canyon strip loses ~30% of its area to
+downsampling while keeping its detectors. Compare the acceptance rates instead, which are
+measured on the same grid in both. §6.26 of the roadmap does this properly.
 
 **Co-location is decided by slope, not arrival geometry.** GRAND's 3–25° deployable band
-against Colca's ~40° walls leaves only a 20–25° sliver.
+against Colca's ~40° walls leaves only a 20–25° sliver — 23% of the narrower band. What
+the two ask of the *view* (distance window, arrival elevations) differs freely and is no
+obstacle: a pixel has one slope and both must accept it.
 
-### 5.2 Numbers to quote carefully
+### 5.1 Numbers to quote carefully
 
-- **Reported area is ~2.29× the physics-accepted area.** Morphological closing, measured
-  with a stride-1 control. GRAND's 4580 km² corresponds to ~2120 km² actually accepted.
-- **Candidate striding is unbiased** — acceptance identical at strides 1 and 5, and the
-  stride-corrected area matches the stride-1 truth to 0.05%.
-- **TAMBO's capacity now varies by 1.46× across a plausible spectral index**, having
-  varied without bound (10878 → 0) when the decay was evaluated at a single energy.
-  `min_score` is now the dominant assumption at 2.38× to 0.20×.
-
----
+- **Reported area is not physics-accepted area.** Morphological closing inflated it
+  **2.29×** at Colca, measured against a stride-1 control. Each run now reports the
+  factor for itself: **2.19× for GRAND** — an independent check on that number, agreeing
+  to 4% — but **0.53× for TAMBO**, whose 100 m element cannot bridge the gaps
+  `candidate_stride: 5` leaves. **TAMBO's area is therefore a lower bound, not an upper
+  one.** See §9.9.
+- **`solid_angle` is the weakest score component at 15 of 15 TAMBO sites** and at GRAND's
+  single site. The Colca result is set almost entirely by `solid_angle_half_sr`.
+- **TAMBO's capacity varies by 1.46× across a plausible spectral index**, having varied
+  without bound (10878 → 0) when the decay was evaluated at a single energy. `min_score`
+  is the dominant assumption at 2.38× to 0.20×.
 
 ## 6. Key measured facts — do not re-derive
 
 | finding | value |
 | --- | --- |
 | Slope depends on measurement baseline | median 17.8° at ~61 m, 10.8° at 1 km |
-| Morphological closing inflates area | **2.29×**, measured at stride 1 |
-| Candidate striding | unbiased; stride-5 matches stride-1 area to 0.05% |
+| Morphological closing inflates area | **2.29×** at a 1 km element (stride-1 control) |
+| The same, from a run's own funnel | 2.19× GRAND, **0.53× TAMBO** (100 m element) |
+| Candidate striding | unbiased at a 1 km element; **untested at 100 m** |
 | Capacity over-count, integer stamping | +7.4% at 1 km, **+58% at 100 m** — fixed |
-| Capacity over-count, bounding box vs region | **+38%** on a canyon network, 2.07× synthetic — fixed |
+| Capacity over-count, bounding box vs region | **+38%** on a canyon network — fixed |
 | The ±3° window sits below the horizon almost everywhere | median horizon 7.3° |
 | Geomagnetic asymmetry | east-facing targets worth 3.7× north-facing |
 | Earth absorption narrows the window | −4.4° at 100 PeV, −2.0° at 1 EeV, −0.9° at 10 EeV |
@@ -219,9 +307,9 @@ against Colca's ~40° walls leaves only a 20–25° sliver.
 | Shower maximum needs | 561 g/cm² at 3 PeV, 700 at 1 EeV |
 | Tau decay length | 147 m at 3 PeV, 49 km at 1 EeV |
 | Bilinear vs nearest sampling | acceptance +13.4%, 1.44× cost |
-| Azimuth locality penalty | 1.14× (the sweep premise, measured and rejected) |
 | Scan thread scaling | 1.85× at 2 threads, **3.70× at 8** — hardware, not scheduling |
 | Far-wall slope recovered at Colca | 34.7–44.3°, median 38.6°, against a published ~40° |
+| Storing the named score components | 1.62× on the per-site aggregation, +48 ms on a 19 s search |
 
 ## 7. Tried and REJECTED — do not repeat
 
@@ -235,30 +323,29 @@ against Colca's ~40° walls leaves only a 20–25° sliver.
 | Tuning `numba.set_parallel_chunksize` | ~3%. Block-dealing already handles it. |
 
 **The lesson:** per (candidate, azimuth) the bin loop runs 12 times and the profile walk
-~2700, a ratio of 225:1. **The scan is not compute-bound.** Four separate arithmetic
-optimisations returned nothing. Anything further must reduce *samples* or *memory
-traffic*, not flops.
+~2700, a ratio of 225:1. **The scan is not compute-bound.** Anything further must reduce
+*samples* or *memory traffic*, not flops.
 
 ## 8. Working conventions — please keep
 
 1. **Measure before optimising, and after.** Several confident hypotheses here were wrong.
-2. **Run examples, don't read them.** Eight docstring examples were plausible, close, and
-   wrong; every one was caught by executing it. `tests/test_doctests.py` runs them all.
+2. **Run examples, don't read them.** `tests/test_doctests.py` executes every `Examples`
+   block. Eight were plausible, close, and wrong.
 3. **Negative results go in `docs/ROADMAP.md`** so they are not retried.
 4. **Fixtures are verified before the code that uses them** (`tests/test_fixtures.py`).
-5. Regenerate goldens deliberately: `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
-5a. **Figure labels: capitalise the first word.** Axis labels, titles, legend entries
-   and annotations, in the notebooks and in the maps the pipeline writes. Labels that
-   begin with a function name or a symbol are left alone. The convention is stated at
-   the top of `src/oroscope/figures.py`.
-5b. **Lint the way CI does: `ruff check .`, from the repository root.** It lints the
-   notebooks too, and `ruff check src/ tests/` does not — an unused `plt` import in a
-   notebook that draws nothing failed CI after a local check had passed.
-6. Commit messages explain *why* and state measured deltas.
-7. The roadmap is updated in the same commit as the code.
-8. **A failing test is more often a wrong test than wrong code** — it has been, six times
-   here. The recurring cause is forgetting that a detector on the ground has every steep
-   downward direction blocked by the ground at its feet.
+5. Regenerate goldens deliberately:
+   `cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression`.
+6. **Lint as CI does: `ruff check .` from the root.** Trap 4.
+7. Commit messages explain *why* and state measured deltas.
+8. The roadmap is updated in the same commit as the code.
+9. **Figure labels capitalise their first word** — axis labels, titles, legend entries and
+   annotations, in the notebooks and in the maps the pipeline writes. Labels beginning
+   with a function name or a symbol are left alone. Stated at the top of `figures.py`.
+10. **Documentation is library-first.** Show `import oroscope` and a call before showing a
+    shell line. The command line has its own page.
+11. **A failing test is more often a wrong test than wrong code** — it has been, seven
+    times here. The recurring cause is forgetting that a detector on the ground has every
+    steep downward direction blocked by the ground at its feet.
 
 ## 9. Remaining work, ranked
 
@@ -266,12 +353,10 @@ traffic*, not flops.
 1. **The detector acceptance `A(E)` is not modelled.** An event rate is
    ∫Φ(E)·A(E)·P(E)dE; the weight used is the flux alone. *Partially doable now*: both
    published curves are in `data/` and `aperture.infer_response()` divides one by our
-   geometric model to recover everything else. A better weight than flat, but it
-   inherits the published site's geometry.
-2. **`min_score` is the dominant assumption.** `--score_percentile` and
-   `--stop_at_target` now exist as rank-based alternatives; the configs still use the
-   absolute cut. Consider switching them.
-3. Column depth is still bounded by the walk unless `max_range_km` is set.
+   geometric model to recover everything else.
+2. **`min_score` is the dominant assumption.** `--score_percentile` exists as the
+   scale-free alternative; the configs still use the absolute cut. Consider switching.
+3. Column depth is bounded by the walk unless `max_range_km` is set.
 4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
 5. β, the tau energy-loss constant, is an estimate (0.4–1.0×10⁻⁶). Needs a collaboration
    value.
@@ -280,20 +365,22 @@ traffic*, not flops.
 **Verification**
 7. **Nothing has been checked against an external simulation.** The Earth-absorption
    prediction in §6 is the cheapest such test and is ready for someone to run.
-8. **The full Arequipa DEM has never been run** — every number is from crops. Now
-   **scaffolded and ready**: `config/{grand,tambo}_arequipa_full.json`,
-   `python tools/run_arequipa_full.py` (GRAND, TAMBO, then the combination), and
-   notebook 8, which explains the result. `downsample_factor: 4`, ~25–30 min each,
-   2.3 GiB estimated. The runner stores the small artefacts in `results/arequipa_full/`
-   and the notebook reads them, so the searches are never re-run by CI. All that is
-   missing is the hour. ROADMAP §6.26 lists what to look at when it happens.
+8. ~~**The full Arequipa DEM.**~~ ✅ done, 2026-08-16. §1 and roadmap §6.26.
 
 **Software**
-9. ~~`--explain`~~ — done, ROADMAP §6.23.
-10. ~~CLI/library parity~~ — done, ROADMAP §6.24.
-11. The pipeline still requires `cd src` for relative config paths.
-12. No release: nothing on PyPI, Pages not yet deployed (the workflow exists and fires
-    from `main`), so several README badges are dark by design.
+9. **A stride-1 control at TAMBO settings.** Cheap, and it settles whether TAMBO's area is
+   a lower bound. §5.1.
+10. **The config→pipeline translation is duplicated three times** — `main()`,
+    `sensitivity.py`'s child process, and `tools/run_arequipa_full.py` each re-derive the
+    same mapping (drop `print_info`, invert `require_sky`, tuple-ify the bands, resolve
+    the RFI preset, parse `score_weights`). A single `run_from_config()` would collapse
+    it, and it is where a new parameter gets forgotten.
+11. **The pipeline resolves paths relative to the working directory**, so the bundled
+    configs need `cd src`. Making them relative to the configuration file is the fix.
+12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
+13. **No release.** Nothing on PyPI. When publishing: PyPI does **not** render SVG, so the
+    project page needs a PNG of the logo even though GitHub and Sphinx are happy with the
+    vector.
 
 ## 10. Open questions for the owner
 
@@ -304,10 +391,57 @@ traffic*, not flops.
 3. **The TAMBO assumptions**, all flagged in `config/tambo_colca_config.json` and
    `docs/source/assumptions.rst`: the 20–60° near-wall band, the 25° far-wall floor, the
    ±20° arrival window, the 0.1 shower-content fraction, γ = 2.0, and `min_score` 0.35.
+   Add to that **`solid_angle_half_sr`**, which §5.1 shows is what the TAMBO result
+   actually turns on.
 4. **A prediction worth checking against the collaboration's own acceptance:** the
    effective arrival window should narrow with energy, its lower edge climbing from
    −4.4° at 100 PeV to −0.9° at 10 EeV. If their simulated window does not narrow that
    way, one of the two treatments has the absorption wrong.
-5. **A logo.** The design brief is `docs/LOGO.md` -- feed its paragraph to an
-   image-generation session. It lands in `docs/source/_static/`, and `conf.py` has the
-   `html_logo` line commented out ready to enable.
+
+---
+
+## 11. What the previous session did
+
+Context on why things are as they are. All of it is in `docs/ROADMAP.md` §6.23–6.33 with
+the measurements.
+
+**Delivered:**
+
+- **`--explain`, on by default.** Every run prints a plain-language account of itself and
+  saves it as `explanation.txt`: what was found, which funnel stage set the size of the
+  answer and the parameter behind it, **why each site is good** (the criteria it
+  satisfies, each with the measurement that earned it) and what held it back, the closing
+  factor measured from the run itself, which numbers are assumptions, what energy the
+  geometry favours, and what to try next. `oroscope-combine` gained the same treatment,
+  including *which screening band decides co-location*.
+- **CLI/library parity.** `max_memory_gb`, `preflight_memory()`, `load_config()`,
+  `generate_config()`, `default_config()`, and the pipeline **returns its results dict**.
+- **`import oroscope`.** The flat modules became a real package; the notebooks' `sys.path`
+  insert is gone.
+- **Site records carry coordinates** and their named score components.
+- **Documentation:** a CLI page with the full option reference, library-first README and
+  quickstart, the logo, and eight notebooks (7 explains a run — including one that finds
+  nothing — and 8 is the full DEM).
+- **Coverage 65% → 74%**; `combine_experiments` 30% → 88%, `crop_dem` 18% → 90%.
+
+**Bugs found, several of which had been producing plausible wrong numbers:**
+
+| what | effect |
+| --- | --- |
+| `oroscope-combine` read a stale `.tif` | TAMBO 44.5 → **83.6 km²**, joint 26.4 → **50.1** |
+| The results file listed more sites than were selected | area over-reported wherever `stop_at_target` was used |
+| `oroscope-combine` crashed on any single-mode run | two faults in one path |
+| A `geomagnetic` component appeared with the weighting *off* | a disabled criterion listed among a site's strengths |
+| `main()` leaked its log file and never restored `sys.stdout` | |
+| Ten defaults disagreed across three sources | `origin` defaulted to 0.0 — a *valid* coordinate in the Gulf of Guinea |
+| `import oroscope` forced the matplotlib backend | all notebook figures silently lost |
+| The map title said "GRAND site search" on every run | including TAMBO's |
+| The README documented 34 of 83 options, one imaginary | plus the precedence rule backwards |
+
+**One worth reading in full (ROADMAP §6.30):** the first version of the combination
+summary reasoned about *why* two experiments could share ground, and was confidently
+wrong — it concluded GRAND and TAMBO "cannot share ground at all", printed directly above
+the 50.1 km² they demonstrably share. It had treated the viewing windows as shared
+constraints when only properties of the ground itself are shared. **A summary that
+reasons can be wrong in ways one that merely restates cannot, and it will be wrong
+persuasively.** Check any such feature against a case whose answer you already know.

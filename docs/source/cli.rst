@@ -186,10 +186,10 @@ without starting a search, writing a file or touching the store:
 .. code-block:: text
 
    DEM:       input/dem/arequipa_SRTMGL1.tif
-   estimate:  2.32 GiB at downsample_factor 4
-   available: 5.4 GiB
+   estimate:  5.08 GiB at downsample_factor 4
+   available: 6.4 GiB
    would run: grand, tambo, then combine
-   expected:  ~25-30 minutes each
+   expected:  ~25 min for grand, ~1 min for tambo
    store:     results/arequipa_full
 
 Each line answers a question worth answering before committing an hour:
@@ -200,9 +200,12 @@ Each line answers a question worth answering before committing an hour:
 
 ``estimate`` and ``available``
    the pre-flight memory estimate against what the system reports free. This is the
-   number that decides ``downsample_factor``: the same DEM needs 4.5 GiB at 1 and
-   2.3 GiB at 4, and the labelling arrays scale as its inverse square. The estimate
-   deliberately excludes the memory-mapped DEM, which is file-backed and evictable.
+   number that decides ``downsample_factor`` and ``candidate_stride``: the same DEM
+   needs 7.2 GiB at 1 and 5.1 GiB at 4. Downsampling scales the labelling arrays as
+   its inverse square but leaves the candidates untouched -- they are taken on the
+   native grid -- and at this scale the candidates dominate, so striding is the
+   stronger lever. The estimate deliberately excludes the memory-mapped DEM, which is
+   file-backed and evictable.
 
 ``would run``
    which searches, honouring ``--only``. ``--only grand`` runs one and skips the

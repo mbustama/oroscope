@@ -834,17 +834,27 @@ two parameters. The memory-mapped DEM is deliberately excluded — it is file-ba
 the kernel can evict it, and counting it would make every large search look impossible
 when the streaming design exists precisely so that it is not.
 
-`downsample_factor` is the knob that matters: the labelling arrays scale as its inverse
-square. Here is the real Arequipa DEM, 10204 × 12603 pixels."""),
+**Two knobs, and the obvious one is the weaker.** `downsample_factor` scales the
+labelling arrays as its inverse square, but candidates are taken on the *native* grid —
+the stride subsamples the surviving-pixel list, not the map — so downsampling never
+touches them. At full-DEM scale the per-candidate arrays dominate, and `candidate_stride`
+is the lever on those. Here is the real Arequipa DEM, 10204 × 12603 pixels."""),
 ("code", """rows, cols = 10204, 12603
 print(f"Arequipa DEM: {rows} x {cols} = {rows*cols/1e6:.0f} Mpx\\n")
 for ds in (1, 2, 4, 8):
     need = ss.estimate_peak_memory_gb(rows, cols, downsample_factor=ds)
     print(f"   downsample_factor {ds}:  {need:5.2f} GiB")
 
+print()
+for stride in (1, 5, 10, 20):
+    need = ss.estimate_peak_memory_gb(rows, cols, downsample_factor=4,
+                                      candidate_stride=stride)
+    print(f"   downsample_factor 4, candidate_stride {stride:2d}:  {need:6.2f} GiB")
+
 have = ss.available_memory_gb()
 print(f"\\navailable right now: {have:.1f} GiB" if have else "\\n(memory not reportable here)")
-print("\\nThis is why the full run uses downsample_factor 4.")"""),
+print("\\nThe full run uses downsample_factor 4 and candidate_stride 5,")
+print("and measured 5.68 GiB peak RSS.")"""),
 ("md", """The estimate is rough and says so — `survival_fraction` is the share of pixels passing
 the topographic screen, which is terrain-dependent and unknown until the screen has run.
 It is meant to catch the order-of-magnitude mistake, not to predict a number.
@@ -1145,19 +1155,26 @@ machine:
 
 ```text
 DEM:       input/dem/arequipa_SRTMGL1.tif
-estimate:  2.32 GiB at downsample_factor 4
-available: 5.4 GiB
+estimate:  5.08 GiB at downsample_factor 4
+available: 6.4 GiB
 would run: grand, tambo, then combine
-expected:  ~25-30 minutes each
+expected:  ~25 min for grand, ~1 min for tambo
 store:     results/arequipa_full
 ```
 
 `DEM` says whether the file is even present, so a missing DEM is reported before the
 first search starts rather than after. `estimate` against `available` is what decides
-`downsample_factor` — the same DEM needs 4.5 GiB at 1 and 2.3 GiB at 4, since the
-labelling arrays scale as its inverse square. `would run` honours `--only`, so
-`--only grand` runs one search and skips the combination. And no memory cap is applied
-during a dry run, because nothing is allocated.
+`downsample_factor` and `candidate_stride` — the same DEM needs 7.2 GiB at 1 and
+5.1 GiB at 4, and downsampling helps less than it looks because the candidates are taken
+on the native grid regardless. `would run` honours `--only`, so `--only grand` runs one
+search and skips the combination. And no memory cap is applied during a dry run, because
+nothing is allocated.
+
+**This is a run that needs its cap set.** The default ceiling is 80% of what the system
+reports available, which on a machine whose desktop already holds half of RAM is below
+what the search needs: the first attempt died 23 minutes in, at the scoring stage,
+against a 5.5 GiB cap. Pass `--max-memory-gb` explicitly — the run measured 5.68 GiB
+peak RSS.
 
 **Regenerate it when a configuration changes, and not otherwise.** The store carries a
 manifest naming the configs and the time, so a stale one is detectable rather than
@@ -1172,11 +1189,13 @@ Three searches, all at the same `downsample_factor` so their masks are pixel-ali
 | **Combined** | `combine_experiments` over both | joint, union, and how much of each sits inside the other |
 
 **What it costs.** 10204 × 12603 pixels, about 129 Mpx. At `downsample_factor: 4` the
-estimator says 2.3 GiB against the ~6 GiB typically free; at 1 it says 4.5 GiB, which is
-why 4 is the setting. That choice has a price worth stating: area is measured on the
+estimator says 5.1 GiB against the ~6–7 GiB typically free; at 1 it says 7.2 GiB, which
+is why 4 is the setting. That choice has a price worth stating: area is measured on the
 downsampled mask while capacity is measured at full resolution, so a feature a few
-pixels wide keeps its detectors and loses area. **Read these areas as lower bounds**,
-and more so for TAMBO's canyon strips than for GRAND's blobs."""),
+pixels wide keeps its detectors and loses area — the run puts it at around 30% for a
+canyon strip. **Read these areas as lower bounds**, and more so for TAMBO's canyon
+strips than for GRAND's blobs. It is the reason TAMBO's full-DEM area below cannot be
+compared directly against the crop's, which was measured at `downsample_factor: 1`."""),
 ("code", """STORE = os.path.abspath(os.path.join("..", "results", "arequipa_full"))
 
 def load_stored(label):

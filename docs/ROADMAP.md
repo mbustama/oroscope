@@ -1603,9 +1603,16 @@ as readily as the happy one.
 
 Measured after: the same sweep peaks at **1.2 GB**, against 6.9 GB before.
 
-For the full DEM the estimator says 4.5 GiB at `downsample_factor: 1` and 2.3 GiB at 4,
-against ~6 GiB typically available on this machine — so 4 is the right setting, which
+For the full DEM the estimator says 7.2 GiB at `downsample_factor: 1` and 5.1 GiB at 4,
+against ~6–7 GiB typically available on this machine — so 4 is the right setting, which
 is what §6.12 already recommended for a different reason.
+
+**These two numbers were 4.5 and 2.3 until the full DEM was actually run**, and the
+under-estimate cost that run 23 minutes before it hit its own cap. The estimator counted
+only the arrays the scan returns, not the roughly three times as many live inside
+`scoring.compose`, which is where the high-water mark really is. See §6.26a — including
+why `downsample_factor` is the weaker of the two memory levers, contrary to what the
+rest of this section implies.
 
 ### 6.23 The run explains itself ✅ delivered
 
@@ -1757,21 +1764,85 @@ are noise, exactly as §6.12 warns. Updating the baseline from a run like that w
 bake the noise in. Refresh it on a quiet machine, and expect `capacity_analysis` to be
 the only stage that legitimately moved.
 
-### 6.26 The full Arequipa DEM, scaffolded but not yet run
+### 6.26 The full Arequipa DEM ✅ run
 
-Every number published so far comes from crops. The full-DEM run now has everything it
-needs except the half hour: two configurations (`config/grand_arequipa_full.json`,
-`config/tambo_arequipa_full.json`, identical to the Colca ones except for the DEM, the
-origin and `downsample_factor: 4`), a runner (`tools/run_arequipa_full.py`), and
-notebook 8, which explains the result.
+Run on 2026-08-16 at head `1fa8810`. Every number published before this came from
+crops; this is the first search over the whole 10204 × 12603 DEM — 128.6 Mpx, a
+117,430 km² footprint, 21.2× the Colca crop. Both configurations are the crop ones with
+the three intended changes only (the full DEM, a null origin read from the tiepoint,
+`downsample_factor: 4`); no criterion was touched, so the comparison below is like for
+like.
 
-**The notebook reads the results; it does not produce them.** Three searches at roughly
-half an hour each, against CI that executes every notebook on every push, is ninety
-minutes of compute per commit for something that changes only when a configuration does.
-So the runner writes the small artefacts — results JSON, provenance, explanation, about
-a few hundred KB — into `results/arequipa_full/`, which is committed, and the notebook
-opens those. This is only possible because `explain.explain_results()` is a pure
-function of the results dictionary: no DEM, no re-run, no pipeline.
+| | area km² | sites | capacity | bound by | kept | closing | weakest |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GRAND, Colca crop | 4,580.2 | 1 | 5,317 | directions accepted | 60.1% | 2.19× | solid_angle 1/1 |
+| **GRAND, full DEM** | **88,527.5** | **1** | **101,948** | directions accepted | **61.6%** | **2.10×** | solid_angle 1/1 |
+| TAMBO, Colca crop | 83.6 | 15 | 9,717 | directions accepted | 17.5% | 0.53× | solid_angle 15/15 |
+| **TAMBO, full DEM** | **111.9** | **26** | **9,024** | directions accepted | **9.7%** | **0.52×** | solid_angle 26/26 |
+| joint, crop | 50.1 | | | | | | Jaccard 0.0109 |
+| **joint, full DEM** | **50.2** | | | | | | **Jaccard 0.0006** |
+
+**The four questions, answered.**
+
+1. **The binding constraint is the same one the crops found** — `directions accepted`,
+   for both experiments, as it was at Colca. So the crops were not misleading about
+   *what* limits the answer, and the numbers derived from them do not need re-reading.
+   But the *rate* differs sharply by experiment, and that is the real finding: GRAND
+   keeps 61.6% at full scale against the crop's 60.1% — indistinguishable — while TAMBO
+   keeps **9.7% against 17.5%**, barely half. Colca is ordinary ground for GRAND and
+   exceptional ground for TAMBO, which is exactly what one would expect of a crop chosen
+   for containing a canyon, and is now measured rather than suspected.
+2. **The area.** GRAND: 88,527.5 km², against 96,946 km² for the crop scaled linearly by
+   footprint — **0.91× the naive scale-up**, so the crop was very slightly better than
+   typical and the linear extrapolation was close to right. It accepts 75.4% of the DEM
+   against the crop's 82.5%. TAMBO: 111.9 km² against a naive 1,769 km² — **0.06×**, an
+   order of magnitude short. Each run's own closing factor confirms both crop
+   measurements: GRAND 2.10× (crop 2.19×, stride-1 control 2.29×), giving ~42,190 km² of
+   physics-accepted ground; TAMBO **0.52×** (crop 0.53×). That TAMBO's closing factor
+   reproduces to within 2% on twenty-one times the ground establishes it as structural —
+   a 100 m element cannot bridge the gaps `candidate_stride: 5` leaves — and not a
+   peculiarity of Colca. **TAMBO's area remains a lower bound.** §9.9 still stands.
+3. **The spread, which is where the crop could say nothing.** GRAND is one contiguous
+   region: 48 were labelled, one was large enough, and it holds 101,948 detectors against
+   a target of 10,000 — at full scale GRAND is not capacity-limited at all, where on the
+   crop it fell 47% short. TAMBO is the opposite: 15,105 regions labelled, 45 large
+   enough, 26 selected, spread over **310 km** (151 N-S × 271 E-W). The good TAMBO ground
+   is scattered across the whole region rather than concentrated in one canyon. That is a
+   deployment finding, and it is the one a crop is structurally unable to produce.
+4. **`solid_angle` is still the weakest component everywhere** — 26 of 26 TAMBO sites and
+   GRAND's single site, as on the crops. Holding at 21× the area, it is a statement about
+   the criterion rather than about Peru: the Arequipa result is set by
+   `solid_angle_half_sr`. It belongs in §10 with the other assumptions, and it is the
+   first thing to check before quoting any of these numbers.
+
+**The programme-level number barely moved: joint 50.2 km² at full scale against 50.1 km²
+in the crop.** Searching twenty-one times more ground found essentially no additional
+co-locatable ground — the shared ground is Colca, and the DEM's other canyons do not
+offer it. The Jaccard falls from 0.0109 to 0.0006 only because GRAND's union grew; the
+shared area itself is unchanged. Co-location remains decided by slope, and 44.9% of
+TAMBO's ground sits inside GRAND's while 0.1% of GRAND's sits inside TAMBO's.
+
+**One comparison that must not be made naively.** TAMBO's full-DEM area (111.9 km²,
+`downsample_factor: 4`) is not commensurable with the crop's (83.6 km², factor 1): area
+is measured on the downsampled mask while capacity is measured at full resolution, and
+the run puts the cost at ~30% for a canyon strip. TAMBO looking *larger* than the crop is
+therefore not evidence that it found more ground at Colca — it found other ground
+elsewhere. The conclusion in (1) survives this because it rests on the acceptance rate,
+which is measured on the same grid in both runs, and because a 30% correction does not
+close a 16× gap.
+
+**What it cost, and what that corrected.** GRAND 24.2 minutes, TAMBO **1.2 minutes** —
+not the "~25-30 minutes each" this section previously assumed. TAMBO is cheap because its
+targets are 2-5 km away against GRAND's 10-40, so the profile walks are a fraction as
+long. The whole store is ~26 minutes of compute, not ninety. The case for keeping
+notebooks 7 and 8 out of CI still holds on GRAND's 25 minutes alone, but it should be
+argued from the real number.
+
+**The notebook reads the results; it does not produce them.** The runner writes the small
+artefacts — results JSON, provenance, explanation, a few hundred KB — into
+`results/arequipa_full/`, which is committed, and the notebook opens those. This is only
+possible because `explain.explain_results()` is a pure function of the results
+dictionary: no DEM, no re-run, no pipeline.
 
 Notebooks 7 and 8 are therefore **excluded from the CI execution job**, which is a real loss of
 coverage and is replaced deliberately: `tests/test_docs.py` asserts that every
@@ -1782,12 +1853,43 @@ an API rename produces and the one the execution would have caught.
 what, so a stale store is detectable. The premise of storing rather than recomputing is
 that nobody looks again, so the store has to say when it was last right.
 
-**What to look at when it runs**, in order: whether the binding constraint is the same
-one the crops found — if not, the crops were not representative and every number derived
-from them needs re-reading; the area against the crop scaled up, and against the closing
-factor the run reports for itself; whether the good ground is one region or fifty; and
-whether `solid_angle` is still the weakest component everywhere, which would be a
-statement about the criterion rather than about Peru.
+### 6.26a The memory estimator was wrong by 2.5×, and the first attempt died of it
+
+**The first run failed 23 minutes in**, at the scoring stage, with a clean `MemoryError`
+against its own 5.5 GiB address-space cap. The cap did its job — a `MemoryError` naming
+the run, not an OOM killer taking the user's session — but it fired because
+`estimate_peak_memory_gb` had advertised **2.32 GiB** for a search that measured
+**5.68 GiB peak RSS**.
+
+The model's structure was right and its candidate count was accurate: it predicted
+15.43M candidates against 15.14M actual. What it got wrong was `n_observables=12`, the
+arrays `arrival_scan.scan` returns. **The peak is not at the end of the scan.** By the
+time `scoring.compose` runs, the scan's 11 arrays are still live, a component has been
+built for each criterion, `compose` has clipped a float64 *copy* of every component, and
+the composition and scoring intermediates need several more — about **36** per-candidate
+arrays at 115.5 MiB each, three times what was counted. Counting them by hand gives
+5.75 GiB; the run measured 5.68. Fixed by splitting the term: `n_observables` keeps its
+honest meaning and a new `n_scoring_arrays=24` names the rest.
+
+Corrected, the estimator says **7.21 GiB at `downsample_factor: 1` and 5.08 GiB at 4**,
+against 4.5 and 2.32 before.
+
+**And the knob everything pointed at is the weaker one.** `downsample_factor` scales the
+labelling and gradient arrays as its inverse square, but candidates are taken on the
+*native* grid — `candidate_stride` subsamples the surviving-pixel list, not the map — so
+downsampling never touches the term that dominates at this scale. Going from 1 to 4 cuts
+the estimate by 1.4×, not the 16× the inverse-square reasoning suggests; going from
+stride 5 to 10 at factor 4 cuts it from 5.08 to 2.83. Every document that explained the
+choice of `downsample_factor: 4` by "the labelling arrays scale as its inverse square"
+was giving a true reason for a conclusion it does not support, and has been corrected.
+
+Two consequences worth carrying forward. The default cap is 80% of available and the
+warning fires when the estimate exceeds 80% of available, so **the two are only coherent
+if the estimate is accurate** — a wrong estimate silently disarms the warning while the
+cap still bites, which is exactly the failure seen. And on a machine whose desktop
+already holds half of RAM, this run needs its ceiling set explicitly:
+`tools/run_arequipa_full.py` gained `--max-memory-gb` for that, since a memory ceiling is
+a property of the machine and not of the science, and the configs were left untouched.
 
 ### 6.27 Documentation drift, and a test for it
 
