@@ -1412,13 +1412,180 @@ for label, folder in (("GRAND", "arequipa_full_grand"),
     found = sorted(glob.glob(os.path.join(OUT, folder, "oroscope_results*.png")))
     show_figure(found[0] if found else os.path.join(OUT, folder, "none.png"),
                 caption=f"{label} over the full Arequipa DEM")"""),
-("md", """And the overlay, which is the one worth dwelling on. Altitude is greyscale so the
-three categories are the only colours on the map; GRAND is outlined rather than filled
-because it covers most of the frame, and a wash over that much of a map hides
-everything underneath it. The magenta is the 50.2 km² both experiments accept."""),
-("code", """found = sorted(glob.glob(os.path.join(OUT, "arequipa_full_combined", "*.png")))
-show_figure(found[0] if found else os.path.join(OUT, "arequipa_full_combined", "none.png"),
-            caption="GRAND and TAMBO overlaid, with the co-located ground in magenta")"""),
+("md", """### The overlay, one experiment at a time
+
+The combination is easier to read built up than all at once, so `--reveal` writes it as
+three frames. Everything that is not a category — the terrain, the colour bar, the
+roads, the towns, the scale bar, the legend — is identical in all three, so what
+changes between them is only the result.
+
+**First GRAND alone.** It is *outlined* rather than filled: it covers most of the
+frame, and a translucent wash over that much of a map hides everything underneath.
+Notice where the boundary runs — GRAND's constraint is deployable slope, so it accepts
+the high plateau and declines the canyon walls and the steep coast."""),
+("code", """def show_stage(name, caption):
+    found = os.path.join(OUT, "arequipa_full_combined", name)
+    show_figure(found, caption=caption)
+
+show_stage("combined_overview_1_grand.png",
+           "GRAND alone — 88,527 km², essentially the whole plateau")"""),
+("md", """**Now TAMBO alone.** A different question entirely, and it shows: instead of a
+boundary enclosing most of the map, a scatter of small patches strung along the canyon
+systems. TAMBO needs a wall to stand on facing a wall to watch, and that exists only
+where the ground is cut."""),
+("code", """show_stage("combined_overview_2_tambo.png",
+           "TAMBO alone — 112 km², following the canyons")"""),
+("md", """**And both.** The magenta is the ground that satisfies the two at once: 50.2 km²,
+0.1% of GRAND's and 44.9% of TAMBO's. The asymmetry is the finding — co-location costs
+GRAND nothing and is most of what TAMBO has.
+
+Look at where the magenta *is*. It traces the canyon rims, and the roads run along them
+too, which is not a coincidence: a canyon rim is where a road goes in this terrain."""),
+("code", """show_stage("combined_overview_3_both.png",
+           "Both — the 50.2 km² that satisfies GRAND and TAMBO together")"""),
+("md", """## What moves the answer
+
+The numbers above come from one setting of every parameter. The honest question is how
+much they would move under another, and that cannot be read off a single run.
+
+The full DEM is far too slow to sweep — GRAND alone is 25 minutes a point — so what
+follows searches a **small synthetic canyon** instead: a plateau cut by a gorge, a few
+hundred pixels across, seconds per run. The absolute numbers mean nothing. The
+*direction and steepness* of each response is the point, and those carry over."""),
+("code", """import contextlib
+import io
+import tempfile
+
+import numpy as np
+import tifffile as tiff
+
+from oroscope import site_searcher as ss
+
+WORK = tempfile.mkdtemp(prefix="oroscope_nb08_")
+
+
+def plateau_with_canyon(n=400, depth_m=1300.0, floor_px=30, wall_px=35):
+    \"\"\"
+    A high plateau cut by a gorge: ground a canyon search has an opinion about.
+
+    Sized against the criteria rather than drawn freehand. At ~30 m pixels the rim-to-
+    rim distance is 3.0 km, so the far wall sits inside a 1-4 km window, and the walls
+    are ~51 deg, inside the 20-60 deg band. A narrower or steeper canyon returns
+    nothing at all, which is a lesson about the criteria but a poor demonstration.
+    \"\"\"
+    col = np.arange(n)
+    wall = np.clip((np.abs(col - n // 2) - floor_px) / wall_px, 0.0, 1.0)
+    z = 3600.0 + wall[None, :] * depth_m
+    # Gentle relief, so the plateau is not perfectly flat and slope has a distribution
+    rr, cc = np.mgrid[0:n, 0:n]
+    z = z + 90.0 * np.sin(rr / 47.0) + 60.0 * np.cos(cc / 61.0)
+    return z.astype(np.float32)
+
+
+dem = os.path.join(WORK, "canyon.tif")
+tiff.imwrite(dem, plateau_with_canyon(), extratags=[
+    (33550, "d", 3, (1 / 3600, 1 / 3600, 0.0)),
+    (33922, "d", 6, (0.0, 0.0, 0.0, -72.0, -15.5, 0.0)),
+])
+print("synthetic canyon written:", os.path.basename(dem))"""),
+("code", """BASE = dict(
+    dem_path=dem, search_mode="distributed", grid_type="hex",
+    min_slope_deg=20.0, max_slope_deg=60.0, min_target_slope_deg=25.0,
+    min_dist_km=1.0, max_dist_km=4.0,
+    elev_min_deg=-20.0, elev_max_deg=20.0, n_elev_bins=16,
+    antenna_spacing_km=0.1, min_sub_array_size=20, min_width_km=0.0,
+    target_antennas=5000, grammage_mode="particle",
+    grammage_band_gcm2=(236.0, 1287.0),
+    decay_energy_min_pev=3.0, decay_energy_max_pev=1000.0,
+    solid_angle_half_sr=0.8, min_score=0.05,
+    downsample_factor=1, tile_size=256, candidate_stride=3, num_cores=2,
+    generate_kml=False, explain=False,
+)
+
+
+def search(tag, **overrides):
+    \"\"\"One run, returning the few numbers worth comparing.\"\"\"
+    params = dict(BASE, **overrides)
+    quiet = io.StringIO()
+    with contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(io.StringIO()):
+        res = ss.find_grand_regions_interactive(
+            run_output_dir=os.path.join(WORK, tag), **params)
+    sites = res["results"]["sites"]
+    funnel = res["funnel"]
+    strided = next(v for k, v in funnel.items() if k.startswith("kept by stride"))
+    return dict(area=sum(s["area_km2"] for s in sites),
+                sites=res["results"]["total_sites"],
+                capacity=res["results"]["total_capacity"],
+                accepted=100.0 * funnel["directions accepted"] / max(strided, 1))
+
+
+baseline = search("baseline")
+print(f"baseline: {baseline['sites']} sites, {baseline['area']:.1f} km², "
+      f"{baseline['capacity']:,} detectors, {baseline['accepted']:.1f}% accepted")"""),
+("md", """### One parameter at a time
+
+Four knobs, each swept while everything else is held. Watch which ones bend the answer
+and which barely touch it — and in particular watch where a response is *not* smooth,
+because a cliff is where a result stops being a measurement and starts being a choice."""),
+("code", """def sweep(label, key, values, fmt="{}"):
+    print()
+    print(label)
+    print(f"   {'value':>12} {'sites':>6} {'area km²':>10} {'capacity':>10} {'accepted':>10}")
+    print("   " + "-" * 52)
+    for i, v in enumerate(values):
+        r = search(f"{key}_{i}", **{key: v})
+        mark = "  <- baseline" if v == BASE.get(key) else ""
+        print(f"   {fmt.format(v):>12} {r['sites']:>6} {r['area']:>10.1f} "
+              f"{r['capacity']:>10,} {r['accepted']:>9.1f}%{mark}")
+
+
+sweep("Arrival window half-width (elev_min/max_deg)", "elev_max_deg",
+      [5.0, 10.0, 20.0, 30.0], "±{:.0f}°")"""),
+("code", """sweep("Far-wall slope floor (min_target_slope_deg)", "min_target_slope_deg",
+      [25.0, 45.0, 50.0, 55.0], "{:.0f}°")"""),
+("code", """sweep("Distance window, far edge (max_dist_km)", "max_dist_km",
+      [2.0, 3.0, 4.0, 6.0], "{:.0f} km")"""),
+("code", """sweep("Score cut (min_score)", "min_score",
+      [0.0, 0.05, 0.10, 0.15], "{:.2f}")"""),
+("md", """### What that shows
+
+Three of these are physics and one is not, and they do not behave alike.
+
+**The arrival window** widens the accepted set smoothly: more sky examined, more
+directions accepted. It is the binding constraint on the real search too — both GRAND
+and TAMBO are bound by `directions accepted` over Arequipa — so this is the response
+that most directly sets the size of the answer.
+
+**The far-wall floor** is a threshold compared against a physical distribution, and it
+behaves exactly as that should: nearly flat while it sits below the bulk, then a cliff
+as it crosses. These walls are ~51°, and the floor takes 52.7% of directions at 25°,
+45.2% at 45°, 34.4% at 50° — and **nothing at all at 55°**. Ask for a wall steeper than
+the terrain has and the search correctly returns an empty answer.
+
+That is worth dwelling on, because it is the shape every terrain threshold has. The
+question is never "is this value reasonable" but "where does it sit relative to the
+distribution the ground actually offers", and only a scan like this answers it.
+
+**The distance window** has to reach the far wall at all. At 2 and 3 km this canyon
+returns *nothing*: the opposite wall is 3.0 km rim to rim, so a window that stops short
+of it finds no target, however good the ground underfoot. Past that it opens up. A
+window is two constraints, and the far edge is doing the work here.
+
+**The score cut is not physics at all.** It is a threshold on a *product* of components,
+and a product of numbers in [0, 1] piles up near zero — the site scores here have a
+median near 0.10, so a cut of 0.15 is already biting into the body of the distribution
+while 0.0 keeps everything. Over the real Colca crop `min_score` 0.35 is equivalent to
+keeping the top 22.8% by rank, and a scan across the cut shows **no knee anywhere**:
+nothing in the data marks 0.35 as the natural place to stand. It is the single most
+consequential choice in the TAMBO configuration and the one least constrained by the
+terrain.
+
+Note also what `min_target_slope_deg: 0` means, since it is a trap: zero is *falsy*, so
+it switches the far-wall criterion **off** rather than setting a 0° floor. Off is not
+the permissive end of this sweep — it is a different search.
+
+That last one is why `--score_percentile` exists: a rank means the same thing when the
+composition changes, and an absolute cut on a product does not."""),
 ("md", """## Every assumption behind these numbers
 
 A search produces authoritative-looking areas and detector counts, and the only defence

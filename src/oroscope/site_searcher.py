@@ -1951,6 +1951,10 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         Resolved parameters, serialised into the results JSON.
     run_info : dict, optional
         Timings, funnel and provenance to record alongside the results.
+    settlements : str or sequence, optional
+        Named places to mark on the map. See :func:`resolve_settlements`.
+    roads_geojson : str, optional
+        Road geometry to draw as context, from ``oroscope-fetch-roads``.
 
     Returns
     -------
@@ -4024,6 +4028,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         Detection response ``A(E)`` for the acceptance weightings: a path to a
         two-column CSV of energy in PeV against relative response, or a callable.
         :func:`aperture.infer_response` recovers one from a published integral curve.
+    settlements : str or sequence, optional
+        Named places to mark on the map. ``'auto'`` uses whichever curated list has
+        points inside the DEM; a path to a places GeoJSON from ``oroscope-fetch-roads``
+        marks those; ``'none'`` marks nothing. See :func:`resolve_settlements`.
+    roads_geojson : str, optional
+        Road geometry to draw on the map, from ``oroscope-fetch-roads``. Context only:
+        distinct from ``road_map_path``, which screens candidates, this changes no
+        result.
 
     stop_at_target : bool, optional
         In distributed mode, stop selecting sites once ``target_antennas`` is reached.

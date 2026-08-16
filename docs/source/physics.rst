@@ -397,6 +397,74 @@ is. Looking across a canyon also accepts far more sky than looking to the horizo
 1.5 sr against GRAND's ~0.05, which is why ``solid_angle_half_sr`` has to be
 experiment-specific or the term saturates and stops discriminating.
 
+What each signal tells you about the shower
+```````````````````````````````````````````
+
+The two channels do not measure the same quantity less or more well. They measure
+**different things**, and that is the whole argument for a joint site.
+
+*Radio measures the electromagnetic shower, calorimetrically.* The field amplitude
+scales with the energy in the electromagnetic cascade, and the atmosphere neither
+absorbs nor scatters at these frequencies — so what arrives at the antenna is what was
+emitted, with no attenuation correction to make and no dependence on how much shower
+happens to survive to the ground.
+
+Three further things come with it, and none has a particle-array equivalent:
+
+* **The direction**, from the arrival times of a nanosecond pulse across the array.
+* **The depth of shower maximum**, from the *shape* of the arriving wavefront and the
+  slope of the lateral distribution. :math:`X_{\rm max}` is the classic handle on how
+  deep the shower developed — and for a tau shower it constrains where the decay
+  happened, which is the geometry this whole search is about.
+* **The polarisation**, which identifies the emission mechanism: geomagnetic emission
+  is polarised along :math:`\vec{v} \times \vec{B}` and charge-excess emission radially
+  about the axis. That is a physical signature no anthropogenic pulse reproduces, and
+  it is the main defence against the radio-frequency interference the RFI criterion
+  otherwise has to exclude geometrically.
+
+What radio does *not* give is the particle content. It is nearly blind to muons, which
+carry little of the electromagnetic energy.
+
+*Particles measure the shower where it is, at one depth.* A water-Cherenkov array
+counts what physically arrives: the density and arrival times of particles at the
+ground. That is a sample of the longitudinal profile at a single slice — the ground —
+which is why TAMBO's grammage criterion is a band. Miss the slice and there is nothing
+to detect.
+
+In exchange it sees what radio cannot:
+
+* **The muon content.** Muons penetrate where the electromagnetic component is
+  absorbed, and a water-Cherenkov tank distinguishes them by the depth of light they
+  deposit. Muon number is the standard discriminator of shower composition, and it
+  separates a hadronic cascade from a purely electromagnetic one.
+* **A direct count**, with no emission geometry in the way. There is no Cherenkov cone
+  to sit inside and no magnetic-field angle to be unlucky in: if the particles arrive,
+  they are detected.
+
+*Both together give what neither gives alone.* Three things, in increasing order of
+what they are worth:
+
+1. **Two points on one longitudinal profile.** Radio gives :math:`X_{\rm max}`, where
+   the shower peaked; the array gives its content at the ground. Two depths on the same
+   cascade constrain the shower age — and therefore the altitude and distance at which
+   the tau decayed — far better than either does alone.
+2. **Energy and composition separately.** Radio measures the electromagnetic energy
+   calorimetrically and the array measures the muon number. Those are the two numbers
+   a shower measurement wants, and each channel supplies the one the other is blind to.
+   For a tau shower they also begin to separate the decay channel, since a hadronic
+   decay produces muons that an electromagnetic one does not.
+3. **Cross-calibration on the same event, which is the real prize.** Radio's systematics
+   are the antenna response, the electronics and the emission model. The array's are the
+   tank response and the hadronic interaction model. These are almost entirely
+   independent, so a shower measured by both constrains each in a way that neither can
+   constrain itself. Every energy scale in this field is limited by exactly that kind of
+   systematic, and coincident events are how it is attacked.
+
+There is a fourth, less glamorous and possibly more immediately useful: **a coincidence
+is essentially unfakeable**. A radio pulse with the right polarisation arriving at the
+same instant as particles on the ground is not something a power line, an aircraft or a
+mine does.
+
 Side by side
 ````````````
 
@@ -434,6 +502,15 @@ Side by side
    * - Accepted solid angle
      - ~0.05 sr
      - 0.2–1.5 sr
+   * - What it measures
+     - EM energy, calorimetrically; :math:`X_{\rm max}`; polarisation
+     - particle density at the ground; **muon content**
+   * - Blind to
+     - muons
+     - the shower above the ground
+   * - Design reference
+     - :cite:`GRAND:2018iaj`
+     - :cite:`Arguelles:2026btb`, :cite:`RomeroWolf:2020pzh`
 
 
 Joint particle + radio arrays
@@ -610,8 +687,4 @@ asked — 7.4% high at 1 km spacing and 58% at 100 m.
    print(f"{n} detectors on {area_km2:.1f} km^2; analytic density gives {analytic:.1f}")
 
 
-References
-----------
-
-.. bibliography::
-   :filter: docname in docnames
+The papers behind these numbers are collected on the :doc:`references` page.
