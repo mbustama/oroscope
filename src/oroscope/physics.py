@@ -28,6 +28,7 @@ __all__ = [
     "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
+    "nc_regeneration_factor", "NC_TO_CC_RATIO", "NC_INELASTICITY",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
     "set_tau_energy_loss", "restore_tau_energy_loss", "tau_energy_loss_settings",
     "production_escape_optimum_gcm2", "depth_band_from_energy",
@@ -429,9 +430,93 @@ def earth_chord_gcm2(elevation_deg: float, radius_m: float = EARTH_RADIUS_M,
     return earth_chord_m(elevation_deg, radius_m) * 100.0 * density_gcm3
 
 
+# Neutral-current cross-section as a fraction of charged-current, and the mean
+# inelasticity of an NC interaction. Both are slowly varying at these energies; these
+# are round numbers, and both are parameters of nc_regeneration_factor() so a better
+# value can be supplied without touching this.
+NC_TO_CC_RATIO = 0.42
+NC_INELASTICITY = 0.25
+
+
+def nc_regeneration_factor(chord_gcm2: float, cc_length_gcm2: float,
+                           spectral_index: float = 2.0,
+                           nc_to_cc: float = NC_TO_CC_RATIO,
+                           inelasticity: float = NC_INELASTICITY) -> float:
+    """
+    Leading-order enhancement from neutral-current regeneration. **An approximation.**
+
+    A charged-current interaction removes a neutrino from the beam. A neutral-current
+    one does not -- it degrades the energy and the neutrino continues. Counting only CC
+    absorption, as ``neutrino_survival`` does by default, therefore understates the flux
+    arriving at a given energy: neutrinos that started higher up the spectrum scatter
+    *down into* the band and partially refill it.
+
+    The size of that refilling follows from the spectrum. For a power law
+    ``Phi(E) ~ E**-gamma``, a neutrino observed at ``E`` after one NC interaction of
+    inelasticity ``y`` began at ``E' = E/(1-y)``. The flux there is larger by
+    ``(1-y)**gamma``, and the Jacobian ``dE'/dE = 1/(1-y)`` gives one more power, so each
+    NC scatter contributes ``(1-y)**(gamma-1)`` relative to the unscattered flux. With
+    ``tau_nc = (chord/X_cc) * (sigma_NC/sigma_CC)`` NC interactions expected along the
+    chord, the leading term is::
+
+        1 + tau_nc * (1 - y)**(gamma - 1)
+
+    **What this is not.** It is the first term of a series, not a solution of the
+    cascade equations, and it ignores the ``nu_tau -> tau -> nu_tau`` chain that makes
+    the Earth genuinely translucent to tau neutrinos at high energy. It is a correction
+    of the right sign and roughly the right size, and it is capped below (see
+    :func:`neutrino_survival`) so it cannot manufacture more flux than arrived. Treat a
+    result that depends strongly on it as a result that needs a real transport code.
+
+    Parameters
+    ----------
+    chord_gcm2 : float
+        Column depth along the chord, in g/cm^2.
+    cc_length_gcm2 : float
+        Charged-current interaction length, in g/cm^2.
+    spectral_index : float, optional
+        ``gamma`` of the assumed power-law flux. A steeper spectrum regenerates *less*:
+        the neutrinos scattering down into the band come from ``E/(1-y)``, above it, and
+        a steeper spectrum has less flux there.
+    nc_to_cc : float, optional
+        ``sigma_NC / sigma_CC``.
+    inelasticity : float, optional
+        Mean fraction of energy lost in one NC interaction.
+
+    Returns
+    -------
+    float
+        Multiplicative enhancement, at least 1.
+
+    Examples
+    --------
+    A chord one CC interaction length deep, on an E^-2 spectrum:
+
+    >>> from oroscope import physics
+    >>> round(physics.nc_regeneration_factor(1.0e8, 1.0e8), 3)
+    1.315
+
+    A steeper spectrum regenerates less, since less flux sits above the band:
+
+    >>> round(physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.7), 3)
+    1.258
+
+    A short chord regenerates nothing:
+
+    >>> round(physics.nc_regeneration_factor(0.0, 1.0e8), 3)
+    1.0
+    """
+    if cc_length_gcm2 <= 0 or chord_gcm2 <= 0:
+        return 1.0
+    tau_nc = (chord_gcm2 / cc_length_gcm2) * nc_to_cc
+    return 1.0 + tau_nc * (1.0 - inelasticity) ** (spectral_index - 1.0)
+
+
 def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
                       radius_m: float = EARTH_RADIUS_M,
-                      density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
+                      density_gcm3: float = CRUST_DENSITY_GCM3,
+                      nc_regeneration: bool = False,
+                      spectral_index: float = 2.0) -> float:
     """
     Fraction of neutrinos surviving the Earth chord to reach the exit region.
 
@@ -439,6 +524,11 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
     on the cross-section at the energy of interest; around an EeV it is of order
     1e8 g/cm^2, which is the same order as the chord at -3 degrees, so the suppression
     across a +/-3 degree window is substantial rather than marginal.
+
+    With ``nc_regeneration=True`` the result is multiplied by
+    :func:`nc_regeneration_factor`, and clipped at 1 so that regeneration can offset
+    absorption but never invent flux. **Off by default**, because it is an
+    approximation and every published number here was computed without it.
 
     Parameters
     ----------
@@ -451,6 +541,10 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
         Earth radius, in metres.
     density_gcm3 : float, optional
         Crust density, in g/cm^3.
+    nc_regeneration : bool, optional
+        Apply the leading-order neutral-current regeneration correction.
+    spectral_index : float, optional
+        Power-law index used by that correction.
 
     Returns
     -------
@@ -463,11 +557,20 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
     >>> lam = physics.neutrino_interaction_length_gcm2(1000.0)
     >>> round(physics.neutrino_survival(-1.0, lam), 3)
     0.7
+
+    Regeneration lifts it, because absorption alone was overstating the suppression:
+
+    >>> round(physics.neutrino_survival(-1.0, lam, nc_regeneration=True), 3)
+    0.778
     """
     if interaction_length_gcm2 <= 0:
         return 1.0
-    return math.exp(-earth_chord_gcm2(elevation_deg, radius_m, density_gcm3)
-                    / interaction_length_gcm2)
+    chord = earth_chord_gcm2(elevation_deg, radius_m, density_gcm3)
+    survival = math.exp(-chord / interaction_length_gcm2)
+    if nc_regeneration:
+        survival *= nc_regeneration_factor(chord, interaction_length_gcm2,
+                                           spectral_index=spectral_index)
+    return min(survival, 1.0)
 
 
 # ------------------------------------------------------- muon shielding

@@ -374,7 +374,12 @@ obstacle: a pixel has one slope and both must accept it.
    window fixes it with an *identical* selection. But at 12× the same run keeps 6.0% of
    directions against 17.5% and collapses — the knob is not monotone. Configs unchanged;
    the run now reports the factor and the cliff. Roadmap §6.39.
-4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
+4. ~~Neutral-current regeneration not modelled.~~ ✅ leading order, 2026-08-16.
+   `physics.nc_regeneration_factor()`, and `neutrino_survival(nc_regeneration=True)`.
+   **Off by default** — it is the first term of a series, not a cascade solution, and
+   omits the ν_τ→τ→ν_τ chain. Lifts survival 1.06× at −0.5° to 1.56× at −5° at 1 EeV.
+   Note `earth_absorption_cutoff_deg` does *not* apply it, so the §6 prediction is still
+   absorption-only. Roadmap §6.41.
 5. ~~β, the tau energy-loss constant, is an estimate.~~ ✅ configurable, 2026-08-16 —
    `physics.set_tau_energy_loss()`. Still wants a collaboration value, but adopting one
    no longer means editing source. **Note it does not affect a search**: β enters tau

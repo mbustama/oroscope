@@ -922,3 +922,45 @@ class TestDeclinationCanFollowTheSite(unittest.TestCase):
             physics.declination_from_grid(np.array([-18.0, -14.0]),
                                           np.array([-74.0, -70.0]),
                                           np.array([[-5.0, -7.0]]))
+
+
+class TestNeutralCurrentRegeneration(unittest.TestCase):
+    """
+    A CC interaction removes a neutrino; an NC one only degrades its energy. Counting
+    absorption alone therefore overstates the suppression, and the correction is off by
+    default because it is a leading-order approximation rather than a cascade solution.
+    """
+
+    def test_it_is_off_by_default_so_published_numbers_do_not_move(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        self.assertEqual(physics.neutrino_survival(-1.0, lam),
+                         math.exp(-physics.earth_chord_gcm2(-1.0) / lam))
+
+    def test_regeneration_can_only_help(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        for elev in (-0.5, -1.0, -3.0, -8.0):
+            plain = physics.neutrino_survival(elev, lam)
+            regen = physics.neutrino_survival(elev, lam, nc_regeneration=True)
+            self.assertGreaterEqual(regen, plain)
+
+    def test_it_never_manufactures_flux(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        for elev in (-0.01, -0.1, -0.5, -1.0, -5.0, -20.0):
+            self.assertLessEqual(
+                physics.neutrino_survival(elev, lam, nc_regeneration=True), 1.0)
+
+    def test_a_steeper_spectrum_regenerates_less(self):
+        # The neutrinos scattering into the band come from E/(1-y), above it, where a
+        # steeper spectrum has less flux. Getting this backwards is easy.
+        soft = physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.0)
+        hard = physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.7)
+        self.assertGreater(soft, hard)
+
+    def test_no_chord_means_no_regeneration(self):
+        self.assertEqual(physics.nc_regeneration_factor(0.0, 1.0e8), 1.0)
+        self.assertEqual(physics.nc_regeneration_factor(1.0e8, 0.0), 1.0)
+
+    def test_it_grows_with_the_chord(self):
+        factors = [physics.nc_regeneration_factor(x, 1.0e8)
+                   for x in (1e7, 5e7, 1e8, 2e8)]
+        self.assertTrue(all(b > a for a, b in zip(factors, factors[1:])))

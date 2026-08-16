@@ -2356,6 +2356,51 @@ Nothing about a published number changes: with no model set the fallback is exac
 before, which the tests pin. The run's assumptions block now says the declination is
 constant *unless a model was supplied*, and names the two ways to supply one.
 
+### 6.41 Neutral-current regeneration, to leading order and clearly labelled as such
+
+§9.4: only charged-current attenuation was counted, so the Earth-chord suppression is
+overstated. A CC interaction removes a neutrino from the beam; an NC one only degrades
+its energy, and on a falling spectrum those degraded neutrinos scatter *down into* the
+band and partially refill it.
+
+`nc_regeneration_factor()` is the leading term, and it is derivable rather than
+asserted. For `Φ(E) ~ E^-γ`, a neutrino seen at `E` after one NC scatter of inelasticity
+`y` started at `E' = E/(1-y)`, where the flux is larger by `(1-y)^γ`; the Jacobian
+`dE'/dE = 1/(1-y)` supplies one more power, giving `(1-y)^(γ-1)` per scatter. With
+`τ_NC = (X_chord/X_CC)·(σ_NC/σ_CC)` scatters expected, the factor is
+`1 + τ_NC·(1-y)^(γ-1)`.
+
+Measured at 1 EeV, against the ±3° window that matters:
+
+| elevation | absorption only | with regeneration | lift |
+| --- | --- | --- | --- |
+| −0.5° | 0.836 | 0.883 | 1.06× |
+| −1.0° | 0.700 | 0.778 | 1.11× |
+| −3.0° | 0.342 | 0.458 | **1.34×** |
+| −5.0° | 0.168 | 0.262 | 1.56× |
+
+So the correction is small at the top of the window and grows with the chord, which is
+the expected shape: the deeper the crossing, the more NC scatters and the more refilling.
+
+**Off by default, and it is an approximation.** It is the first term of a series, not a
+solution of the cascade equations, and it omits the `ν_τ → τ → ν_τ` chain that makes the
+Earth genuinely translucent to tau neutrinos at high energy. It is clipped at 1 so it can
+offset absorption but never manufacture flux. A result that leans on it is a result that
+needs a real transport code.
+
+One thing to watch: `earth_absorption_cutoff_deg` — the prediction in §6 offered as the
+cheapest external check (§9.7) — does *not* apply this correction, so that prediction
+still describes absorption alone. Turning regeneration on would move its lower edge
+upward, and if it is ever compared against a collaboration simulation the two treatments
+must be matched.
+
+**A correction to a wrong statement made while writing this.** The first draft of the
+docstring said a steeper spectrum regenerates *more*. It is the opposite: the neutrinos
+scattering into the band come from `E/(1-y)`, above it, where a steeper spectrum has
+*less* flux. The formula was right and the prose was backwards — γ = 2.0 gives 1.315 and
+γ = 2.7 gives 1.258 — and two of the doctest values were wrong on top of that. Caught by
+running them, which is exactly what §8.2 exists for. A test now pins the direction.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
