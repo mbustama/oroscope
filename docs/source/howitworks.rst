@@ -137,6 +137,57 @@ detector positions. ``score_percentile`` is the scale-free alternative and is
 scored against the same ranking; see :doc:`assumptions`.
 
 
+Co-locating two arrays
+----------------------
+
+The search answers *where each experiment could go*. Deployment asks something else:
+**given a site chosen for one, is there enough ground nearby for the other?**
+
+The tempting way to ask is "how much of the joint region can host the partner", and it
+gives the wrong answer. On the unbiased Cajatambo crop the GRAND-viable ground *inside*
+the joint mask is 22,577 fragments, of which exactly **one** is large enough for a single
+1 km lattice cell — while 976 km² of perfectly good GRAND ground lies within 20 km. An
+optimiser pointed at the intersection would call that site impossible.
+
+**A partner array does not have to stand on the joint mask.** What couples two arrays is
+a shared line of sight to the same massif, not a shared footprint, and GRAND's own targets
+are 10–40 km away.
+
+.. code-block:: python
+
+   from oroscope import combine_experiments as ce
+
+   run = ce.load_run("output/ancash_full_grand")
+   ce.smallest_radius_for(run["mask"], run["world"], lat, lon, wanted=1000)
+
+Measured from each region's best TAMBO site, the answer is consistent:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 26 26 26
+
+   * - Region
+     - 100 GRAND antennas
+     - 1,000
+     - 5,000
+   * - Arequipa
+     - 10 km
+     - 20 km
+     - 40 km
+   * - Ancash
+     - 10 km
+     - 30 km
+     - 60 km
+   * - Lima
+     - 10 km
+     - 30 km
+     - 60 km
+
+None of the three is limited by finding partner ground near a site. The limit is simply
+that 1,000 antennas at 1 km spacing need 866 km², and steep country does not offer that
+within a few kilometres. Notebook 11 computes the table.
+
+
 What the answer is, and is not
 -------------------------------
 

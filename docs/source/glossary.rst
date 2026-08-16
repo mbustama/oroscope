@@ -46,6 +46,15 @@ link to where it is explained and where it bites.
       **It must be larger than the stride gap**; see :doc:`howitworks` and
       :func:`~oroscope.site_searcher.warn_stride_outruns_closing`.
 
+   co-location
+      Siting two experiments so that one deployment serves both. **Not the same as the**
+      :term:`joint region`: a partner array does not have to stand on ground both
+      experiments accept, because what couples them is a shared line of sight to the same
+      massif rather than a shared footprint. Measured across three regions, a GRAND array
+      of 100 antennas fits within ~10 km of the best TAMBO site, 1,000 within 20–30 km and
+      5,000 within 40–60 km. :func:`~oroscope.combine_experiments.colocation_capacity`
+      and :func:`~oroscope.combine_experiments.smallest_radius_for`.
+
    column depth
       Rock traversed along an arrival direction, in g/cm². Accumulated over the whole
       profile walk, so it is bounded by where the walk stopped rather than by the

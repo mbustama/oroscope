@@ -10,6 +10,7 @@ So the masks below are small enough to count by hand, and every expected value i
 arithmetic rather than a previous run's output.
 """
 
+import math
 import json
 import os
 import shutil
@@ -336,3 +337,67 @@ class TestCombineRefusesBadRequests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestColocationCapacity(unittest.TestCase):
+    """
+    The deployment question, which is not the intersection question.
+
+    A partner array does not have to stand on the joint mask: measured on the Cajatambo
+    crop, the GRAND-viable ground *inside* the joint mask was 22,577 fragments of which
+    exactly one held a single 1 km lattice cell, while 976 km² of good GRAND ground lay
+    within 20 km. An optimiser pointed at the intersection calls that site impossible.
+    """
+
+    # 1 arc-second pixels, north-west corner at (-77, -10). y is negative: rows go south.
+    WORLD = (1 / 3600.0, 0.0, 0.0, -1 / 3600.0, -77.0, -10.0)
+
+    def test_capacity_never_falls_as_the_radius_grows(self):
+        mask = np.ones((300, 300), dtype=bool)
+        rows = ce.colocation_capacity(mask, self.WORLD, -10.04, -76.96,
+                                      radii_km=(2.0, 5.0, 10.0))
+        radii = [r["radius_km"] for r in rows]
+        self.assertEqual(radii, sorted(radii), "rows must come back ascending")
+        for a, b in zip(rows, rows[1:]):
+            self.assertLessEqual(a["area_km2"], b["area_km2"])
+            self.assertLessEqual(a["capacity"], b["capacity"])
+
+    def test_the_area_within_a_radius_is_about_a_disc(self):
+        """A full mask should give pi r^2, which pins the distance metric itself."""
+        mask = np.ones((900, 900), dtype=bool)
+        row = ce.colocation_capacity(mask, self.WORLD, -10.125, -76.875,
+                                     radii_km=(5.0,))[0]
+        self.assertAlmostEqual(row["area_km2"], math.pi * 25.0, delta=1.0)
+
+    def test_ground_outside_the_radius_does_not_count(self):
+        """The whole point: distance is measured, not assumed."""
+        mask = np.zeros((300, 300), dtype=bool)
+        mask[280:, 280:] = True                      # a corner, far from the anchor
+        rows = ce.colocation_capacity(mask, self.WORLD, -10.0, -77.0,
+                                      radii_km=(1.0, 100.0))
+        self.assertEqual(rows[0]["capacity"], 0, "nothing is within 1 km")
+        self.assertGreater(rows[1]["capacity"], 0, "the corner is within 100 km")
+
+    def test_spacing_sets_how_many_fit(self):
+        mask = np.ones((400, 400), dtype=bool)
+        wide = ce.colocation_capacity(mask, self.WORLD, -10.05, -76.95,
+                                      radii_km=(5.0,), spacing_km=1.0)[0]
+        tight = ce.colocation_capacity(mask, self.WORLD, -10.05, -76.95,
+                                       radii_km=(5.0,), spacing_km=0.1)[0]
+        self.assertGreater(tight["capacity"], wide["capacity"] * 50,
+                           "ten times finer spacing is ~100x the positions")
+
+    def test_smallest_radius_reports_none_rather_than_guessing(self):
+        """`None` means 'not within the radii tried', which is not 'impossible'."""
+        mask = np.zeros((200, 200), dtype=bool)
+        self.assertIsNone(ce.smallest_radius_for(mask, self.WORLD, -10.0, -77.0,
+                                                 wanted=1, radii_km=(5.0, 10.0)))
+
+    def test_smallest_radius_is_the_first_that_suffices(self):
+        mask = np.ones((600, 600), dtype=bool)
+        radii = (2.0, 5.0, 10.0)
+        wanted = ce.colocation_capacity(mask, self.WORLD, -10.08, -76.92,
+                                        radii_km=(2.0,))[0]["capacity"]
+        got = ce.smallest_radius_for(mask, self.WORLD, -10.08, -76.92,
+                                     wanted=wanted, radii_km=radii)
+        self.assertEqual(got, 2.0, "it must not overshoot to a larger radius")

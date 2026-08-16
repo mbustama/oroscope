@@ -36,6 +36,7 @@ import numpy as np
 
 __all__ = ["load_run", "check_alignment", "read_world_file",
            "pixel_area_km2", "capacity_of", "main",
+           "colocation_capacity", "smallest_radius_for",
            "dem_for_run", "relief_for_mask", "elevation_for_mask", "geographic_extent"]
 import tifffile as tiff
 
@@ -391,6 +392,147 @@ def capacity_of(results):
         return int(results["results"]["total_capacity"])
     except (TypeError, KeyError, ValueError):
         return None
+
+
+def colocation_capacity(partner_mask, world, centre_lat, centre_lon,
+                        radii_km=(5.0, 10.0, 20.0, 40.0),
+                        spacing_km=1.0, grid_type="hex"):
+    """
+    How much partner ground lies within reach of a site, and what it could hold.
+
+    The question this answers is the deployment one rather than the site-finding one:
+    *given a site chosen for one experiment, is there enough ground nearby for the
+    other?* It is deliberately **not** an intersection. The joint mask is the ground both
+    experiments accept at the same pixel, and a partner array does not have to stand
+    there -- measured on the Cajatambo crop, the GRAND-viable ground inside the joint
+    mask was 22,577 fragments of which exactly one was large enough for a single 1 km
+    lattice cell, while 976 km2 of perfectly good GRAND ground lay within 20 km
+    (roadmap 6.52). **An optimiser pointed at the intersection reports the partner array
+    impossible; the site is fine.**
+
+    What couples two arrays is a shared line of sight to the same massif, not a shared
+    footprint. GRAND's own targets are 10-40 km away, so a partner antenna 20 km from a
+    TAMBO strip is still watching the same wall.
+
+    Parameters
+    ----------
+    partner_mask : ndarray
+        2-D boolean mask of the *other* experiment's viable ground, on the mask grid.
+    world : tuple of float
+        The six affine terms of that mask's world file, from :func:`read_world_file`.
+    centre_lat, centre_lon : float
+        The site to measure from, in degrees. A site's ``center_lat``/``center_lon``
+        from a results JSON is the usual source.
+    radii_km : iterable of float, optional
+        Distances to report, in km.
+    spacing_km : float, optional
+        Detector spacing of the partner array, in km. GRAND's is 1.0, TAMBO's 0.1.
+    grid_type : {'hex', 'square'}, optional
+        Lattice the partner array uses.
+
+    Returns
+    -------
+    list of dict
+        One entry per radius, ascending, with ``radius_km``, ``area_km2`` and
+        ``capacity``. ``capacity`` counts positions on an **anchored** lattice, as
+        :func:`~oroscope.site_searcher.count_grid_capacity` does, so it is an estimate
+        for an arbitrarily placed array rather than the best achievable packing.
+
+    Notes
+    -----
+    Distances are great-circle-free: a local flat approximation with the east-west
+    degree shrunk by the cosine of the site's latitude, which is what the rest of this
+    project uses and is good to much better than a pixel over the tens of kilometres
+    involved.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import combine_experiments as ce
+    >>> mask = np.ones((200, 200), dtype=bool)
+    >>> world = (1/3600, 0.0, 0.0, -1/3600, -77.0, -10.0)
+    >>> rows = ce.colocation_capacity(mask, world, -10.02, -76.98, radii_km=(2.0,))
+    >>> rows[0]["radius_km"]
+    2.0
+    >>> rows[0]["capacity"] > 0
+    True
+    """
+    mask = np.asarray(partner_mask, dtype=bool)
+    pixel_deg_x, _, _, pixel_deg_y, upper_left_x, upper_left_y = world
+
+    rows, cols = np.indices(mask.shape)
+    lat = upper_left_y + (rows + 0.5) * pixel_deg_y
+    lon = upper_left_x + (cols + 0.5) * pixel_deg_x
+    km_per_deg_lon = 111.32 * np.cos(np.radians(centre_lat))
+    distance_km = np.hypot((lat - centre_lat) * 111.32,
+                           (lon - centre_lon) * km_per_deg_lon)
+
+    cell_y = abs(pixel_deg_y) * 111.32 * 1000.0
+    cell_x = abs(pixel_deg_x) * km_per_deg_lon * 1000.0
+    per_pixel_km2 = (cell_y * cell_x) / 1.0e6
+
+    out = []
+    for radius in sorted(float(r) for r in radii_km):
+        near = np.ascontiguousarray(mask & (distance_km <= radius))
+        out.append({
+            "radius_km": radius,
+            "area_km2": float(near.sum()) * per_pixel_km2,
+            "capacity": int(ss.count_grid_capacity(
+                near, cell_y, cell_x, spacing_km * 1000.0,
+                1 if grid_type == "hex" else 0)),
+        })
+    return out
+
+
+def smallest_radius_for(partner_mask, world, centre_lat, centre_lon, wanted,
+                        spacing_km=1.0, grid_type="hex",
+                        radii_km=(2.0, 5.0, 10.0, 20.0, 30.0, 40.0, 60.0, 80.0)):
+    """
+    The nearest radius at which a partner array of ``wanted`` detectors fits.
+
+    A convenience over :func:`colocation_capacity` for the question actually asked of a
+    candidate site --- *how far would the partner array have to spread?* --- rather than
+    the table.
+
+    Parameters
+    ----------
+    partner_mask : ndarray
+        As :func:`colocation_capacity`.
+    world : tuple of float
+        As :func:`colocation_capacity`.
+    centre_lat, centre_lon : float
+        The site to measure from, in degrees.
+    wanted : int
+        Detectors the partner array needs.
+    spacing_km : float, optional
+        Partner detector spacing, in km.
+    grid_type : {'hex', 'square'}, optional
+        Partner lattice.
+    radii_km : iterable of float, optional
+        Radii to try, ascending.
+
+    Returns
+    -------
+    float or None
+        The smallest radius tried at which the capacity reaches ``wanted``, or ``None``
+        if none of them does. ``None`` means "not within the largest radius tried", not
+        "impossible".
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import combine_experiments as ce
+    >>> mask = np.ones((400, 400), dtype=bool)
+    >>> world = (1/3600, 0.0, 0.0, -1/3600, -77.0, -10.0)
+    >>> ce.smallest_radius_for(mask, world, -10.05, -76.95, 4, radii_km=(2.0, 5.0))
+    2.0
+    """
+    for row in colocation_capacity(partner_mask, world, centre_lat, centre_lon,
+                                   radii_km=radii_km, spacing_km=spacing_km,
+                                   grid_type=grid_type):
+        if row["capacity"] >= wanted:
+            return row["radius_km"]
+    return None
 
 
 def main():

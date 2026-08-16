@@ -2650,6 +2650,81 @@ rows must never be mixed."""),
         "..", "output", "cajatambo_full_combined", frame)), caption=caption)"""),
 ("md", """---
 
+## Co-locating the two arrays
+
+The searches answer *where each experiment could go*. Deployment asks something else:
+**given a site chosen for one, is there enough ground nearby for the other?**
+
+The tempting way to ask is "how much of the joint mask can host GRAND", and it gives the
+wrong answer. On the unbiased Cajatambo crop the GRAND-viable ground *inside* the joint
+mask is 22,577 fragments of which exactly **one** is large enough for a single 1 km
+lattice cell — while 976 km² of perfectly good GRAND ground lies within 20 km. An
+optimiser pointed at the intersection would call that site impossible.
+
+**A partner array does not have to stand on the joint mask.** What couples two arrays is
+a shared line of sight to the same massif, not a shared footprint — and GRAND's own
+targets are 10–40 km away, so an antenna 20 km from a TAMBO strip is watching the same
+wall. `ce.colocation_capacity` measures that directly."""),
+("code", """from oroscope import combine_experiments as ce
+
+OUTDIRS = {r: os.path.abspath(os.path.join("..", "output", f"{r}_full_grand"))
+           for r in ("arequipa", "ancash", "lima")}
+
+
+def best_tambo_site(region):
+    path = os.path.join(STORES[region], "tambo_results.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        sites = json.load(f)["results"]["sites"]
+    return max(sites, key=lambda s: s["capacity_exact"]) if sites else None
+
+
+print(f"{'region':<11}{'anchor TAMBO site':>19}{'GRAND within 10 km':>21}"
+      f"{'within 20 km':>15}{'within 40 km':>15}")
+for region in ("arequipa", "ancash", "lima"):
+    site = best_tambo_site(region)
+    if not site or not os.path.isdir(OUTDIRS[region]):
+        continue
+    run = ce.load_run(OUTDIRS[region])
+    rows = ce.colocation_capacity(run["mask"], run["world"],
+                                  site["center_lat"], site["center_lon"],
+                                  radii_km=(10.0, 20.0, 40.0), spacing_km=1.0)
+    caps = "".join(f"{r['capacity']:>15,}" for r in rows)
+    print(f"{region:<11}{site['capacity_exact']:>13,} units{caps[:21]}{caps[21:]}")"""),
+("md", """And the question a proposal actually asks — **how far would the partner array
+have to spread?**"""),
+("code", """WANTED = (100, 1000, 5000)
+print(f"{'region':<11}" + "".join(f"{'r for ' + str(w) + ' GRAND':>20}" for w in WANTED))
+for region in ("arequipa", "ancash", "lima"):
+    site = best_tambo_site(region)
+    if not site or not os.path.isdir(OUTDIRS[region]):
+        continue
+    run = ce.load_run(OUTDIRS[region])
+    cells = []
+    for want in WANTED:
+        r = ce.smallest_radius_for(run["mask"], run["world"], site["center_lat"],
+                                   site["center_lon"], want, spacing_km=1.0)
+        cells.append(f"{r:.0f} km" if r else "> 80 km")
+    print(f"{region:<11}" + "".join(f"{c:>20}" for c in cells))"""),
+("md", """**The answer is consistent across all three regions**, which is what makes it
+useful: about **10 km for 100 antennas, 20–30 km for 1,000, and 40–60 km for 5,000**.
+None of the three is limited by finding GRAND ground near a TAMBO site — the limit is
+simply that 1,000 antennas at 1 km spacing need 866 km², and steep country does not offer
+that within a few kilometres.
+
+Two caveats, and the first is the one to keep.
+
+**The anchor is each region's largest TAMBO site, and at ``4 / 5`` those capacities are
+badly understated** — 551, 726 and 990 units against 6,357 on the unbiased Cajatambo
+crop. The *locations* survive striding even where the capacities do not, so the radii
+above are sound while the "units" column is a floor.
+
+**The capacity is an anchored lattice**, laid from the region's bounding-box corner
+rather than fitted, so it is an estimate for an arbitrarily placed array. Fitting would
+do better."""),
+("md", """---
+
 ## The full explanation of each run
 
 Reproduced in full rather than summarised: the caveats matter as much as the totals, and
