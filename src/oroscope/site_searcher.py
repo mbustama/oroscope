@@ -38,6 +38,7 @@ import sys
 import numpy as np
 import tifffile as tiff
 import matplotlib.pyplot as plt
+import matplotlib.axes as maxes
 from matplotlib.patches import Ellipse, Polygon as MplPolygon
 from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
@@ -88,6 +89,8 @@ __all__ = [
     "preflight_memory", "emit_explanation", "resolve_config_paths",
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
     "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
+    "attach_colorbar", "resolve_settlements", "add_settlements",
+    "AREQUIPA_SETTLEMENTS", "LIMA_SETTLEMENTS", "SETTLEMENT_PRESETS",
 ]
 
 # Try to import psutil for RAM stats
@@ -1895,7 +1898,8 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
 def generate_visualizations_and_outputs(dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
                                         origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
                                         output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
-                                        min_altitude, max_altitude, region_name, final_params, run_info=None):
+                                        min_altitude, max_altitude, region_name, final_params, run_info=None,
+                                        settlements='auto'):
     """
     Step 6 Pipeline: Formats and exports all scientific products including geo-registered TIFs, KML models, 
     an annotated map graphic, and a serialized JSON summary of the run parameters and results 
@@ -2104,9 +2108,17 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         ax.set_ylabel("Latitude (°)")
         # The axes are pixels, so the bar needs the metric pixel size, not a latitude.
         add_scale_bar(ax, map_grid.cell_size_x * viz_ds / 1000.0)
-        cbar = plt.colorbar(im, ax=ax, fraction=0.035, pad=0.02, extend='min')
-        cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
+        attach_colorbar(fig, ax, im, 'Altitude (m)', extend='min')
         add_north_arrow(ax)
+
+        # Settlements, from the coordinates already curated in this file as RFI zones.
+        rows_px, cols_px = mask_viz_labeled.shape[:2]
+        south = origin_lat - rows_px * deg_viz
+        east = origin_lon + cols_px * deg_viz
+        places = resolve_settlements(settlements, (south, origin_lat, origin_lon, east))
+        add_settlements(ax, places,
+                        lambda lat, lon: ((lon - origin_lon) / deg_viz,
+                                          (origin_lat - lat) / deg_viz))
 
         # No title. Everything it carried is either on the figure already (the sites,
         # in the legend), in the run's own summary, or in the caption of whatever this
@@ -2114,12 +2126,13 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         #
         # The legend goes outside the axes for the same reason: it was a filled box
         # sitting on top of the data it describes, and on a dense map it hid whichever
-        # sites happened to be in the top right.
+        # sites happened to be in the top right. Above rather than below, so it is read
+        # before the map rather than after it.
         fs = 'small' if len(legend_labels) > 8 else 'medium'
         if legend_labels:
             ax.legend(legend_handles, legend_labels, fontsize=fs, framealpha=0.9,
-                      loc='upper left', bbox_to_anchor=(0.0, -0.06),
-                      ncol=max(1, min(3, len(legend_labels))), borderaxespad=0.0)
+                      loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=3,
+                      borderaxespad=0.0, columnspacing=1.6)
         
         img_name = os.path.join(run_output_dir, base_filename + "." + output_image_format.strip('.'))
         
@@ -2523,6 +2536,175 @@ def altitude_limits(elevation, low_percentile=0.5, high_percentile=99.8):
         lo = 0.0
     step = 100.0
     return (math.floor(lo / step) * step, math.ceil(hi / step) * step)
+
+
+# Named places already curated in this file, as the RFI exclusion zones. Reused rather
+# than sourced afresh, deliberately: these coordinates have been checked once and
+# inventing a second set from memory is how a map acquires a town in the wrong valley.
+# Cerro Verde is a mine rather than a settlement and is labelled as one.
+AREQUIPA_SETTLEMENTS = [
+    (-16.409, -71.537, "Arequipa"),
+    (-16.264, -71.956, "Majes"),
+    (-16.480, -71.930, "La Joya"),
+    (-17.015, -72.015, "Mollendo"),
+    (-16.533, -71.658, "Cerro Verde (mine)"),
+]
+LIMA_SETTLEMENTS = [
+    (-12.080, -77.010, "Lima"),
+    (-11.950, -76.680, "Chosica"),
+    (-11.850, -76.360, "Matucana"),
+    (-11.750, -76.220, "San Mateo"),
+    (-11.470, -76.630, "Canta"),
+    (-11.100, -77.600, "Huacho"),
+    (-13.060, -76.380, "Cañete"),
+    (-10.750, -77.750, "Barranca"),
+    (-12.480, -76.650, "Chilca"),
+    (-11.480, -77.200, "Huaral"),
+    (-11.560, -77.270, "Chancay"),
+]
+SETTLEMENT_PRESETS = {"arequipa": AREQUIPA_SETTLEMENTS, "lima": LIMA_SETTLEMENTS}
+
+
+def resolve_settlements(value, bounds=None):
+    """
+    Settlements to mark on a map: a preset name, an explicit list, or ``"auto"``.
+
+    ``"auto"`` picks whichever curated list has points inside the map, which is what a
+    reader wants without having to say so, and marks nothing when neither does rather
+    than guessing at a region the project has no coordinates for.
+
+    **No coordinates are invented here.** The lists are the named places already
+    curated as RFI zones; adding more means supplying them, not asking this function to
+    remember them.
+
+    Parameters
+    ----------
+    value : str, list, or None
+        ``"auto"``, a preset name, ``"none"``/``None``, or a list of
+        ``(latitude, longitude, name)``.
+    bounds : tuple, optional
+        ``(south, north, west, east)`` in degrees, used by ``"auto"``.
+
+    Returns
+    -------
+    list
+        ``(latitude, longitude, name)`` triples, possibly empty.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> [n for _, _, n in ss.resolve_settlements("arequipa")][:2]
+    ['Arequipa', 'Majes']
+
+    Auto picks the list with points on the map, and nothing when none has any:
+
+    >>> arequipa = (-17.5, -14.5, -73.6, -70.3)
+    >>> len(ss.resolve_settlements("auto", arequipa))
+    5
+    >>> ss.resolve_settlements("auto", (40.0, 42.0, 0.0, 2.0))
+    []
+    >>> ss.resolve_settlements(None)
+    []
+    """
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        return [tuple(s) for s in value]
+    key = value.lower()
+    if key in ("none", ""):
+        return []
+    if key in SETTLEMENT_PRESETS:
+        return list(SETTLEMENT_PRESETS[key])
+    if key != "auto" or bounds is None:
+        return []
+    south, north, west, east = bounds
+    best = []
+    for places in SETTLEMENT_PRESETS.values():
+        inside = [p for p in places if south <= p[0] <= north and west <= p[1] <= east]
+        if len(inside) > len(best):
+            best = inside
+    return best
+
+
+def add_settlements(ax, settlements, to_axes, fontsize=9):
+    """
+    Marks settlements, with their names, wherever they fall inside the axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final.
+    settlements : sequence
+        ``(latitude, longitude, name)`` triples.
+    to_axes : callable
+        ``to_axes(latitude, longitude) -> (x, y)`` in the axes' own units, so this
+        serves both the pixel-coordinate search map and the degree-coordinate overlay.
+    fontsize : int, optional
+        Label size.
+
+    Returns
+    -------
+    int
+        How many were drawn. Points outside the axes are skipped rather than clipped,
+        so a label cannot appear at the edge pointing at nothing.
+    """
+    if not settlements:
+        return 0
+    x0, x1 = sorted(ax.get_xlim())
+    y0, y1 = sorted(ax.get_ylim())
+    drawn = 0
+    for lat, lon, name in settlements:
+        x, y = to_axes(lat, lon)
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            continue
+        ax.plot([x], [y], marker="s", ms=5, mfc="#F2F2F2", mec="#1A1A1A",
+                mew=1.1, zorder=18, linestyle="none")
+        label = ax.annotate(name, (x, y), textcoords="offset points", xytext=(7, 3),
+                            fontsize=fontsize, color="#1A1A1A", zorder=19,
+                            annotation_clip=True)
+        label.set_path_effects([path_effects.Stroke(linewidth=2.6, foreground="white"),
+                                path_effects.Normal()])
+        drawn += 1
+    return drawn
+
+
+def attach_colorbar(fig, ax, mappable, label, width="2.6%", pad=0.12, **kwargs):
+    """
+    Adds a colour bar whose height matches the plot panel exactly.
+
+    ``fig.colorbar(..., fraction=...)`` sizes the bar as a fraction of the *figure*, so
+    on a map whose aspect is set by its data -- which every map here is -- the bar
+    overshoots the panel top and bottom by however much the axes shrank to fit. Taking
+    the space out of the axes' own divider instead ties the two together whatever the
+    aspect turns out to be.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure the axes belong to.
+    ax : matplotlib.axes.Axes
+        Axes to take the space from.
+    mappable : matplotlib.cm.ScalarMappable
+        What the bar describes.
+    label : str
+        Axis label for the bar.
+    width : str, optional
+        Bar width, as a percentage of the axes width.
+    pad : float, optional
+        Gap between panel and bar, in inches.
+    **kwargs
+        Passed to ``fig.colorbar`` -- ``extend``, for instance.
+
+    Returns
+    -------
+    matplotlib.colorbar.Colorbar
+    """
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    cax = make_axes_locatable(ax).append_axes("right", size=width, pad=pad,
+                                              axes_class=maxes.Axes)
+    cbar = fig.colorbar(mappable, cax=cax, **kwargs)
+    cbar.set_label(label, rotation=270, labelpad=15)
+    return cbar
 
 
 def add_north_arrow(ax, x=0.965, y=0.955, size=0.055):
@@ -3055,6 +3237,9 @@ def default_config(preset="default"):
         # The latter two need decay_response_csv, a two-column A(E) table.
         "decay_weight_by": "flux",
         "decay_response_csv": None,
+        # Named places to mark on the map: "auto" uses whichever curated list has
+        # points inside the DEM, or give a preset name, "none", or an explicit list.
+        "settlements": "auto",
         "score_percentile": None,
         "stop_at_target": False,
         "max_memory_gb": None,
@@ -3535,6 +3720,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_target_slope_deg=None, max_target_slope_deg=None,
                             max_range_km=None, score_percentile=None,
                             decay_weight_by='flux', decay_response_csv=None,
+                            settlements='auto',
                             stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
@@ -3981,6 +4167,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "max_range_km": max_range_km, "score_percentile": score_percentile,
         "decay_weight_by": decay_weight_by, "decay_response_csv": decay_response_csv,
+        "settlements": settlements,
         "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -4206,7 +4393,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                       "timings_sec": timings, "provenance": provenance,
                       "aperture": aperture_mod.summarize_sites(
                           site_details, min_dist_km * 1000.0, max_dist_km * 1000.0,
-                          np.logspace(0, 5, 26))}
+                          np.logspace(0, 5, 26))},
+            settlements=settlements,
         )
         timings["outputs"] = time.time() - t0
         print(f"      Time Elapsed: {timings['outputs']:.2f}s")
@@ -4365,6 +4553,12 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--settlements", type=str, default="auto",
+                        help="Named places to mark on the map. 'auto' (the default) "
+                             "uses whichever curated list has points inside the DEM, or "
+                             "give a preset ('arequipa', 'lima') or 'none'. The "
+                             "coordinates are the ones already curated as RFI zones; "
+                             "supply your own as a list in a config file to add more.")
     parser.add_argument("--decay_weight_by", type=str, default="flux",
                         choices=list(physics.DECAY_WEIGHTINGS),
                         help="What weights the spectrum-folded decay probability. "

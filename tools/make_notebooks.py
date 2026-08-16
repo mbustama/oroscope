@@ -778,6 +778,37 @@ list, and it is deliberately blunt."""),
 ]
 
 # --------------------------------------------------------------------------- 07
+SHOW_HELPER = """from IPython.display import Image, display
+
+
+def show_figure(path, width=1100, caption=None):
+    \"\"\"Displays a figure the pipeline wrote, downscaled so the notebook stays small.
+
+    The searcher saves its map to disk and says where; a notebook that only prints the
+    path makes the reader go and find it. Downscaled because the full-resolution PNG is
+    a megabyte or two and these outputs are committed.
+    \"\"\"
+    if not os.path.exists(path):
+        print(f"not here yet: {os.path.relpath(path)}")
+        return
+    try:
+        from PIL import Image as PILImage
+        import io as _io
+        img = PILImage.open(path)
+        if img.width > width:
+            img = img.resize((width, round(img.height * width / img.width)),
+                             PILImage.LANCZOS)
+        buf = _io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG", optimize=True)
+        data = buf.getvalue()
+    except Exception:                       # pillow absent: show it full size
+        with open(path, "rb") as f:
+            data = f.read()
+    if caption:
+        print(caption)
+    display(Image(data=data))"""
+
+
 NB07 = [
 ("md", """# 7. Explaining a run
 
@@ -909,6 +940,18 @@ with contextlib.redirect_stdout(log), contextlib.redirect_stderr(io.StringIO()):
 
 print(f"{len(log.getvalue().splitlines())} lines of output captured\\n")
 print("returned:", ", ".join(sorted(results)))"""),
+("md", """### The map it drew
+
+The run writes a GeoTIFF, a world file, a KML and a PNG map, and prints where it put
+them. Printing the path is not the same as showing the picture, so here it is — the
+same file, read back from disk."""),
+("code", SHOW_HELPER),
+("code", """import glob
+
+png = sorted(glob.glob(os.path.join(WORK, "run", "*.png")))
+show_figure(png[0] if png else os.path.join(WORK, "run", "missing.png"),
+            caption=f"{os.path.basename(png[0])} — altitude, the site outline, "
+                    f"a scale bar and north" if png else None)"""),
 ("md", """### Where a default comes from
 
 A parameter can state its default in three places — the function's signature,
@@ -1344,6 +1387,31 @@ interesting is not a survey**, and that is the gap this run exists to close.""")
     print("   TAMBO: bound by 'directions accepted' (kept 17.5%)")
 else:
     print("Run both searches to make this comparison.")"""),
+("md", """### The maps
+
+The store holds the numbers, not the rasters — a GeoTIFF of a 129 Mpx mask is far too
+large for a repository. But the PNG maps are in `output/`, and if you have run the
+searches locally they are worth looking at rather than reading about: the funnel says
+*how much* ground survived, the map says *where* it is.
+
+If `output/` is empty here, produce it with `python tools/run_arequipa_full.py`. The
+images below are stored in this notebook, so they are visible either way."""),
+("code", SHOW_HELPER),
+("code", """import glob
+
+OUT = os.path.abspath(os.path.join("..", "output"))
+for label, folder in (("GRAND", "arequipa_full_grand"),
+                      ("TAMBO", "arequipa_full_tambo")):
+    found = sorted(glob.glob(os.path.join(OUT, folder, "oroscope_results*.png")))
+    show_figure(found[0] if found else os.path.join(OUT, folder, "none.png"),
+                caption=f"{label} over the full Arequipa DEM")"""),
+("md", """And the overlay, which is the one worth dwelling on. Altitude is greyscale so the
+three categories are the only colours on the map; GRAND is outlined rather than filled
+because it covers most of the frame, and a wash over that much of a map hides
+everything underneath it. The magenta is the 50.2 km² both experiments accept."""),
+("code", """found = sorted(glob.glob(os.path.join(OUT, "arequipa_full_combined", "*.png")))
+show_figure(found[0] if found else os.path.join(OUT, "arequipa_full_combined", "none.png"),
+            caption="GRAND and TAMBO overlaid, with the co-located ground in magenta")"""),
 ("md", """## Every assumption behind these numbers
 
 A search produces authoritative-looking areas and detector counts, and the only defence

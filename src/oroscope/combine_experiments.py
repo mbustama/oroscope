@@ -411,6 +411,10 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--settlements", type=str, default="auto",
+                    help="Named places to mark on the overview: 'auto' (the default) "
+                         "uses whichever curated list has points inside the map, or "
+                         "give a preset name ('arequipa', 'lima') or 'none'.")
     ap.add_argument("--no_explain", action="store_false", dest="explain",
                     help="Skip the plain-language account of the overlay. It is printed "
                          "by default and saved as combination_explanation.txt: what each "
@@ -585,9 +589,12 @@ def main():
         ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
         ss.add_north_arrow(ax)
 
+        places = ss.resolve_settlements(
+            args.settlements, (extent[2], extent[3], extent[0], extent[1]))
+        ss.add_settlements(ax, places, lambda lat, lon: (lon, lat))
+
         if im is not None:
-            cbar = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
-            cbar.set_label("Altitude (m)", rotation=270, labelpad=15)
+            ss.attach_colorbar(fig, ax, im, "Altitude (m)")
 
         pct_a = 100.0 * both.sum() / max(masks[a].sum(), 1)
         pct_b = 100.0 * both.sum() / max(masks[b].sum(), 1)
@@ -600,11 +607,14 @@ def main():
         handles = [
             key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²", base_alpha),
             key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
-            key("#E8189B", f"Both — {joint_km2:,.1f} km²  "
+            # The parenthetical is the point of this entry: 50 km² means nothing until
+            # you know it is 0.1% of one experiment's ground and 45% of the other's.
+            key("#E8189B", f"Both — {joint_km2:,.1f} km² "
                            f"({pct_a:.1f}% of {a}, {pct_b:.1f}% of {b})"),
         ]
-        ax.legend(handles=handles, framealpha=0.9, fontsize="small",
-                  loc="upper left", bbox_to_anchor=(0.0, -0.07), borderaxespad=0.0)
+        ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=3,
+                  loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
+                  columnspacing=1.6)
         png = os.path.join(out_dir, "combined_overview.png")
         fig.savefig(png, dpi=140, bbox_inches="tight")
         plt.close(fig)

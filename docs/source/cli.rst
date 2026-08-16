@@ -497,6 +497,10 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.
+   * - ``--settlements``
+     - str
+     - ``auto``
+     - Named places to mark on the map. ``auto`` uses whichever curated list has points inside the DEM; or give a preset (``arequipa``, ``lima``), ``none``, or an explicit list of ``(latitude, longitude, name)`` in a configuration file. The bundled coordinates are the ones already curated as RFI exclusion zones, not a second set sourced separately.
    * - ``--decay_weight_by``
      - str
      - ``flux``
