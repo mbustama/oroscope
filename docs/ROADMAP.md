@@ -2301,6 +2301,37 @@ A test pins that, by asserting `tau_decay_length_m` is unchanged by a tenfold β
 ever does enter the search, the claim in the explanation becomes false and that test
 fails — which is the only way a statement like this stays true.
 
+### 6.39 Column depth is truncated by the walk, measured at 6.4× — and the fix has a cliff
+
+§9.3: "column depth is bounded by the walk unless `max_range_km` is set". The parameter
+already existed and defaults to `max_dist_km`, so the profile walk stops at the target
+rather than continuing through the rock behind it. What was missing was the size of the
+effect. TAMBO over the Colca crop, three walk lengths against an unchanged 2–5 km
+distance window:
+
+| `max_range_km` | sites | area km² | capacity | mean column depth g/cm² | directions accepted |
+| --- | --- | --- | --- | --- | --- |
+| 5 (the default) | 15 | 83.6 | 9,717 | 747,016 | 17.49% |
+| 20 | 15 | 83.6 | 9,717 | **4,765,107** | 17.49% |
+| 60 | **2** | **5.3** | **605** | 5,522,952 | **5.98%** |
+
+**The reported depth is a 6.4× under-report at the default**, and correcting it costs
+nothing: at 20 km the selection is byte-for-byte the same — 83,343 accepted pixels in
+both, the same 15 sites, the same 83.6 km². The walk was simply stopping before it had
+measured the thing it reports.
+
+**But the knob is not monotone and must not be maximised.** At 60 km the same run keeps
+5.98% of directions against 17.49%, and the result collapses to two sites. The mechanism
+is not yet identified — the mean horizon barely moves (+13.6° → +14.0°), so it is not
+simple distant blocking — and it is recorded here as measured behaviour rather than
+explained. Anyone raising `max_range_km` should check the funnel, not assume.
+
+The configurations are unchanged, deliberately: this is a reporting defect rather than a
+selection one, and changing them would restate the published numbers for a reason
+unrelated to the physics they describe. The run's own assumptions block now carries the
+measured factor and the warning about the cliff, so the depth is read as the lower bound
+it is.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

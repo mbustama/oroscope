@@ -1008,7 +1008,13 @@ def _section_assumptions(results):
         items.append(("max_range_km", "unset",
                       "Column depth accumulates over the whole profile walk, which "
                       "then stops at max_dist_km — so the reported depth is a property "
-                      "of where the walk stopped, not of the target's thickness."))
+                      "of where the walk stopped, not of the target's thickness. "
+                      "Measured on TAMBO at Colca: walking to 20 km instead of the "
+                      "5 km distance window raised the reported depth 6.4× and changed "
+                      "the selection not at all. Read this depth as a lower bound. "
+                      "Do not simply set it large, though — at 60 km the same run kept "
+                      "only 6.0% of directions against 17.5%, so the walk length is a "
+                      "parameter to check rather than to maximise."))
 
 
     for name, value, why in items:

@@ -369,7 +369,11 @@ obstacle: a pixel has one slope and both must accept it.
    geometric model to recover everything else.
 2. **`min_score` is the dominant assumption.** `--score_percentile` exists as the
    scale-free alternative; the configs still use the absolute cut. Consider switching.
-3. Column depth is bounded by the walk unless `max_range_km` is set.
+3. ~~Column depth is bounded by the walk unless `max_range_km` is set.~~ ✅ measured,
+   2026-08-16. It is a **6.4× under-report** at the default, and walking 4× the distance
+   window fixes it with an *identical* selection. But at 12× the same run keeps 6.0% of
+   directions against 17.5% and collapses — the knob is not monotone. Configs unchanged;
+   the run now reports the factor and the cliff. Roadmap §6.39.
 4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
 5. ~~β, the tau energy-loss constant, is an estimate.~~ ✅ configurable, 2026-08-16 —
    `physics.set_tau_energy_loss()`. Still wants a collaboration value, but adopting one
