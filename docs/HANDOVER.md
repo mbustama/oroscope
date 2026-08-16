@@ -6,7 +6,7 @@ Written to be fed to a fresh session. It assumes no memory of the previous one.
 A `site_search` symlink sits beside it for anything pointing at the old path; the owner
 knows about it and has chosen to keep it.
 
-**Branch:** `dev`, head **`e4df930`**, **not pushed**. `main` is 11 commits behind — the
+**Branch:** `dev`, head **`b70ef72`**, **not pushed**. `main` is 13 commits behind — the
 last merge was PR #4. **Tests:** 600, stdlib `unittest`, ~30 s. **CI:** 8 jobs.
 **Documentation:** <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
@@ -24,7 +24,7 @@ What follows is what is genuinely next, in the order I would take it.
 
 ### 1. Push `dev` and open the PR
 
-Four commits are sitting unpushed. Nothing else in this list should start before they
+Six commits are sitting unpushed. Nothing else in this list should start before they
 are on the remote.
 
 ```bash
@@ -80,7 +80,7 @@ the obvious approach assumes. Summary in §5 below; the whole thing is §6.47.
 
 ## 1. What the previous session did
 
-Four commits, `35d7814` → `e4df930`.
+Six commits, `35d7814` → `b70ef72`.
 
 **Four more animations**, taking `tools/make_animations.py` to eight (§6.45). The filter
 was whether the intermediate states carry the argument; six candidates were rejected
@@ -121,6 +121,16 @@ the frames can be walked exactly once.
 
 **The Peru-wide survey ran.** §6.46. 22,080 × 15,360 = 339 Mpx at 3 arc-seconds:
 **17 sites, 563,411 km², 633,655 antenna positions, in four minutes.** Caveats in §5.
+
+**Notebook 10** is that survey on its own, at the owner's request. It reads the stored
+run rather than repeating it, but everything else computes live — the memory table, the
+stride/closing table, the funnel, the area bracket, and the resolution check. **Unlike
+7, 8 and 9 it is executed in CI**: every cell needing the store is guarded and nothing
+else touches the filesystem outside the library, so on a bare runner it degrades to
+prose and arithmetic instead of failing. Verified by running it from an empty directory
+with no repo around it — the thing that would have broken there was a synthetic fallback
+importing from `../tests`, so it is built inline instead. Keep that property if you edit
+it.
 
 **The joint-realization question was answered.** §6.47, and §5 below.
 
@@ -256,6 +266,7 @@ of superseded material if room is ever needed.
 | `tools/make_animations.py` | Eight animations now. Adds `_colca_ground()` (real DEM or synthetic fallback), `write_mp4_with_stills()`, and the four new builders. |
 | `tools/make_notebooks.py` | Adds `NB09`. **Edit here, never the `.ipynb`.** |
 | `notebooks/09_animating_the_mechanism.ipynb` | Generated and executed. Excluded from CI execution. |
+| `notebooks/10_the_peru_survey.ipynb` | Generated and executed. **Not** excluded — it is written to survive a runner with no store. |
 | `src/oroscope/fetch_dem.py` | Adds the `peru` region (SRTMGL3), `--region`, `--output_dir`, `--config_dir`, `OPENTOPOGRAPHY_API_KEY`. No longer shells out to a `site_searcher.py` in the CWD — a pre-package leftover that broke it outside `src/`. |
 | `src/oroscope/site_searcher.py` | `preflight_memory` warns when the cap exceeds available memory and returns `cap_exceeds_available`. |
 | `config/grand_peru_survey.json` | **New.** The national survey. Every choice is commented with its reason. |
