@@ -6,9 +6,9 @@ Written to be fed into a fresh session. It assumes no memory of the previous one
 with a `site_search` symlink beside it for anything still pointing at the old path —
 **delete it when convenient.**
 
-**Branch:** `dev`. **Head at handover: `8c108b1`.** `main` contains everything on `dev`
-(merged as PR #2), so the two are level apart from merge commits.
-**Tests:** 541, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
+**Branch:** `dev`. **Head at handover: `e7ced77`.** `main` was last level at PR #3;
+everything since is on `dev` awaiting a PR.
+**Tests:** 595, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
 **Documentation:** live at <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
 `main` is protected by a repository ruleset: no direct push, no force-push, no deletion,
@@ -248,10 +248,11 @@ cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execut
 | `src/oroscope/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
 | `src/oroscope/figures.py` | The publication figures. **States the label convention** (§8.9). |
 | `src/oroscope/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
-| `tests/` | 541 tests across 14 files. `synthetic.py` builds terrain with closed-form answers. |
+| `tests/` | 595 tests across 14 files. `synthetic.py` builds terrain with closed-form answers. |
 | `tools/make_notebooks.py` | Generates the eight tutorials. **Edit here, not the `.ipynb`.** Only rewrites what changed. |
 | `tools/run_arequipa_full.py` | The full-DEM runner. §1. |
-| `results/arequipa_full/` | The committed store notebook 8 reads. Currently empty but for its README. |
+| `tools/make_animations.py` | Four animations of the mechanism, MP4 and GIF. |
+| `results/arequipa_full/` | The committed store notebook 8 reads. Populated 2026-08-16. |
 | `docs/source/cli.rst` | The command line, with the complete 82-option reference generated from the parser. |
 | `docs/source/assumptions.rst` | The blunt list of what the numbers rest on. |
 | `docs/ROADMAP.md` | ~2000 lines. The durable record. **Read §6.11, §6.12, §6.20–6.33.** |
