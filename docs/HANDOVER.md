@@ -282,8 +282,16 @@ obstacle: a pixel has one slope and both must accept it.
   **2.29×** at Colca, measured against a stride-1 control. Each run now reports the
   factor for itself: **2.19× for GRAND** — an independent check on that number, agreeing
   to 4% — but **0.53× for TAMBO**, whose 100 m element cannot bridge the gaps
-  `candidate_stride: 5` leaves. **TAMBO's area is therefore a lower bound, not an upper
-  one.** See §9.9.
+  `candidate_stride: 5` leaves.
+- **TAMBO's area is a lower bound by 4.75×, now measured** (roadmap §6.34). The stride-1
+  control at TAMBO settings separates the two effects the 0.53× conflated: acceptance is
+  unbiased (17.494% against 17.491%), closing alone inflates 1.17×, and the fragmentation
+  of a mask marked one pixel in five and closed with an element too small to reconnect it
+  costs **4.75×**. Read TAMBO's Colca area as **~397 km², not 83.6**, and its capacity as
+  **~45,856, not 9,717**. The full-DEM 111.9 km² is under-reported for the same reason
+  plus downsampling, and cannot be measured directly here (26.8M candidates, ~10 GiB).
+  GRAND is unaffected at either scale. Every run now warns when the element cannot outrun
+  the stride gap.
 - **`solid_angle` is the weakest score component at 15 of 15 TAMBO sites** and at GRAND's
   single site. The Colca result is set almost entirely by `solid_angle_half_sr`.
 - **TAMBO's capacity varies by 1.46× across a plausible spectral index**, having varied
@@ -297,7 +305,8 @@ obstacle: a pixel has one slope and both must accept it.
 | Slope depends on measurement baseline | median 17.8° at ~61 m, 10.8° at 1 km |
 | Morphological closing inflates area | **2.29×** at a 1 km element (stride-1 control) |
 | The same, from a run's own funnel | 2.19× GRAND, **0.53× TAMBO** (100 m element) |
-| Candidate striding | unbiased at a 1 km element; **untested at 100 m** |
+| Candidate striding, acceptance | unbiased at both elements: 60.1% vs 60.1% (GRAND), 17.491% vs 17.494% (TAMBO) |
+| Candidate striding, **area** | costs **4.75×** at a 100 m element, nothing at 1 km — the element must outrun the stride gap (154 m at stride 5) |
 | Capacity over-count, integer stamping | +7.4% at 1 km, **+58% at 100 m** — fixed |
 | Capacity over-count, bounding box vs region | **+38%** on a canyon network — fixed |
 | The ±3° window sits below the horizon almost everywhere | median horizon 7.3° |
@@ -368,8 +377,8 @@ obstacle: a pixel has one slope and both must accept it.
 8. ~~**The full Arequipa DEM.**~~ ✅ done, 2026-08-16. §1 and roadmap §6.26.
 
 **Software**
-9. **A stride-1 control at TAMBO settings.** Cheap, and it settles whether TAMBO's area is
-   a lower bound. §5.1.
+9. ~~**A stride-1 control at TAMBO settings.**~~ ✅ done, 2026-08-16. It is a lower bound
+   by **4.75×**. Roadmap §6.34; `config/tambo_colca_stride1.json`.
 10. **The config→pipeline translation is duplicated three times** — `main()`,
     `sensitivity.py`'s child process, and `tools/run_arequipa_full.py` each re-derive the
     same mapping (drop `print_info`, invert `require_sky`, tuple-ify the bands, resolve
@@ -378,9 +387,9 @@ obstacle: a pixel has one slope and both must accept it.
 11. **The pipeline resolves paths relative to the working directory**, so the bundled
     configs need `cd src`. Making them relative to the configuration file is the fix.
 12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
-13. **No release.** Nothing on PyPI. When publishing: PyPI does **not** render SVG, so the
-    project page needs a PNG of the logo even though GitHub and Sphinx are happy with the
-    vector.
+13. **No release.** Nothing on PyPI. The logo question is settled: it is a **PNG
+    everywhere** (1024×1024 RGBA), because PyPI does not render SVG and a project
+    carrying both formats eventually ships two different logos.
 
 ## 10. Open questions for the owner
 

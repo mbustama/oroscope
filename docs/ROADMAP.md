@@ -2085,8 +2085,72 @@ line actually needs it. **A library must not decide how its user's figures are
 rendered.** The same applied to `sensitivity`, which set `MPLBACKEND` at import for the
 benefit of its subprocesses.
 
-Still open for the release: PyPI does not render SVG, so the project page will need a
-PNG of the logo even though GitHub and Sphinx are happy with the vector.
+Settled for the release: the logo is a **PNG everywhere** — 1024×1024 RGBA, used by
+Sphinx's `html_logo`, by the README and by PyPI alike. PyPI does not render SVG, and
+carrying a vector for two of those and a raster for the third is how a project ends up
+shipping two different logos.
+
+### 6.34 The stride-1 control at TAMBO settings: acceptance is unbiased, area is not
+
+§9.9 asked whether TAMBO's area is a lower bound. It is, **by 4.75×**, and the reason is
+not the one the funnel's own closing factor suggested.
+
+`config/tambo_colca_stride1.json` is `tambo_colca_config.json` with `candidate_stride: 1`
+and nothing else moved. 26 seconds. Against the stride-5 run on the same crop:
+
+| | stride 5 | stride 1 | |
+| --- | --- | --- | --- |
+| directions accepted | **17.491%** | **17.494%** | unbiased, 0.017% apart |
+| accepted pixels | 83,343 (×5 = 416,715) | 416,776 | agree to 0.01% |
+| after gap closing | 222,658 | 486,322 | |
+| **area** | **83.6 km²** | **396.9 km²** | **4.75× under-report** |
+| sites | 15 | 29 | |
+| capacity | 9,717 | 45,856 | 4.72× |
+
+**Acceptance is unbiased and area is not, and the two facts are not in tension.**
+Striding decides which pixels are *tested*, and it tests a fair sample — 17.491 against
+17.494 is as close as this measurement gets. But it also decides which pixels are
+*marked*, and the mask is closed morphologically before any area is measured. Marking
+one pixel in five leaves gaps of 5 px; at Colca's 30.7 m that is **154 m**. TAMBO's
+closing element is `antenna_spacing_km` = 100 m, or 3.3 px. **A 100 m element cannot
+bridge a 154 m gap**, so the mask never reconnects: it stays a scatter of isolated
+pixels, most regions fall below `min_sub_array_size`, and the area collapses.
+
+GRAND's element is 1 km — 32 px against the same 154 m gap — which is why the earlier
+control found striding clean and why this went unnoticed for so long. The rule is one
+line: **the closing element must outrun the stride gap.**
+
+| | element | stride-5 gap | |
+| --- | --- | --- | --- |
+| GRAND | 1000 m (32.5 px) | 154 m | bridges |
+| TAMBO | 100 m (3.3 px) | 154 m | **cannot bridge** |
+
+`warn_stride_outruns_closing()` now checks this at the top of every run, printing the
+comparison and naming the three ways out (raise `gap_close_km`, lower
+`candidate_stride`, or read the area as a lower bound and say so). It is checked against
+both experiments in the doctests, since it is exactly the sort of guard that is wrong in
+the direction of silence.
+
+**What this means for the published numbers.** The mechanism was already named correctly
+— §5.1 said in as many words that TAMBO's 100 m element "cannot bridge the gaps
+`candidate_stride: 5` leaves". What was missing was its size, and the 0.53× figure
+standing in for it understated the problem badly. 0.53 is the *ratio of the closed
+stride-5 mask to the stride-corrected accepted count*, which folds the closing and the
+fragmentation into one number and so measures neither. Separated: closing alone inflates
+by **1.17×**, mildly, as it does everywhere; fragmentation costs **4.75×**. A reader
+seeing 0.53 would reasonably infer the area was low by about half. It is low by nearly a
+factor of five.
+
+So: **TAMBO's Colca area of 83.6 km² should be read as ~397 km², and its capacity of
+9,717 as ~45,856** — nine times its 5,000 target rather than twice. The full-DEM figure
+of 111.9 km² is under-reported for the same reason *and* by downsampling on top, and
+cannot be corrected by simply applying 4.75× (the full run also uses
+`downsample_factor: 4`). Measuring it directly is not possible on this machine: TAMBO at
+stride 1 over the full DEM is 26.8M candidates, which the corrected estimator puts near
+10 GiB. GRAND is unaffected throughout, at either scale.
+
+The joint area is affected as well, and in the direction that matters: it is limited by
+TAMBO's mask, so 50.1 km² at Colca is also a floor rather than an estimate.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

@@ -85,6 +85,7 @@ __all__ = [
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
     "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
     "preflight_memory", "emit_explanation",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
 ]
 
 # Try to import psutil for RAM stats
@@ -2388,6 +2389,98 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     return total / 1024 ** 3
 
 
+def stride_gap_m(candidate_stride, cell_size_y_m):
+    """
+    Distance between kept candidates, in metres, after striding.
+
+    ``candidate_stride`` subsamples the *list* of surviving pixels rather than the map,
+    so the gap it leaves is a stride's worth of pixels along a scanline.
+    """
+    return float(max(1, int(candidate_stride))) * float(cell_size_y_m)
+
+
+def closing_element_m(gap_close_km, antenna_spacing_km):
+    """Size of the morphological closing element in metres, defaulting as the pipeline does."""
+    km = antenna_spacing_km if gap_close_km is None else gap_close_km
+    return float(km) * 1000.0
+
+
+def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
+                                gap_close_km, antenna_spacing_km, quiet=False):
+    """
+    Warns when the closing element is too small to bridge the gaps striding leaves.
+
+    Striding is unbiased in *acceptance* -- measured at both scales, 60.1% against
+    60.1% for GRAND and 17.491% against 17.494% for TAMBO -- so it is tempting to treat
+    it as free. It is not. Accepted pixels are marked one in ``candidate_stride``, and
+    the mask is then closed morphologically before areas are measured. If the closing
+    element is smaller than the gap the stride leaves, the mask never reconnects: it
+    stays a scatter of isolated pixels, small regions fall below the size and capacity
+    thresholds, and the reported area collapses.
+
+    Measured at Colca with a 100 m element against a 154 m stride-5 gap: **83.6 km²
+    reported against 396.9 km² at stride 1, a 4.75x under-report**, with acceptance
+    identical to three decimal places. The same run at GRAND's 1 km element -- 32 px,
+    against the same 154 m gap -- is unaffected, which is why this went unnoticed.
+
+    The rule is simply that the element must outrun the gap. Raise ``gap_close_km``,
+    lower ``candidate_stride``, or accept the area as a lower bound and say so.
+
+    Parameters
+    ----------
+    candidate_stride : int
+        Keeps every Nth surviving pixel.
+    cell_size_y_m : float
+        Metric pixel size, N-S.
+    gap_close_km : float or None
+        Closing element in km. ``None`` defaults to ``antenna_spacing_km``.
+    antenna_spacing_km : float
+        Detector spacing, which the closing element defaults to.
+    quiet : bool, optional
+        Suppress the printed warning, keeping the returned verdict.
+
+    Returns
+    -------
+    dict or None
+        ``{"gap_m", "element_m", "ratio"}`` when the element cannot bridge the gap,
+        and ``None`` when it can.
+
+    Examples
+    --------
+    GRAND's 1 km element easily bridges a stride-5 gap at 30 m pixels:
+
+    >>> from oroscope import site_searcher as ss
+    >>> ss.warn_stride_outruns_closing(5, 30.72, None, 1.0, quiet=True) is None
+    True
+
+    TAMBO's 100 m element does not, and that is the 4.75x:
+
+    >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.1, quiet=True)
+    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
+    (154, 100, 1.54)
+
+    Closing disabled entirely is not this failure, so it does not warn:
+
+    >>> ss.warn_stride_outruns_closing(5, 30.72, 0.0, 0.1, quiet=True) is None
+    True
+    """
+    element = closing_element_m(gap_close_km, antenna_spacing_km)
+    if element <= 0.0:                    # closing switched off deliberately
+        return None
+    gap = stride_gap_m(candidate_stride, cell_size_y_m)
+    if element >= gap:
+        return None
+
+    if not quiet:
+        print(f"{C.WARN}{Icon.WARN}The closing element ({element:.0f} m) is smaller "
+              f"than the gap candidate_stride {int(candidate_stride)} leaves "
+              f"({gap:.0f} m). Accepted pixels will not reconnect, so the reported "
+              f"AREA will be an under-report while acceptance stays unbiased -- "
+              f"measured 4.75x at Colca on TAMBO's settings. Raise gap_close_km, "
+              f"lower candidate_stride, or read the area as a lower bound.{C.RESET}")
+    return {"gap_m": gap, "element_m": element, "ratio": gap / element}
+
+
 def apply_memory_cap(max_memory_gb):
     """
     Caps this process's address space, so a runaway fails instead of taking the machine.
@@ -3370,6 +3463,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
     print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
     print(f"   -> Candidate Stride: {C.MAGENTA}every {candidate_stride} px{C.RESET}")
+    warn_stride_outruns_closing(candidate_stride, cell_size_y,
+                                gap_close_km, antenna_spacing_km)
     _sb = f"{slope_baseline_m:.0f} m" if slope_baseline_m else "native DEM resolution"
     print(f"   -> Slope Baseline: {C.MAGENTA}{_sb}{C.RESET}")
     print(f"   -> Memory: Tile Size {C.MAGENTA}{tile_size}x{tile_size} px{C.RESET}")
