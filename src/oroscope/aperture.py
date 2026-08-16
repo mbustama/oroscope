@@ -161,12 +161,12 @@ def scale_published_curve(values, target_units, published, target_spacing_km=Non
 
     Examples
     --------
-    >>> import numpy as np
+    Half the published detector count is half the aperture, at the same spacing:
+
     >>> from oroscope import aperture
-    >>> e, a = aperture.load_curve_csv("data/tambo_aperture_fig3.csv")
-    >>> scaled = aperture.scale_published_curve(a, 2500, "tambo_aperture_fig3")
-    >>> round(float(scaled.max() / a.max()), 3)
-    0.5
+    >>> published = [10.0, 100.0, 1000.0]
+    >>> aperture.scale_published_curve(published, 2500, "tambo_aperture_fig3")
+    array([  5.,  50., 500.])
     """
     factor = array_scale_factor(target_units, published, target_spacing_km)
     return np.asarray(values, dtype=np.float64) * factor
@@ -209,16 +209,18 @@ def absolute_from_published(results, curve_path, published, target_spacing_km=No
 
     Examples
     --------
-    >>> import json
+    Paths are resolved by the caller, so this example builds one from the package's own
+    location rather than from the working directory -- the test job runs from ``tests/``:
+
+    >>> import os
     >>> from oroscope import aperture
-    >>> with open("results/huaylas_full/tambo_results.json") as f:
-    ...     res = json.load(f)
-    >>> out = aperture.absolute_from_published(
-    ...     res, "data/tambo_aperture_fig3.csv", "tambo_aperture_fig3")
-    >>> out["units"]
-    'm^2 sr'
-    >>> out["scale_factor"] > 0
-    True
+    >>> repo = os.path.dirname(os.path.dirname(os.path.dirname(aperture.__file__)))
+    >>> curve = os.path.join(repo, "data", "tambo_aperture_fig3.csv")
+    >>> results = {"results": {"total_capacity": 10000},
+    ...            "parameters": {"antenna_spacing_km": 0.15}}
+    >>> out = aperture.absolute_from_published(results, curve, "tambo_aperture_fig3")
+    >>> out["units"], round(out["scale_factor"], 3), out["detectors"]
+    ('m^2 sr', 2.0, 10000)
     """
     if isinstance(published, str):
         published = PUBLISHED_ARRAYS[published]
