@@ -3065,6 +3065,74 @@ every TAMBO area and capacity above is a lower bound by a terrain-dependent fact
 carry the bias equally; the absolute TAMBO numbers do not. Arequipa alone applies RFI
 zones, worth ~2.9% of its box, which is why Ancash and Lima are both held at `none`.
 
+### 6.52 A specific joint realization: what the code can answer today, and what it cannot
+
+The question, asked again and worth answering properly: **can the code lay out ~100 TAMBO
+units and ~10 GRAND antennas, co-located, at a chosen site?**
+
+**It can already answer the feasibility half, unchanged.** Three things exist today:
+
+1. :func:`~oroscope.site_searcher.count_grid_capacity` counts how many detectors of a
+   given spacing and lattice fit on any boolean mask. So *"does this ground hold 100 TAMBO
+   units?"* is a call, not a project.
+2. The per-role slope bands are already computed, so *"where could each experiment
+   stand?"* is a mask operation.
+3. `oroscope-combine` gives the joint, union and membership rasters the masks come from.
+
+So a **proposed** realization can be tested now. What cannot be done is **proposing** one:
+there is no routine that places N detectors well.
+
+**§6.47 measured this on the strided Colca joint mask. Repeated on the unbiased Cajatambo
+crop — 805.1 km² of joint ground, sixteen times Colca's — the conclusion survives and
+sharpens:**
+
+| ground inside the 805.1 km² joint mask | share | km² |
+| --- | --- | --- |
+| GRAND's band 3–25° only | 3.9% | 31.5 |
+| both bands, 20–25° | 10.9% | 87.8 |
+| **TAMBO's band 20–60° only** | **84.7%** | **682.1** |
+
+So **119.3 km² is GRAND-standable** — against Colca's 3.63 km², a very different number.
+The continuum limit is 138 antennas at 1 km hexagonal spacing. And yet:
+
+- The GRAND-standable ground inside the joint mask is **22,577 disconnected patches**.
+- The largest is **1.252 km²**, against the 0.866 km² one lattice cell occupies.
+- **Exactly one patch is large enough to hold a single antenna.**
+
+**The binding constraint is patch size, not area**, and it survives removing the sampling
+bias. A routine that reasons in total area would report 138 antennas where the ground
+holds one. This is the single most important thing to know before writing an optimiser.
+
+**What it would take, in order of difficulty.**
+
+1. **Retain the score raster.** :func:`~oroscope.scoring.score_candidates` computes a score
+   per candidate and only per-site aggregates reach the results file. Writing it out as a
+   raster aligned with the mask is a small change and unlocks everything below.
+2. **A placement routine.** With a score raster, greedy or blue-noise placement of N
+   detectors maximising summed score subject to a minimum spacing is straightforward —
+   **provided it is given a patch-aware feasibility test rather than an area budget.**
+3. **A real objective.** The score is a *ranking proxy*, not an event rate. Optimising it
+   is defensible but it is not maximising detected neutrinos, which needs the differential
+   acceptance `A(E)` — still the outstanding physics ask (§9.1), and still unsafe to infer
+   (§6.42).
+
+**Two design points worth settling before any of that.**
+
+**Optimise over the union, never the intersection.** The joint mask is TAMBO ground that
+GRAND's region happens to enclose. An optimiser pointed at it will place the TAMBO units
+easily and then report that the GRAND antennas cannot be placed at all — which is true of
+the intersection and false of the site. At Colca the GRAND-deployable ground sat a median
+0.92 km away, well inside one GRAND cell.
+
+**The coupling term is shared line of sight, not shared footprint.** What makes a pairing
+joint is that both arrays watch the same wall. That is a property the arrival scan already
+computes per candidate and the combination step currently discards. Recovering it is
+probably a better first move than the optimiser itself, because it is what an optimiser
+would need as its objective.
+
+Not implemented, and deliberately so: the measurement above says a naive formulation
+would give a confidently wrong answer.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
