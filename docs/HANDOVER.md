@@ -6,7 +6,7 @@ Written to be fed to a fresh session. It assumes no memory of the previous one.
 A `site_search` symlink sits beside it for anything pointing at the old path; the owner
 knows about it and has chosen to keep it.
 
-**Branch:** `dev`, head **`b70ef72`**, **not pushed**. `main` is 13 commits behind — the
+**Branch:** `dev`, head **`d333841`**, pushed. `main` is 14 commits behind — the
 last merge was PR #4. **Tests:** 600, stdlib `unittest`, ~30 s. **CI:** 8 jobs.
 **Documentation:** <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
@@ -22,15 +22,17 @@ hand the merge command to the owner. Do not try to work around it.
 The previous session's four asks are all **delivered**. Nothing below is half-finished.
 What follows is what is genuinely next, in the order I would take it.
 
-### 1. Push `dev` and open the PR
+### 1. Open the PR
 
-Six commits are sitting unpushed. Nothing else in this list should start before they
-are on the remote.
+`dev` is pushed and there is no open PR for it. Seven commits are waiting to land.
 
 ```bash
-git push origin dev
 GIT_CONFIG_NOSYSTEM=1 gh pr create --base main --head dev --title "..." --body-file -
 ```
+
+Then report the green checks and hand the merge command to the owner — you cannot merge
+it yourself (see the note above). Watch for the docs-job flake in Trap 10 before
+concluding anything is broken.
 
 ### 2. `tau_exit_probability` under-resolves its own integral — decide whether to fix it
 
@@ -253,6 +255,18 @@ are photographic and PNG made notebook 8 4.2 MB. Notebook 9's stills use the sam
 **Trap 9 — a killed run leaves orphans.** The crashed search left two 339 MB
 `buffer_*.npy` scratch files and an output directory mixing two runs' artefacts. Check
 `output/<run>/` for `buffer_*.npy` and for mismatched timestamps before trusting it.
+
+**Trap 10 — a red CI docs job may be a network flake, not a code bug.** Sphinx runs with
+`-W`, and intersphinx fetches an inventory per entry in `intersphinx_mapping` over the
+network. One unreachable host emits one warning and exits 1, with the real cause buried a
+hundred lines above `build finished with problems, 1 warning`. **Before investigating,
+grep the log for `failed to reach any of the inventories`.**
+
+This bit twice on 2026-08-16, both times on `docs.scipy.org`. Fixed by removing the scipy
+entry, which nothing referenced — no role in `docs/source` or `src/` resolved against it,
+and the only mention of the name was a plain-text dependency row. `numpy` and `python`
+stay, because docstring type fields do resolve against them; if either flakes the same
+way, cache the inventory rather than removing it.
 
 **Disk** was at 99% at one point this session and is now ~14 GB free. `old/` holds 3.5 GB
 of superseded material if room is ever needed.

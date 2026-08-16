@@ -93,10 +93,18 @@ bibtex_bibfiles = ['refs.bib']
 # Only the inventories actually cross-referenced. Each one costs a network round trip
 # per build, and a fetch that fails is a warning, which the -W build treats as fatal.
 intersphinx_timeout = 10
+# Each entry is an inventory fetched over the network on every build, and the build runs
+# with -W, so one unreachable host fails it. scipy was listed and referenced by nothing:
+# no :mod:/:func:/:class: role in docs/source or src/ resolves against it, and the only
+# mention of the name anywhere is as a plain-text dependency row in installation.rst. It
+# cost a fetch per build and failed two runs in a row on 2026-08-16 when docs.scipy.org
+# timed out from the runner. Removed rather than worked around.
+#
+# numpy and python stay because docstring type fields do resolve against them. If either
+# starts flaking the same way, the fix is a cached inventory rather than another removal.
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'numpy': ('https://numpy.org/doc/stable', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy', None),
 }
 
 # Keep the source order of the routines, which groups them the way the pipeline runs,
