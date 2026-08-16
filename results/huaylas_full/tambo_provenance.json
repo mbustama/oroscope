@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-08-16T17:21:25.984199",
+    "timestamp": "2026-08-16T17:51:18.522902",
     "git": {
-        "commit": "5c20b3ab5af7067ccd073428f9043d25537d1015",
+        "commit": "eadcdb1845ef3001526fd62538ecf7bd59514563",
         "branch": "dev",
         "dirty": true
     },
@@ -29,5 +29,5 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_full_dem.py --region huaylas --max-memory-gb 5.5"
+    "command": "tools/run_full_dem.py --region huaylas --only tambo --max-memory-gb 7.0"
 }

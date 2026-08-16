@@ -660,6 +660,49 @@ class TestLibraryParity(unittest.TestCase):
         self.assertFalse(report["cap_exceeds_available"],
                          "no cap applied means nothing to warn about")
 
+    def test_the_preflight_counts_the_map_as_well_as_the_search(self):
+        """
+        Three runs in one session finished their searches and then died drawing the
+        picture — the JSON and the GeoTIFF already written, only the map lost. A
+        pre-flight that models the search alone sizes a cap that cannot survive the run.
+        """
+        viz = ss.estimate_visualisation_memory_gb(3961, 2881, 1)
+        self.assertGreater(viz, 0.5, "a 2.85 Mpx viz raster costs more than half a GiB")
+        # It renders at downsample_factor * 2, so the cost falls as its square.
+        self.assertLess(ss.estimate_visualisation_memory_gb(3961, 2881, 4), viz)
+
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "viz.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        with quiet():
+            report = ss.preflight_memory(dem, max_memory_gb=0)
+        self.assertGreater(report["visualisation_gb"], 0.0)
+        self.assertAlmostEqual(report["estimate_gb"],
+                               report["search_gb"] + report["visualisation_gb"],
+                               places=6, msg="the reported total must be the sum")
+
+    def test_the_preflight_can_refuse_instead_of_merely_warning(self):
+        """
+        Warning is what it did while three runs died anyway. ``refuse=True`` is the
+        gate, and it fires before anything is allocated.
+        """
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "refuse.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        real = ss.available_memory_gb
+
+        ss.available_memory_gb = lambda: 0.001          # anything is too much
+        try:
+            with self.assertRaises(MemoryError):
+                with quiet():
+                    ss.preflight_memory(dem, max_memory_gb=0, refuse=True)
+            with quiet():                                # the default still only warns
+                ss.preflight_memory(dem, max_memory_gb=0)
+        finally:
+            ss.available_memory_gb = real
+
     def test_the_preflight_survives_a_dem_it_cannot_measure(self):
         with quiet():
             report = ss.preflight_memory("nonexistent.tif", max_memory_gb=0)

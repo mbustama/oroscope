@@ -2948,6 +2948,53 @@ crop's own 855.1 km².
 Stored in `results/huaylas_full/`, controls included, with
 `config/{grand,tambo}_huaylas.json` and their `_control` counterparts.
 
+### 6.50 The memory pre-flight modelled the search and not the map, and the map is what kept dying
+
+Three runs in one session finished their searches and then died drawing the picture,
+having already written the JSON and the GeoTIFF — Peru at a 7.0 GiB cap, the Huaylas
+combination at 5.5, the Huaylas TAMBO run at 5.5 and again at 6.0 and 7.0. A fourth,
+given `max_memory_gb 0`, took the machine down.
+
+`estimate_peak_memory_gb` models the candidate and scoring arrays, which is what §6.26a
+calibrated it on and what a *search* allocates. The map is a separate peak landing on top
+of them at the very end. It renders at `viz_ds = downsample_factor * 2`, so its raster is
+`rows/(2d) × cols/(2d)` — at `downsample_factor` 1 on the Huaylas crop that is
+1,981 × 1,441, exactly the array in the failure message.
+
+Measured, shading through `LightSource.shade` and saving at 150 dpi:
+
+| viz raster | peak RSS above idle |
+| --- | --- |
+| 700 × 500 (0.35 Mpx) | 126 MB |
+| 1400 × 1000 (1.4 Mpx) | 263 MB |
+| 1981 × 1441 (2.85 Mpx) | 539 MB |
+| 2800 × 2000 (5.6 Mpx) | 959 MB |
+
+**~190 bytes per viz pixel**, plus ~130 MB of matplotlib import and canvas.
+`estimate_visualisation_memory_gb` carries both, `preflight_memory` adds it to the search
+term and reports the split, and `preflight_memory(refuse=True)` now **raises rather than
+warns** above `REFUSE_FRACTION` (0.8) of available. `tools/run_full_dem.py` passes
+`refuse=True` on a real run and **rejects `--max-memory-gb 0` outright**.
+
+**And the estimator is about 2× optimistic at `candidate_stride` 1.** Measured on the
+Huaylas TAMBO run by polling `/proc/<pid>/status`:
+
+| | estimate | measured |
+| --- | --- | --- |
+| search + map | 3.27 GiB | — |
+| peak RSS | — | **5.31 GiB** |
+| peak virtual (what `RLIMIT_AS` caps) | — | **6.51 GiB** |
+
+So a cap set from the estimate is roughly half what the run needs at stride 1, which is
+why 5.5, 6.0 and 7.0 all failed on the map while the search itself completed every time.
+§6.26a calibrated the estimator on a *strided* run; nothing has calibrated it at stride 1,
+and this is the one data point. **Treat the estimate as a lower bound, and size a cap
+from measurement when the sampling is unusual.** The proper fix is a second calibration
+point at stride 1 and a corrected `n_scoring_arrays`; not done.
+
+The map for that run was never produced. It is not needed: `--reveal` on the combination
+already renders TAMBO alone for the same crop, which is what notebook 10 shows.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

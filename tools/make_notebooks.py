@@ -2339,6 +2339,26 @@ practice, unbounded — 4.75× at Colca, 291× here. Quote TAMBO numbers from un
 or quote them as "at least". The Callejón de Huaylas was effectively invisible to the
 department run: its TAMBO mask contributes **1.2 km² inside this crop window** against
 the crop's own 855.1 km²."""),
+("md", """### The zoom-in, drawn
+
+The crop's own maps. `--reveal` writes the combination one experiment at a time, so the
+same frame can be read three ways: GRAND alone, TAMBO alone, and the ground that
+satisfies both. Everything that is not a category — terrain, colour bar, roads, towns,
+scale bar — is identical between them."""),
+("code", """CROP_OUT = os.path.abspath(os.path.join("..", "output", "huaylas_full_combined"))
+for frame, caption in (
+        ("combined_overview_1_grand.png",
+         "GRAND over the crop — one site, 8,295 km²"),
+        ("combined_overview_2_tambo.png",
+         "TAMBO over the crop at stride 1 — 109 sites along the Río Santa"),
+        ("combined_overview_3_both.png",
+         "Both — 637 km² of joint ground, 74.5% of TAMBO's mask")):
+    show_figure(os.path.join(CROP_OUT, frame), caption=caption)"""),
+("md", """**And the same TAMBO search at the department run's sampling**, for the
+comparison the numbers above make. One picture is 109 sites; the other is one."""),
+("code", """show_figure(os.path.abspath(os.path.join(
+                "..", "output", "huaylas_ctl_tambo", "oroscope_results_huaylas.png")),
+            caption="TAMBO on the same crop at downsample 4 / stride 5 — the control")"""),
 ("md", """---
 
 ## The full explanation of each run

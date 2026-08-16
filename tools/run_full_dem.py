@@ -239,10 +239,11 @@ def main():
     parser.add_argument("--max-memory-gb", type=float, default=None,
                         help="Address-space ceiling in GiB, passed to the pipeline. The "
                              "default (None) uses 80%% of what the system reports "
-                             "available, which is not enough on a machine whose desktop "
-                             "already holds half of RAM: this DEM needs about 6 GiB at "
-                             "the scoring stage. 0 disables the cap, which risks the OOM "
-                             "killer rather than a clean MemoryError -- prefer a number.")
+                             "available. Must stay BELOW available: RLIMIT_AS only "
+                             "protects the machine if it is reached before the kernel "
+                             "runs out, and above that line the OOM killer always gets "
+                             "there first. 0 is refused outright -- it removes the only "
+                             "backstop there is.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Report what the real run would cost, then stop without "
                              "starting a search, writing a file or touching the store. "
@@ -275,9 +276,17 @@ def main():
     downsample = max((int(c.get("downsample_factor") or 1) for c in sampling),
                      default=1)
     stride = max((int(c.get("candidate_stride") or 1) for c in sampling), default=1)
+    # refuse=True on the real run: this file has taken the machine down twice by
+    # warning and proceeding. A dry run allocates nothing, so it only reports.
+    if args.max_memory_gb == 0:
+        raise SystemExit(
+            "--max-memory-gb 0 disables the address-space cap, which is the only thing "
+            "between a runaway and the OOM killer. Pass a number below what is "
+            "available, or omit the flag for 80% of it.")
     report = ss.preflight_memory(dem, downsample_factor=downsample,
                                  candidate_stride=stride,
-                                 max_memory_gb=0, quiet=args.dry_run)
+                                 max_memory_gb=0 if args.dry_run else None,
+                                 quiet=args.dry_run, refuse=not args.dry_run)
     if args.dry_run:
         print(f"region:    {args.region}")
         print(f"DEM:       {os.path.relpath(dem, REPO)}")

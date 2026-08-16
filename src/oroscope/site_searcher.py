@@ -85,7 +85,8 @@ __all__ = [
     # Everything the command line can do, the library can do too: configuration
     # files, the memory pre-flight, and the run summary.
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
-    "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
+    "estimate_peak_memory_gb", "estimate_visualisation_memory_gb",
+    "apply_memory_cap", "available_memory_gb",
     "preflight_memory", "emit_explanation", "resolve_config_paths",
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
     "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
@@ -3122,8 +3123,69 @@ def available_memory_gb():
     return None                                          # pragma: no cover
 
 
+def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1):
+    """
+    Memory the map costs, in GiB, which is *not* what the search costs.
+
+    :func:`estimate_peak_memory_gb` models the candidate and scoring arrays and nothing
+    else, because those are what a search allocates. The map is a separate peak that
+    lands on top of them at the very end, and it is the stage that has actually been
+    failing: three runs in one session finished their searches and then died drawing the
+    picture, having written the JSON and the GeoTIFF first. A pre-flight that models only
+    the search will size a cap that cannot survive the run.
+
+    The map renders at ``viz_ds = downsample_factor * 2``, so its raster is
+    ``rows/(2d) x cols/(2d)``. Measured on this machine over 0.35 to 5.6 Mpx of viz
+    raster -- shading through ``LightSource.shade`` and saving at 150 dpi:
+
+    ======================  ================
+    viz raster              peak RSS above idle
+    ======================  ================
+    700 x 500  (0.35 Mpx)   126 MB
+    1400 x 1000 (1.4 Mpx)   263 MB
+    1981 x 1441 (2.85 Mpx)  539 MB
+    2800 x 2000 (5.6 Mpx)   959 MB
+    ======================  ================
+
+    which is ~190 bytes per viz pixel once matplotlib's own ~130 MB of import and canvas
+    is taken out. Both terms are carried here.
+
+    Parameters
+    ----------
+    rows, cols : int
+        Full-resolution DEM dimensions.
+    downsample_factor : int, optional
+        As the pipeline's. The map uses twice it.
+
+    Returns
+    -------
+    float
+        Estimated peak for the visualisation alone, in GiB.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1), 2)
+    0.63
+    """
+    d = max(1, int(downsample_factor or 1)) * 2
+    viz_pixels = (rows / d) * (cols / d)
+    return (MATPLOTLIB_FIXED_BYTES + VIZ_BYTES_PER_PIXEL * viz_pixels) / (1024 ** 3)
+
+
+# Measured, not assumed: see estimate_visualisation_memory_gb for the table.
+VIZ_BYTES_PER_PIXEL = 190.0
+MATPLOTLIB_FIXED_BYTES = 130 * 1024 ** 2
+
+# How much of what the system reports available a run may be estimated to need before
+# preflight_memory(refuse=True) stops it. Not 1.0: the estimate is rough, the desktop
+# moves under it, and the failure mode on the wrong side of this line is the OOM killer
+# choosing a victim by size rather than by fault.
+REFUSE_FRACTION = 0.8
+
+
 def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
-                     max_memory_gb=None, quiet=False):
+                     max_memory_gb=None, quiet=False, refuse=False):
     """
     Estimates what a search will need, says so, and caps the address space.
 
@@ -3181,19 +3243,31 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         pass
 
     have = available_memory_gb()
-    need = None
+    need = viz = None
     if rows and cols:
-        need = estimate_peak_memory_gb(rows, cols,
-                                       downsample_factor=int(downsample_factor or 1),
-                                       candidate_stride=int(candidate_stride or 5))
+        search = estimate_peak_memory_gb(rows, cols,
+                                         downsample_factor=int(downsample_factor or 1),
+                                         candidate_stride=int(candidate_stride or 5))
+        viz = estimate_visualisation_memory_gb(rows, cols,
+                                               int(downsample_factor or 1))
+        need = search + viz
         if not quiet:
             print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
+                  f" ({search:.1f} search + {viz:.1f} map)"
                   + (f", available {have:.1f} GiB" if have else ""))
-        if have and need > 0.8 * have and not quiet:
-            print(f"{C.WARN}{Icon.WARN}This search is estimated to need {need:.1f} GiB "
-                  f"against {have:.1f} GiB available. Raise downsample_factor "
-                  f"(memory scales as its inverse square) or crop the DEM. The estimate "
-                  f"is rough, so this is a warning rather than a refusal.{C.RESET}")
+        if have and need > REFUSE_FRACTION * have:
+            message = (f"This run is estimated to need {need:.1f} GiB "
+                       f"({search:.1f} for the search plus {viz:.1f} for the map) "
+                       f"against {have:.1f} GiB available. Raise candidate_stride, "
+                       f"which is the memory lever, or crop the DEM.")
+            if refuse:
+                raise MemoryError(
+                    message + " Refused before allocating anything: a run that reaches "
+                    "the OOM killer takes the session with it. Pass refuse=False to "
+                    "override, having decided the estimate is wrong.")
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}{message} The estimate is rough, so this is "
+                      f"a warning rather than a refusal.{C.RESET}")
 
     cap = max_memory_gb
     if cap is None:
@@ -3202,6 +3276,15 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         cap = 0.8 * have if have else None
     capped = bool(cap and apply_memory_cap(cap))
     over = bool(capped and have and cap > have)
+    if not capped and not quiet:
+        # The one setting with no backstop at all. It reads as a small convenience and
+        # it is not: with no RLIMIT_AS the OOM killer is the only thing left, and it
+        # chooses its victim by size rather than by fault. This session lost a machine
+        # to exactly this.
+        print(f"{C.WARN}{Icon.WARN}No address-space cap is in force"
+              f"{' (max_memory_gb=0)' if cap == 0 else ''}. Nothing will stop a runaway "
+              f"before the OOM killer does, and it may not pick this process."
+              f"{C.RESET}")
     if capped and not quiet:
         print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
               f" (max_memory_gb=0 disables)")
@@ -3212,7 +3295,8 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
               f"{have:.1f}, and if the search then does not fit, make it coarser "
               f"(raise --candidate_stride, which is the memory lever) rather than "
               f"raising the cap again.{C.RESET}")
-    return {"estimate_gb": need, "available_gb": have,
+    return {"estimate_gb": need, "search_gb": search if rows and cols else None,
+            "visualisation_gb": viz, "available_gb": have,
             "cap_gb": cap if capped else None, "capped": capped,
             "cap_exceeds_available": over}
 
