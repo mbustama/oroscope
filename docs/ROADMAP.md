@@ -2995,6 +2995,76 @@ point at stride 1 and a corrected `n_scoring_arrays`; not done.
 The map for that run was never produced. It is not needed: `--reveal` on the combination
 already renders TAMBO alone for the same crop, which is what notebook 10 shows.
 
+### 6.51 Three departments, one question: the answer tracks median slope, and the joint share does not move
+
+Lima completes the set. **Re-downloaded as SRTMGL1**, replacing the AW3D30 file that had
+been there: the three department runs are compared against one another, and a dataset
+difference would have sat inside every comparison as a confound indistinguishable from
+a difference in the ground. 10,886 × 9,638 = **104.9 Mpx**, same 1 arc-second grid,
+same `downsample_factor` 4 / `candidate_stride` 5, every transferable criterion copied.
+
+| | Arequipa | Ancash | Lima |
+| --- | --- | --- | --- |
+| Mpx | 128.6 | 68.6 | 104.9 |
+| **median slope** | **11.1°** | **23.0°** | **20.4°** |
+| in GRAND's 3–25° | 70.3% | 52.0% | 54.6% |
+| in TAMBO's 20–60° | 24.1% | 58.0% | 50.8% |
+| GRAND area km² | 88,527.5 | 43,091.2 | 51,677.6 |
+| GRAND capacity | 101,948 | 49,447 | 59,270 |
+| GRAND acceptance | 61.6% | 54.9% | 49.6% |
+| **GRAND per pixel** | 1.00× | **0.91×** | **0.72×** |
+| TAMBO sites | 26 | 35 | 40 |
+| TAMBO area km² | 111.9 | 174.9 | 190.9 |
+| TAMBO capacity | 9,024 | 14,290 | 15,775 |
+| **TAMBO per pixel** | 1.00× | **2.93×** | **2.09×** |
+| joint km² | 50.2 | 75.2 | 88.3 |
+| **joint as share of TAMBO's mask** | **44.9%** | **43.0%** | **46.2%** |
+
+**Two results, and the second is the more interesting.**
+
+**(1) The answer tracks median slope, in opposite directions for the two experiments.**
+Order the regions by steepness — Arequipa 11.1°, Lima 20.4°, Ancash 23.0° — and GRAND
+falls monotonically per pixel (1.00, 0.72, 0.91… not quite monotone, and Lima's dip below
+Ancash is worth a look) while TAMBO rises (1.00, 2.09, 2.93). Two regions could be a
+coincidence; three make it a property of the terrain rather than of the run. GRAND wants
+ground gentle enough to stand an array on and steep country keeps giving it cliffs;
+TAMBO wants exactly those cliffs.
+
+**(2) The joint region is a near-constant share of TAMBO's mask — but the constant
+depends on the sampling, and the strided value is not the real one.** Across the three
+department runs it is 44.9%, 43.0%, 46.2%, on terrain that could hardly differ more. That
+looks like a property, and §6.47 predicted it: the joint region is TAMBO-limited, so
+co-location costs GRAND almost nothing.
+
+**Then the two unbiased crops gave 74.5% (Huaylas) and 71.9% (Cajatambo).** Both at
+`downsample_factor` 1 / `candidate_stride` 1, both on ground inside one of the department
+boxes. So there are two constants, not one:
+
+| sampling | joint as share of TAMBO's mask |
+| --- | --- |
+| 4 / 5 — Arequipa, Ancash, Lima | 44.9%, 43.0%, **46.2%** |
+| 1 / 1 — Huaylas, Cajatambo | 74.5%, **71.9%** |
+
+**The unbiased number is the true one.** Striding fragments TAMBO's mask and leaves
+GRAND's untouched (§6.49), so the strided runs shrink the denominator's *quality* — what
+survives is the scattered remainder, which overlaps GRAND's blob less. Roughly **three
+quarters of TAMBO-viable ground is also GRAND-viable**, not four ninths.
+
+The invariance itself survives, and is the finding worth carrying: at fixed sampling the
+share barely moves across radically different terrain. But **quote ~72–75%, from the
+unbiased runs, and never mix the two rows.** A Jaccard index that moves while the share
+does not — 0.00057, 0.00174, 0.00170 for the departments against 0.075 and 0.138 for the
+crops — is TAMBO's mask growing, not the two experiments agreeing more.
+
+The full table is `results/region_comparison.md`, regenerated from the stores by
+`tools/compare_regions.py`, and notebook 11 computes the whole comparison live.
+
+**Caveats carried, unchanged.** All three department runs are strided and downsampled, so
+every TAMBO area and capacity above is a lower bound by a terrain-dependent factor —
+4.75× at Colca, **291× on the Huaylas crop** (§6.49). The ratios survive because all three
+carry the bias equally; the absolute TAMBO numbers do not. Arequipa alone applies RFI
+zones, worth ~2.9% of its box, which is why Ancash and Lima are both held at `none`.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

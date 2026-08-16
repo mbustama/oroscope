@@ -11,7 +11,9 @@ Every criterion is held fixed across regions except where a table says otherwise
 | --- | --- | --- | --- | --- |
 | arequipa | 1 arc-sec | 128.6 | 1.000× | SRTMGL1 |
 | ancash | 1 arc-sec | 68.6 | 0.533× | SRTMGL1 |
-| huaylas | 3 arc-sec | 11.4 | 0.089× | — |
+| cajatambo | 1 arc-sec (crop) | 8.3 | 0.065× | cropped from another region |
+| huaylas | 1 arc-sec (crop) | 11.4 | 0.089× | cropped from another region |
+| lima | 1 arc-sec | 104.9 | 0.816× | SRTMGL1 |
 
 ## The terrain, before any search
 
@@ -21,7 +23,9 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- |
 | arequipa | 11.1° | 70.3% | 24.1% |
 | ancash | 23.0° | 52.0% | 58.0% |
+| cajatambo | — | — | — |
 | huaylas | — | — | — |
+| lima | 20.4° | 54.6% | 50.8% |
 
 ## GRAND
 
@@ -29,7 +33,9 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | arequipa | 4 / 5 | 1 | 88,527.5 | 101,948 | 61.6% | 1.00× | 1.00× |
 | ancash | 4 / 5 | 1 | 43,091.2 | 49,447 | 54.9% | 0.91× | 0.91× |
+| cajatambo | 1 / 1 | 1 | 5,541.1 | 6,424 | 42.6% | — | — |
 | huaylas | 1 / 1 | 1 | 8,294.9 | 9,609 | 56.6% | — | — |
+| lima | 4 / 5 | 1 | 51,677.6 | 59,270 | 49.6% | 0.72× | 0.71× |
 
 *Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions. Per-pixel ratios are shown only where the sampling matches the baseline — otherwise they would measure the sampling rather than the ground.*
 
@@ -40,7 +46,9 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | arequipa | 4 / 5 | 26 | 111.9 | 9,024 | 9.7% | 1.00× | 1.00× |
 | ancash | 4 / 5 | 35 | 174.9 | 14,290 | 15.1% | 2.93× | 2.97× |
+| cajatambo | 1 / 1 | 97 | 1,119.2 | 129,359 | 21.0% | — | — |
 | huaylas | 1 / 1 | 109 | 855.1 | 98,696 | 14.0% | — | — |
+| lima | 4 / 5 | 40 | 190.9 | 15,775 | 12.9% | 2.09× | 2.14× |
 
 *Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions. Per-pixel ratios are shown only where the sampling matches the baseline — otherwise they would measure the sampling rather than the ground.*
 
@@ -51,9 +59,11 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- | --- |
 | arequipa | 50.2 | 0.00057 | 44.9% | 1.00× |
 | ancash | 75.2 | 0.00174 | 43.0% | 2.81× |
-| huaylas | 637.1 | 0.07484 | 74.5% | 143.04× |
+| cajatambo | 805.1 | 0.13751 | 71.9% | — |
+| huaylas | 637.1 | 0.07484 | 74.5% | — |
+| lima | 88.3 | 0.00170 | 46.2% | 2.16× |
 
-**The share of TAMBO's mask is the number to watch.** It has stayed near 44% across regions whose terrain could hardly differ more, which says the joint region is TAMBO-limited and that co-location costs GRAND almost nothing (ROADMAP §6.47). A Jaccard index that moves while that share does not is TAMBO's mask growing, not the two experiments agreeing more.
+**The share of TAMBO's mask is the number to watch, and it depends on the sampling.** At 4 / 5 it sits near 44% across regions whose terrain could hardly differ more; at 1 / 1 it is near 73%. **The unbiased value is the true one** -- striding fragments TAMBO's mask and leaves GRAND's untouched (ROADMAP 6.49), so what survives a strided run is the scattered remainder, which overlaps GRAND's blob less. Roughly three quarters of TAMBO-viable ground is also GRAND-viable. The invariance itself holds at fixed sampling, which is 6.47's point: the joint region is TAMBO-limited and co-location costs GRAND almost nothing. **Never mix the two rows.**
 
 
 ## What the sampling costs
@@ -78,10 +88,10 @@ Regions are downloaded as **bounding boxes**, and departments are not rectangles
 
 | regions | overlap km² | latitudes | longitudes | datasets |
 | --- | --- | --- | --- | --- |
-| ancash ∩ lima | 9,198 | -10.79…-10.23 | -78.08…-76.73 | SRTMGL1 vs AW3D30 |
+| ancash ∩ lima | 9,198 | -10.79…-10.23 | -78.08…-76.73 | SRTMGL1 vs SRTMGL1 |
 | ancash ∩ peru | 64,684 | -10.79…-8.05 | -78.66…-76.73 | SRTMGL1 vs SRTMGL3 |
 | arequipa ∩ peru | 118,225 | -17.39…-14.56 | -73.59…-70.09 | SRTMGL1 vs SRTMGL3 |
-| lima ∩ peru | 98,222 | -13.25…-10.23 | -78.08…-75.40 | AW3D30 vs SRTMGL3 |
+| lima ∩ peru | 98,222 | -13.25…-10.23 | -78.08…-75.40 | SRTMGL1 vs SRTMGL3 |
 
 Measured consequence: **37% of Ancash's joint ground (27.5 km² of 75.2) lies south of −10.45°**, in the corner of its box that reaches into Lima region. The largest joint patch in the whole Ancash run — 5.37 km² at −10.5866, −77.0729 — reverse-geocodes to **Gorgor, Cajatambo, Lima**, not Ancash. File results by box, read them by geography.
 

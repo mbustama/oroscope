@@ -185,10 +185,12 @@ for it.
      - The Cordillera Blanca and the Callejón de Huaylas. Run at the same resolution
        and criteria as Arequipa, so the two are directly comparable.
    * - ``lima``
-     - AW3D30, 30 m
+     - SRTMGL1, 30 m
      - 110 MB
-     - Coastal, and a useful contrast: the criteria that bind there are not the ones
-       that bind in the Andes.
+     - Coastal, and a useful contrast: desert shelf rising to the western Andean flank.
+       **SRTMGL1, not the AW3D30 it used to fetch** — the three department runs are
+       compared against one another, and a dataset difference would sit inside every
+       comparison as a confound.
    * - ``peru``
      - SRTMGL3, 90 m
      - 302 MB

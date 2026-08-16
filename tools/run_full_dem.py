@@ -72,6 +72,19 @@ REGIONS = {
         "dem": os.path.join(REPO, "input", "dem", "ancash_SRTMGL1.tif"),
         "expect": "~13 min for grand, under a minute for tambo (69 Mpx against 129)",
     },
+    "lima": {
+        "dem": os.path.join(REPO, "input", "dem", "lima_SRTMGL1.tif"),
+        "expect": "~20 min for grand, ~1 min for tambo (105 Mpx)",
+    },
+    # Cajatambo / upper Pativilca, cut from the LIMA DEM and run unbiased. It is where
+    # Lima's TAMBO sites are densest, and it is the same ground as the south-east corner
+    # of the Ancash box -- so running it from the Lima side also checks that two
+    # independently downloaded, differently aligned crops of one terrain agree.
+    "cajatambo": {
+        "dem": os.path.join(REPO, "input", "dem", "cajatambo.tif"),
+        "expect": "a few minutes each at stride 1",
+        "configs": "{experiment}_cajatambo.json",
+    },
     # A crop rather than a department, and the only one run unbiased: 11.4 Mpx is
     # small enough for downsample_factor 1 and candidate_stride 1, so neither the
     # ~30% area loss from downsampling nor the 4.75x from striding applies. Its

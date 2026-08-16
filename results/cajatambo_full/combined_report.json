@@ -1,0 +1,52 @@
+{
+  "runs": [
+    {
+      "label": "GRAND",
+      "dir": "output/cajatambo_full_grand",
+      "pixels": 5935984,
+      "area_km2": 5541.132432072892,
+      "reported_capacity": 6424,
+      "reported_sites": 1,
+      "area_in_joint_km2": 805.1223648628899,
+      "fraction_of_own_area_in_joint": 0.1452992460896121
+    },
+    {
+      "label": "TAMBO",
+      "dir": "output/cajatambo_full_tambo",
+      "pixels": 1198948,
+      "area_km2": 1119.1960165608482,
+      "reported_capacity": 129359,
+      "reported_sites": 97,
+      "area_in_joint_km2": 805.1223648628899,
+      "fraction_of_own_area_in_joint": 0.7193756526554946
+    }
+  ],
+  "pixel_area_km2": 0.0009334816994238683,
+  "joint_requires": [
+    "GRAND",
+    "TAMBO"
+  ],
+  "joint": {
+    "pixels": 862494,
+    "area_km2": 805.1223648628899
+  },
+  "union": {
+    "pixels": 6272438,
+    "area_km2": 5855.20608377085
+  },
+  "pairwise_overlap": {
+    "GRAND & TAMBO": {
+      "area_km2": 805.1223648628899,
+      "jaccard": 0.13750538466860893,
+      "fraction_of_GRAND": 0.1452992460896121,
+      "fraction_of_TAMBO": 0.7193756526554946
+    }
+  },
+  "membership_encoding": {
+    "description": "bit i is set where run i's mask is set",
+    "bits": {
+      "0": "GRAND",
+      "1": "TAMBO"
+    }
+  }
+}

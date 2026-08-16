@@ -223,11 +223,13 @@ def build():
         spec = DEM_REGIONS.get(r, {})
         mpx = (px[r] / 1e6) if px[r] else None
         ratio = (px[r] / px[BASELINE]) if (px[r] and px.get(BASELINE)) else None
-        L.append(row([r, "1 arc-sec" if spec.get("demtype", "").endswith("GL1")
-                      or spec.get("demtype") == "AW3D30" else "3 arc-sec",
-                      f"{mpx:,.1f}" if mpx else None,
+        demtype = spec.get("demtype")
+        grid = ("3 arc-sec" if demtype == "SRTMGL3"
+                else "1 arc-sec" if demtype
+                else "1 arc-sec (crop)")     # a crop has no REGIONS entry to read
+        L.append(row([r, grid, f"{mpx:,.1f}" if mpx else None,
                       f"{ratio:.3f}×" if ratio else None,
-                      spec.get("demtype")]))
+                      demtype or "cropped from another region"]))
 
     if any(data[r]["terrain"] for r in regions):
         L.append("\n## The terrain, before any search\n")
@@ -283,20 +285,16 @@ def build():
             c = data[r]["combined"]
             scale = (px[r] / px[BASELINE]) if (px[r] and px.get(BASELINE)) else None
             bc = base.get("combined") if base else None
+            same = data[r]["sampling"] == data[BASELINE]["sampling"]
             per = (f"{c['joint_km2'] / bc['joint_km2'] / scale:.2f}×"
-                   if (c and bc and scale and bc.get("joint_km2")) else None)
+                   if (c and bc and scale and same and bc.get("joint_km2")) else None)
             L.append(row([r,
                           f"{c['joint_km2']:,.1f}" if c else None,
                           f"{c['jaccard']:.5f}" if c and c.get("jaccard") else None,
                           f"{c['share_of_tambo']:.1f}%"
                           if c and c.get("share_of_tambo") else None,
                           per]))
-        L.append("\n**The share of TAMBO's mask is the number to watch.** It has stayed "
-                 "near 44% across regions whose terrain could hardly differ more, which "
-                 "says the joint region is TAMBO-limited and that co-location costs "
-                 "GRAND almost nothing (ROADMAP §6.47). A Jaccard index that moves "
-                 "while that share does not is TAMBO's mask growing, not the two "
-                 "experiments agreeing more.\n")
+        L.append("\n**The share of TAMBO's mask is the number to watch, and it depends on the sampling.** At 4 / 5 it sits near 44% across regions whose terrain could hardly differ more; at 1 / 1 it is near 73%. **The unbiased value is the true one** -- striding fragments TAMBO's mask and leaves GRAND's untouched (ROADMAP 6.49), so what survives a strided run is the scattered remainder, which overlaps GRAND's blob less. Roughly three quarters of TAMBO-viable ground is also GRAND-viable. The invariance itself holds at fixed sampling, which is 6.47's point: the joint region is TAMBO-limited and co-location costs GRAND almost nothing. **Never mix the two rows.**\n")
 
     L.append("\n## What the sampling costs\n")
     L.append("`huaylas` is a **crop**, not a department — the Rio Santa valley cut out "

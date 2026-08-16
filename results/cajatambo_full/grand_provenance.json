@@ -1,0 +1,33 @@
+{
+    "timestamp": "2026-08-16T18:31:17.492252",
+    "git": {
+        "commit": "da54705ddce2fffce7f22669605e71e84a944522",
+        "branch": "dev",
+        "dirty": true
+    },
+    "dem": {
+        "path": "/home/mbustamante/Research/GRAND/oroscope/input/dem/cajatambo.tif",
+        "sha256": "e42ee5e18d4805812b83bdfb0b9e288eb3948139b4cc13642cc1d4e424f30a4b",
+        "bytes": 16600690,
+        "cell_size_deg": 0.0002777777777778146,
+        "cell_size_y_m": 30.722222222226293,
+        "cell_size_x_m": 30.384571253123987,
+        "cell_size_source": "auto-detected from GeoTIFF"
+    },
+    "platform": {
+        "python": "3.12.12",
+        "system": "Linux 7.0.0-28-generic",
+        "cpu_count": 12
+    },
+    "packages": {
+        "numpy": "2.3.4",
+        "scipy": "1.16.3",
+        "numba": "0.62.1",
+        "tifffile": "2021.7.2",
+        "matplotlib": "3.10.6",
+        "tqdm": "4.67.1",
+        "psutil": "7.0.0",
+        "imagecodecs": "2024.9.22"
+    },
+    "command": "tools/run_full_dem.py --region cajatambo --max-memory-gb 6.0"
+}

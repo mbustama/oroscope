@@ -2389,6 +2389,292 @@ explanation(STORE, "grand_explanation.txt")"""),
 - **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — how much of
   any of this survives a change of assumption."""),
 ("md", footer(prev=("09_arequipa_dem.ipynb", "Arequipa, the full DEM"),
+              nxt=("11_lima_dem.ipynb", "Lima"))),
+]
+
+# --------------------------------------------------------------------------- 11  lima
+NB_LIMA = [
+("md", """# 11. Lima
+
+The third department, and the one that closes the set. [Arequipa](09_arequipa_dem.ipynb)
+is high plateau, [Ancash](10_ancash_dem.ipynb) is the Cordillera Blanca, and Lima is the
+coastal contrast — desert shelf rising to the western Andean flank, with the Cordillera
+Huayhuash in its north-east corner.
+
+Three regions, one question, every transferable criterion held fixed. This notebook is
+mostly about what the **three-way** comparison says, because a difference between two
+regions can be a coincidence and a trend across three is harder to dismiss."""),
+("code", """import glob
+import json
+import os
+
+import numpy as np
+
+from oroscope import site_searcher as ss"""),
+("md", """## One dataset for all three
+
+The Lima DEM used to be AW3D30 while Arequipa and Ancash were SRTMGL1. That would have
+put a **dataset difference inside every comparison**, indistinguishable from a difference
+in the ground, so Lima was re-downloaded as SRTMGL1 at the same 1 arc-second resolution.
+
+```bash
+export OPENTOPOGRAPHY_API_KEY=...
+cd src && oroscope-fetch-dem --region lima
+python -m oroscope.fetch_roads --dem ../input/dem/lima_SRTMGL1.tif --places
+
+python tools/run_full_dem.py --region lima --dry-run
+python tools/run_full_dem.py --region lima --max-memory-gb 6.0
+```"""),
+("code", """STORES = {name: os.path.abspath(os.path.join("..", "results", f"{name}_full"))
+          for name in ("arequipa", "ancash", "lima")}
+
+
+def load(region, label):
+    path = os.path.join(STORES[region], f"{label}_results.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+runs = {r: {e: load(r, e) for e in ("grand", "tambo")} for r in STORES}
+for r, table in runs.items():
+    got = [e for e, v in table.items() if v]
+    print(f"{r:<10} {', '.join(got) if got else 'NOT IN THE STORE YET'}")"""),
+("md", """## The configurations, diffed
+
+Same check as the Ancash notebook, extended to three. Anything that differs is either
+bookkeeping or is called out."""),
+("code", """def settings(path):
+    with open(path) as f:
+        return {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+
+
+for experiment in ("grand", "tambo"):
+    base = settings(os.path.join("..", "config", f"{experiment}_arequipa_full.json"))
+    print(f"{experiment.upper()}, against arequipa:")
+    for region in ("ancash", "lima"):
+        other = settings(os.path.join("..", "config",
+                                      f"{experiment}_{region}_full.json"))
+        differ = [k for k in sorted(set(base) | set(other))
+                  if base.get(k) != other.get(k)]
+        bookkeeping = {"dem_path", "region_name"}
+        real = [k for k in differ if k not in bookkeeping]
+        print(f"    {region:<9} {len(differ)} differ "
+              f"({len(differ) - len(real)} bookkeeping)"
+              + (f" -> {real}" if real else ""))"""),
+("md", """`rfi_zones` is the only real difference, and it is Arequipa that is the odd one
+out: it excludes five hand-curated circles around its own towns, and neither Ancash nor
+Lima has an equivalent list. Holding both at `none` keeps *those two* exactly comparable
+and leaves one stated caveat against Arequipa — its zones cover ~3,500 km² of a
+~120,000 km² box, so about 2.9%."""),
+("md", """## The terrain, before any search
+
+The same tiled slope profile the Ancash notebook uses, over all three."""),
+("code", """def slope_profile(tif, origin_lat, block=2048):
+    import tifffile
+    grid = ss.resolve_grid_geometry(tif, origin_lat)
+    z = tifffile.imread(tif)
+    hist = np.zeros(9001)
+    bands = {"GRAND 3-25": (3.0, 25.0), "TAMBO 20-60": (20.0, 60.0)}
+    counts = dict.fromkeys(bands, 0)
+    total = 0
+    for r0 in range(0, z.shape[0], block):
+        r1 = min(z.shape[0], r0 + block)
+        lo, hi = max(0, r0 - 1), min(z.shape[0], r1 + 1)
+        dy, dx = np.gradient(z[lo:hi].astype(np.float32),
+                             grid.cell_size_y, grid.cell_size_x)
+        slope = np.degrees(np.arctan(np.hypot(dy, dx)))[r0 - lo:r1 - lo]
+        s = slope[z[r0:r1] > 0]                    # the sea is exactly 0
+        if not s.size:
+            continue
+        total += s.size
+        hist += np.histogram(s, bins=9001, range=(0.0, 90.0))[0]
+        for name, (a, b) in bands.items():
+            counts[name] += int(((s >= a) & (s <= b)).sum())
+    return {"Mpx": z.size / 1e6,
+            "median slope": float((np.searchsorted(np.cumsum(hist), total / 2.0)
+                                   + 0.5) / 100.0),
+            **{k: 100.0 * v / total for k, v in counts.items()}}
+
+
+DEMS = {"arequipa": ("arequipa_SRTMGL1.tif", -14.5553),
+        "ancash": ("ancash_SRTMGL1.tif", -8.04958),
+        "lima": ("lima_SRTMGL1.tif", -10.2283)}
+terrain = {}
+for name, (stem, lat) in DEMS.items():
+    tif = os.path.abspath(os.path.join("..", "input", "dem", stem))
+    if os.path.exists(tif):
+        terrain[name] = slope_profile(tif, lat)
+
+if terrain:
+    cols = list(next(iter(terrain.values())))
+    print(f"{'':<10}" + "".join(f"{c:>15}" for c in cols))
+    for name, row in terrain.items():
+        print(f"{name:<10}" + "".join(f"{row[c]:>15.1f}" for c in cols))"""),
+("md", """## The three-way result"""),
+("code", """def summary(results):
+    if not results:
+        return None
+    r = results["results"]
+    sites = r.get("sites") or []
+    funnel = results.get("funnel") or {}
+    strided = next((v for k, v in funnel.items()
+                    if k.startswith("kept by stride")), None)
+    accepted = funnel.get("directions accepted")
+    return {"px": next(iter(funnel.values()), None),
+            "sites": r.get("total_sites"),
+            "area": sum(s.get("area_km2", 0.0) for s in sites),
+            "capacity": r.get("total_capacity"),
+            "acceptance": 100.0 * accepted / strided if accepted and strided else None}
+
+
+base_px = (summary(runs["arequipa"]["grand"]) or {}).get("px")
+for experiment in ("grand", "tambo"):
+    print(f"=== {experiment.upper()} ===")
+    print(f"{'region':<10}{'Mpx':>8}{'sites':>8}{'area km2':>12}"
+          f"{'capacity':>11}{'accept':>9}{'area /px':>11}")
+    ref = summary(runs["arequipa"][experiment])
+    for region in ("arequipa", "ancash", "lima"):
+        s = summary(runs[region][experiment])
+        if not s:
+            continue
+        scale = s["px"] / base_px if base_px else None
+        per = (f"{s['area'] / ref['area'] / scale:.2f}x"
+               if ref and scale and ref["area"] else "-")
+        print(f"{region:<10}{s['px'] / 1e6:>8.1f}{s['sites']:>8,}{s['area']:>12,.1f}"
+              f"{s['capacity']:>11,}{s['acceptance']:>8.1f}%{per:>11}")
+    print()"""),
+("md", """## Both at once, three ways"""),
+("code", """print(f"{'region':<10}{'joint km2':>12}{'jaccard':>11}{'share of TAMBO':>17}")
+for region in ("arequipa", "ancash", "lima"):
+    path = os.path.join(STORES[region], "combined_report.json")
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        report = json.load(f)
+    overlap = report["pairwise_overlap"]["GRAND & TAMBO"]
+    print(f"{region:<10}{report['joint']['area_km2']:>12,.1f}"
+          f"{overlap['jaccard']:>11.5f}"
+          f"{100 * overlap['fraction_of_TAMBO']:>16.1f}%")"""),
+("md", """**The share of TAMBO's mask is the invariant to watch.** It held near 44% across
+Arequipa and Ancash, whose terrain could hardly differ more. A third region is what turns
+that from a coincidence into a property of the two experiments: the joint region is
+TAMBO-limited, and co-location costs GRAND almost nothing.
+
+The full cross-region table, regenerated from the stores whenever a region is added, is
+in [`results/region_comparison.md`](../results/region_comparison.md) — produced by
+`python tools/compare_regions.py`."""),
+("md", """## The maps"""),
+("code", SHOW_HELPER),
+("code", """OUT = os.path.abspath(os.path.join("..", "output"))
+for label, title in (("grand", "GRAND over Lima"), ("tambo", "TAMBO over Lima")):
+    found = sorted(glob.glob(os.path.join(OUT, f"lima_full_{label}",
+                                          "oroscope_results*.png")))
+    show_figure(found[0] if found else os.path.join(OUT, "missing.png"), caption=title)"""),
+("code", """for frame, caption in (("combined_overview_1_grand.png", "GRAND alone"),
+                       ("combined_overview_2_tambo.png", "TAMBO alone"),
+                       ("combined_overview_3_both.png", "Both — the joint ground")):
+    show_figure(os.path.join(OUT, "lima_full_combined", frame), caption=caption)"""),
+("md", """---
+
+## Zooming in: Cajatambo and the upper Pativilca
+
+Lima's TAMBO sites are not spread evenly. Seventeen of the forty, including the largest,
+sit in the north-west corner around Cajatambo — **the same ground the Ancash box reaches
+into from the other side**, where the largest joint patch of the whole Ancash run turned
+out to be (notebook 10). So this crop does two jobs: it is Lima's densest TAMBO ground,
+and running it from the Lima side checks that two independently downloaded, differently
+aligned crops of one terrain agree.
+
+8.3 Mpx, so it runs unbiased at `downsample_factor` 1 / `candidate_stride` 1:
+
+```bash
+cd src && oroscope-crop ../input/dem/lima_SRTMGL1.tif ../input/dem/cajatambo.tif \
+    --north -10.30 --south -11.10 --west -77.60 --east -76.80
+python tools/run_full_dem.py --region cajatambo --max-memory-gb 6.0
+```"""),
+("code", """CROP = os.path.abspath(os.path.join("..", "results", "cajatambo_full"))
+
+print(f"{'':<34}{'sites':>8}{'area km2':>12}{'capacity':>12}")
+for label in ("grand", "tambo"):
+    for tag, store in ((f"{label.upper()}, Lima department (4/5)", STORES["lima"]),
+                       (f"{label.upper()}, Cajatambo crop (1/1)", CROP)):
+        path = os.path.join(store, f"{label}_results.json")
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            r = json.load(f)["results"]
+        sites = r.get("sites") or []
+        print(f"{tag:<34}{r['total_sites']:>8,}"
+              f"{sum(x.get('area_km2', 0.0) for x in sites):>12,.1f}"
+              f"{r['total_capacity']:>12,}")"""),
+("md", """**The crop alone finds six times the TAMBO area of the entire Lima department
+run, and eight times the detector positions — from 8% of its pixels.** That is not new
+terrain; it is the same terrain measured without striding and downsampling, and it is the
+291× of notebook 10 arriving independently on different ground.
+
+It also revises something. The joint region's share of TAMBO's mask sat near 44% across
+all three department runs, which looked like a constant of the two experiments."""),
+("code", """print(f"{'':<28}{'sampling':>10}{'joint km2':>12}{'share of TAMBO':>17}")
+for tag, store, samp in (("Arequipa", STORES["arequipa"], "4 / 5"),
+                         ("Ancash", STORES["ancash"], "4 / 5"),
+                         ("Lima", STORES["lima"], "4 / 5"),
+                         ("Huaylas crop", os.path.abspath(os.path.join(
+                             "..", "results", "huaylas_full")), "1 / 1"),
+                         ("Cajatambo crop", CROP, "1 / 1")):
+    path = os.path.join(store, "combined_report.json")
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        report = json.load(f)
+    o = report["pairwise_overlap"]["GRAND & TAMBO"]
+    print(f"{tag:<28}{samp:>10}{report['joint']['area_km2']:>12,.1f}"
+          f"{100 * o['fraction_of_TAMBO']:>16.1f}%")"""),
+("md", """**There are two constants, not one, and the strided value is not the real one.**
+At 4 / 5 the share is ~44%; at 1 / 1 it is ~73%, on two separate crops. Striding
+fragments TAMBO's mask and leaves GRAND's untouched, so what survives a strided run is
+the scattered remainder — which overlaps GRAND's contiguous blob less than the intact
+mask does.
+
+So the honest statement is that **roughly three quarters of TAMBO-viable ground is also
+GRAND-viable**, not four ninths. The *invariance* survives — at fixed sampling the share
+barely moves across radically different terrain, which is the real content of the
+TAMBO-limited finding — but the number to quote comes from the unbiased runs, and the two
+rows must never be mixed."""),
+("code", """for frame, caption in (
+        ("combined_overview_1_grand.png", "GRAND over the Cajatambo crop"),
+        ("combined_overview_2_tambo.png", "TAMBO at stride 1 — 97 sites"),
+        ("combined_overview_3_both.png", "Both — 805 km², 71.9% of TAMBO's mask")):
+    show_figure(os.path.abspath(os.path.join(
+        "..", "output", "cajatambo_full_combined", frame)), caption=caption)"""),
+("md", """---
+
+## The full explanation of each run
+
+Reproduced in full rather than summarised: the caveats matter as much as the totals, and
+they are otherwise sitting in files nobody opens."""),
+("code", """def explanation(region, name):
+    path = os.path.join(STORES[region], name)
+    if not os.path.exists(path):
+        print(f"not in the store: {name}")
+        return
+    with open(path) as f:
+        print(f.read())
+
+
+explanation("lima", "grand_explanation.txt")"""),
+("code", """explanation("lima", "tambo_explanation.txt")"""),
+("code", """explanation("lima", "combination_explanation.txt")"""),
+("md", """## Where to go next
+
+- **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** and
+  **[10. Ancash](10_ancash_dem.ipynb)** — the other two thirds of the comparison.
+- **[12. Peru, all of it](12_peru_dem.ipynb)** — the whole country at 3 arc-seconds,
+  and why a coarse answer has to be read differently.
+- **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — how much of
+  any of this survives a change of assumption."""),
+("md", footer(prev=("10_ancash_dem.ipynb", "Ancash"),
               nxt=("12_peru_dem.ipynb", "Peru, all of it"))),
 ]
 
@@ -2693,7 +2979,7 @@ configuration does not fit** — and the answer is a coarser search, raising
   `stride_and_closing` is the trap in this notebook, animated.
 - **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — what a
   criterion costs, which is the sweep this survey never ran."""),
-("md", footer(prev=("10_ancash_dem.ipynb", "Ancash"))),
+("md", footer(prev=("11_lima_dem.ipynb", "Lima"))),
 ]
 
 # Reading order, which is also the numbering. The regional runs are 09 onward and are
@@ -2710,6 +2996,7 @@ NOTEBOOKS = {
     "08_explaining_a_run.ipynb": NB_EXPLAIN,
     "09_arequipa_dem.ipynb": NB_AREQUIPA,
     "10_ancash_dem.ipynb": NB_ANCASH,
+    "11_lima_dem.ipynb": NB_LIMA,
     "12_peru_dem.ipynb": NB_PERU,
 }
 

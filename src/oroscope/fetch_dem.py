@@ -7,10 +7,11 @@ ready-to-run JSON config for each in ``config/``::
 
     oroscope-fetch-dem --region arequipa --open_topography_api_key KEY
 
-Three regions are defined: ``arequipa`` (SRTMGL1, 1 arc-second, 148 MB), ``lima``
-(AW3D30, 1 arc-second, 110 MB) and ``peru`` (SRTMGL3, 3 arc-seconds, 302 MB) -- the
-whole country, at the only resolution that fits either a desktop's memory or the API's
-own area limit. Omit ``--region`` to fetch all of them.
+Four regions are defined. Three departments at 1 arc-second from **the same dataset**,
+so that runs over them are comparable -- ``arequipa`` (129 Mpx), ``lima`` (105 Mpx) and
+``ancash`` (69 Mpx), all SRTMGL1 -- and ``peru``, the whole country, at 3 arc-seconds
+(SRTMGL3) because that is the only resolution that fits either a desktop's memory or the
+API's own area limit. Omit ``--region`` to fetch all of them.
 
 **Getting a key.** It is free and takes a minute. Register at
 https://portal.opentopography.org/myopentopo, sign in, then open *myOpenTopo
@@ -81,14 +82,19 @@ class Icon:
 # ==========================================
 # Defined as (West, East, South, North)
 REGIONS = {
+    # SRTMGL1, not the AW3D30 this used to fetch. The department runs are compared
+    # against one another and a dataset difference would sit inside every comparison as
+    # a confound -- Arequipa and Ancash are both SRTMGL1, so Lima is too. 98,222 km2 is
+    # well inside the API's 450,000 km2 limit for a 30 m dataset. The older
+    # lima_AW3D30.tif is left on disk for anything that referenced it.
     "lima": {
         "west": -78.07665824890137,
         "east": -75.39955615997313,
         "south": -13.252477566131276,
         "north": -10.228479499469358,
-        "filename": "lima_AW3D30.tif",
+        "filename": "lima_SRTMGL1.tif",
         "preset": "lima",
-        "demtype": "AW3D30"
+        "demtype": "SRTMGL1"
     },
     "arequipa": {
         "west": -73.58612537384033,

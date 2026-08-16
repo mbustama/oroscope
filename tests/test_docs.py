@@ -151,9 +151,9 @@ class TestEveryModuleIntroducesItself(unittest.TestCase):
 class TestTheNotebooksCallRealNames(unittest.TestCase):
     """
     Notebooks are executed in CI, which is what makes their claim to work checkable —
-    except 07 through 10. Seven builds eight animations and wants an ffmpeg the runner
-    does not have; eight drives whole searches; nine and ten read stored full-DEM
-    results. All four are excluded because executing them on every push costs far more
+    except 07 through 11. Seven builds eight animations and wants an ffmpeg the runner
+    does not have; eight drives whole searches; nine, ten and eleven read stored
+    full-DEM results. All five are excluded because executing them on every push costs far more
     than it checks. Twelve is *not* excluded, and is written so that it survives a
     runner with no store.
 
@@ -225,7 +225,8 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
         """
         workflow = read(".github", "workflows", "lint.yml")
         for name in ("07_animating_the_mechanism.ipynb", "08_explaining_a_run.ipynb",
-                     "09_arequipa_dem.ipynb", "10_ancash_dem.ipynb"):
+                     "09_arequipa_dem.ipynb", "10_ancash_dem.ipynb",
+                     "11_lima_dem.ipynb"):
             self.assertIn(name, workflow,
                           f"{name} must be named in the CI workflow, excluded or not")
 
