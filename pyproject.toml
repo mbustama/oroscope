@@ -88,6 +88,7 @@ oroscope-combine = "oroscope.combine_experiments:main"
 oroscope-crop = "oroscope.crop_dem:main"
 oroscope-sensitivity = "oroscope.sensitivity:main"
 oroscope-fetch-dem = "oroscope.fetch_dem:main"
+oroscope-fetch-roads = "oroscope.fetch_roads:main"
 
 # A real package, `oroscope`, rather than the flat top-level modules this used to
 # install. Flat modules were right while the names were still moving -- they let a

@@ -89,7 +89,8 @@ __all__ = [
     "preflight_memory", "emit_explanation", "resolve_config_paths",
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
     "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
-    "attach_colorbar", "resolve_settlements", "add_settlements",
+    "attach_colorbar", "resolve_settlements", "add_settlements", "add_roads",
+    "ROAD_WIDTHS", "ROAD_COLOUR",
     "AREQUIPA_SETTLEMENTS", "LIMA_SETTLEMENTS", "SETTLEMENT_PRESETS",
 ]
 
@@ -1899,7 +1900,7 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                                         origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
                                         output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
                                         min_altitude, max_altitude, region_name, final_params, run_info=None,
-                                        settlements='auto'):
+                                        settlements='auto', roads_geojson=None):
     """
     Step 6 Pipeline: Formats and exports all scientific products including geo-registered TIFs, KML models, 
     an annotated map graphic, and a serialized JSON summary of the run parameters and results 
@@ -2115,10 +2116,30 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         rows_px, cols_px = mask_viz_labeled.shape[:2]
         south = origin_lat - rows_px * deg_viz
         east = origin_lon + cols_px * deg_viz
+        def to_px(lat, lon):
+            """Degrees to this map's pixel coordinates."""
+            return ((lon - origin_lon) / deg_viz, (origin_lat - lat) / deg_viz)
+
+        # Roads under the site outlines, settlements over them: infrastructure is
+        # context for the result, and a place name has to stay readable.
+        if roads_geojson:
+            from oroscope import fetch_roads as fetch_roads_mod
+            roads = fetch_roads_mod.load_roads(roads_geojson)
+            n_roads = add_roads(ax, roads, to_px)
+            if n_roads:
+                legend_handles.append(Line2D([0], [0], color=ROAD_COLOUR, lw=1.0,
+                                             alpha=0.7))
+                legend_labels.append(f"Roads ({n_roads:,})")
+                # ODbL requires attribution, and a figure travels away from the file
+                # it was made from -- so it goes on the picture, not just in the data.
+                ax.text(0.995, -0.055, roads.get("attribution", ""),
+                        transform=ax.transAxes, ha="right", va="top",
+                        fontsize=7, color="#6B6B6B")
+            elif roads is None:
+                print(f"      {C.WARN}{Icon.WARN}No roads read from {roads_geojson}{C.RESET}")
+
         places = resolve_settlements(settlements, (south, origin_lat, origin_lon, east))
-        add_settlements(ax, places,
-                        lambda lat, lon: ((lon - origin_lon) / deg_viz,
-                                          (origin_lat - lat) / deg_viz))
+        add_settlements(ax, places, to_px)
 
         # No title. Everything it carried is either on the figure already (the sites,
         # in the legend), in the run's own summary, or in the caption of whatever this
@@ -2665,6 +2686,79 @@ def add_settlements(ax, settlements, to_axes, fontsize=9):
         label.set_path_effects([path_effects.Stroke(linewidth=2.6, foreground="white"),
                                 path_effects.Normal()])
         drawn += 1
+    return drawn
+
+
+# Line width by highway class, coarse to fine. A trunk road and a tertiary track are
+# both "a road" to the search and very different things to a deployment.
+ROAD_WIDTHS = {"motorway": 1.5, "trunk": 1.2, "primary": 0.9,
+               "secondary": 0.65, "tertiary": 0.45}
+ROAD_COLOUR = "#2B2B2B"
+
+
+def add_roads(ax, roads, to_axes, colour=ROAD_COLOUR, alpha=0.55, scale=1.0):
+    """
+    Draws road geometry, as context rather than as a result.
+
+    Access is the question a site count cannot answer: a canyon wall that takes a
+    hundred detectors means something different with a road along the rim than with the
+    nearest track forty kilometres away. Roads are drawn in a neutral dark line rather
+    than a colour, because on these maps colour belongs to the categories and a road is
+    not one of them -- it is what the reader measures a category against.
+
+    Uses one ``LineCollection`` per class rather than a call per road. The Arequipa DEM
+    carries 8,780 roads and 367,000 vertices; drawn individually that is slow enough to
+    notice, and matplotlib renders the collection in one pass.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final.
+    roads : dict or None
+        As :func:`fetch_roads.load_roads` returns. ``None`` draws nothing, so a missing
+        road file leaves a map without roads rather than without a map.
+    to_axes : callable
+        ``to_axes(latitude, longitude) -> (x, y)`` in the axes' own units, so this
+        serves both the pixel-coordinate search map and the degree-coordinate overlay.
+    colour : str, optional
+        Line colour.
+    alpha : float, optional
+        Line opacity. Roads sit under the result, not over it.
+    scale : float, optional
+        Multiplies every width, for maps drawn at a different size.
+
+    Returns
+    -------
+    int
+        How many roads were drawn.
+    """
+    if not roads or not roads.get("lines"):
+        return 0
+    from matplotlib.collections import LineCollection
+
+    # Only what is on this map. A road file covers the whole DEM while a map may show a
+    # crop of it, so counting the file would report 8,780 roads on a picture holding a
+    # few hundred -- and drawing them all makes matplotlib clip geometry it never
+    # needed to build.
+    x_lo, x_hi = sorted(ax.get_xlim())
+    y_lo, y_hi = sorted(ax.get_ylim())
+
+    by_class = {}
+    for klass, points in roads["lines"]:
+        xy = [to_axes(lat, lon) for lat, lon in points]
+        xs = [p[0] for p in xy]
+        ys = [p[1] for p in xy]
+        if max(xs) < x_lo or min(xs) > x_hi or max(ys) < y_lo or min(ys) > y_hi:
+            continue
+        by_class.setdefault(klass, []).append(xy)
+
+    drawn = 0
+    for klass, segments in by_class.items():
+        width = ROAD_WIDTHS.get(klass, 0.4) * scale
+        ax.add_collection(LineCollection(
+            segments, colors=colour, linewidths=width, alpha=alpha,
+            zorder=14, capstyle="round", joinstyle="round"))
+        drawn += len(segments)
     return drawn
 
 
@@ -3240,6 +3334,8 @@ def default_config(preset="default"):
         # Named places to mark on the map: "auto" uses whichever curated list has
         # points inside the DEM, or give a preset name, "none", or an explicit list.
         "settlements": "auto",
+        # GeoJSON of road geometry to draw as context, from oroscope-fetch-roads.
+        "roads_geojson": None,
         "score_percentile": None,
         "stop_at_target": False,
         "max_memory_gb": None,
@@ -3720,7 +3816,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_target_slope_deg=None, max_target_slope_deg=None,
                             max_range_km=None, score_percentile=None,
                             decay_weight_by='flux', decay_response_csv=None,
-                            settlements='auto',
+                            settlements='auto', roads_geojson=None,
                             stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
@@ -4167,7 +4263,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "max_range_km": max_range_km, "score_percentile": score_percentile,
         "decay_weight_by": decay_weight_by, "decay_response_csv": decay_response_csv,
-        "settlements": settlements,
+        "settlements": settlements, "roads_geojson": roads_geojson,
         "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -4394,7 +4490,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                       "aperture": aperture_mod.summarize_sites(
                           site_details, min_dist_km * 1000.0, max_dist_km * 1000.0,
                           np.logspace(0, 5, 26))},
-            settlements=settlements,
+            settlements=settlements, roads_geojson=roads_geojson,
         )
         timings["outputs"] = time.time() - t0
         print(f"      Time Elapsed: {timings['outputs']:.2f}s")
@@ -4553,6 +4649,11 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--roads_geojson", type=str, default=None,
+                        help="GeoJSON of road geometry to DRAW on the map, from "
+                             "oroscope-fetch-roads. Distinct from --road_map_path, "
+                             "which is a distance-to-road raster used to SCREEN "
+                             "candidates: this one only draws, and changes no result.")
     parser.add_argument("--settlements", type=str, default="auto",
                         help="Named places to mark on the map. 'auto' (the default) "
                              "uses whichever curated list has points inside the DEM, or "

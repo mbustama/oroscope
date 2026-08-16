@@ -411,6 +411,10 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--roads", type=str, default=None,
+                    help="GeoJSON of road geometry to draw as context, from "
+                         "oroscope-fetch-roads. Access is the question a joint area "
+                         "cannot answer on its own.")
     ap.add_argument("--settlements", type=str, default="auto",
                     help="Named places to mark on the overview: 'auto' (the default) "
                          "uses whichever curated list has points inside the map, or "
@@ -589,9 +593,25 @@ def main():
         ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
         ss.add_north_arrow(ax)
 
+        def to_deg(lat, lon):
+            """This overlay's axes are already degrees."""
+            return (lon, lat)
+
+        road_count, road_credit = 0, ""
+        if args.roads:
+            from oroscope import fetch_roads as fetch_roads_mod
+            roads = fetch_roads_mod.load_roads(args.roads)
+            road_count = ss.add_roads(ax, roads, to_deg)
+            if road_count:
+                # ODbL requires attribution, and a figure travels away from the file it
+                # was made from, so it goes on the picture rather than only in the data.
+                road_credit = (roads or {}).get("attribution", "")
+                ax.text(0.995, -0.055, road_credit, transform=ax.transAxes,
+                        ha="right", va="top", fontsize=7, color="#6B6B6B")
+
         places = ss.resolve_settlements(
             args.settlements, (extent[2], extent[3], extent[0], extent[1]))
-        ss.add_settlements(ax, places, lambda lat, lon: (lon, lat))
+        ss.add_settlements(ax, places, to_deg)
 
         if im is not None:
             ss.attach_colorbar(fig, ax, im, "Altitude (m)")
@@ -612,6 +632,9 @@ def main():
             key("#E8189B", f"Both — {joint_km2:,.1f} km² "
                            f"({pct_a:.1f}% of {a}, {pct_b:.1f}% of {b})"),
         ]
+        if road_count:
+            handles.append(Line2D([0], [0], color=ss.ROAD_COLOUR, lw=1.0, alpha=0.7,
+                                  label=f"Roads ({road_count:,})"))
         ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=3,
                   loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
                   columnspacing=1.6)

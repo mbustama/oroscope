@@ -171,6 +171,34 @@ config-relative — there is no configuration file to be relative *to* — so it
 needs a directory one level below the repository root.
 
 
+``oroscope-fetch-roads`` — road geometry for the map
+------------------------------------------------------
+
+.. code-block:: shell
+
+   oroscope-fetch-roads --dem input/dem/arequipa_SRTMGL1.tif
+   oroscope --config_path config/grand_colca_config.json \
+       --roads_geojson input/roads/arequipa_SRTMGL1.geojson
+
+Downloads roads from OpenStreetMap through Overpass and writes a GeoJSON, so a map can
+show what a site count cannot: whether the good ground is reachable. Over the Arequipa
+DEM that is 8,780 roads of motorway through tertiary class.
+
+**Drawing, not screening.** This changes no result. The searcher has a separate and
+older facility for access as a *criterion* — ``--road_map_path`` takes an aligned
+distance-to-road raster and ``--max_road_dist_km`` cuts on it, appearing in the funnel
+as ``road distance`` — which nothing yet produces and no bundled configuration uses.
+
+The bounding box is **tiled** and fetched a piece at a time, with a pause between
+requests and a fallback to a second mirror. A single query over the 3.5-degree Arequipa
+box answers with a gateway timeout; nine smaller ones succeed. Overpass is a shared
+free service, and the pacing is not optional politeness.
+
+Data is © OpenStreetMap contributors, ODbL. The loader carries that attribution inside
+the file and both maps print it beneath the axes, so it cannot be separated from the
+data by copying the picture.
+
+
 ``tools/make_animations.py`` — animations of the mechanism
 ------------------------------------------------------------
 
@@ -497,6 +525,10 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.
+   * - ``--roads_geojson``
+     - str
+     - ``—``
+     - GeoJSON of road geometry to **draw** on the map, from ``oroscope-fetch-roads``. Distinct from ``--road_map_path``, which is a distance-to-road raster used to **screen** candidates: this one only draws, and changes no result. Only roads intersecting the map are drawn and counted.
    * - ``--settlements``
      - str
      - ``auto``
