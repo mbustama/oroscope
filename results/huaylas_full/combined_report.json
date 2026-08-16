@@ -1,0 +1,52 @@
+{
+  "runs": [
+    {
+      "label": "GRAND",
+      "dir": "output/huaylas_full_grand",
+      "pixels": 8849036,
+      "area_km2": 8294.892904374776,
+      "reported_capacity": 9609,
+      "reported_sites": 1,
+      "area_in_joint_km2": 637.1302973279924,
+      "fraction_of_own_area_in_joint": 0.07680994856388877
+    },
+    {
+      "label": "TAMBO",
+      "dir": "output/huaylas_full_tambo",
+      "pixels": 912320,
+      "area_km2": 855.1888244684726,
+      "reported_capacity": 98696,
+      "reported_sites": 109,
+      "area_in_joint_km2": 637.1302973279924,
+      "fraction_of_own_area_in_joint": 0.7450170992634163
+    }
+  ],
+  "pixel_area_km2": 0.0009373781397628821,
+  "joint_requires": [
+    "GRAND",
+    "TAMBO"
+  ],
+  "joint": {
+    "pixels": 679694,
+    "area_km2": 637.1302973279924
+  },
+  "union": {
+    "pixels": 9081662,
+    "area_km2": 8512.951431515256
+  },
+  "pairwise_overlap": {
+    "GRAND & TAMBO": {
+      "area_km2": 637.1302973279924,
+      "jaccard": 0.07484246826186661,
+      "fraction_of_GRAND": 0.07680994856388877,
+      "fraction_of_TAMBO": 0.7450170992634163
+    }
+  },
+  "membership_encoding": {
+    "description": "bit i is set where run i's mask is set",
+    "bits": {
+      "0": "GRAND",
+      "1": "TAMBO"
+    }
+  }
+}

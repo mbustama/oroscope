@@ -72,6 +72,18 @@ REGIONS = {
         "dem": os.path.join(REPO, "input", "dem", "ancash_SRTMGL1.tif"),
         "expect": "~13 min for grand, under a minute for tambo (69 Mpx against 129)",
     },
+    # A crop rather than a department, and the only one run unbiased: 11.4 Mpx is
+    # small enough for downsample_factor 1 and candidate_stride 1, so neither the
+    # ~30% area loss from downsampling nor the 4.75x from striding applies. Its
+    # numbers are therefore the ones to trust, and the gap between them and the
+    # ancash_full ones over the same ground is the bias, measured.
+    "huaylas": {
+        "dem": os.path.join(REPO, "input", "dem", "huaylas.tif"),
+        "expect": "a few minutes each at stride 1 -- every pixel is a candidate",
+        # Not `_full`: it is a crop, and a config called grand_huaylas_full.json would
+        # say the opposite of what it is.
+        "configs": "{experiment}_huaylas.json",
+    },
 }
 
 EXPERIMENTS = ("grand", "tambo")
@@ -85,7 +97,9 @@ def region_paths(region):
         "expect": spec["expect"],
         "store": os.path.join(REPO, "results", f"{region}_full"),
         "prefix": f"{region}_full",
-        "configs": {e: os.path.join(REPO, "config", f"{e}_{region}_full.json")
+        "configs": {e: os.path.join(REPO, "config",
+                                    spec.get("configs", "{experiment}_" + region
+                                             + "_full.json").format(experiment=e))
                     for e in EXPERIMENTS},
     }
 
@@ -253,12 +267,22 @@ def main():
 
     labels = [args.only] if args.only else list(EXPERIMENTS)
 
-    report = ss.preflight_memory(dem, downsample_factor=4, candidate_stride=5,
+    # Read the sampling off the configuration rather than assuming it. These were
+    # hard-coded at 4 and 5, which was right for the two department runs and silently
+    # wrong for the huaylas crop, which runs at 1 and 1 -- the estimate came out 3x
+    # low, on the one number whose whole job is to stop a run that will not fit.
+    sampling = [ss.load_config(c) for c in paths["configs"].values()]
+    downsample = max((int(c.get("downsample_factor") or 1) for c in sampling),
+                     default=1)
+    stride = max((int(c.get("candidate_stride") or 1) for c in sampling), default=1)
+    report = ss.preflight_memory(dem, downsample_factor=downsample,
+                                 candidate_stride=stride,
                                  max_memory_gb=0, quiet=args.dry_run)
     if args.dry_run:
         print(f"region:    {args.region}")
         print(f"DEM:       {os.path.relpath(dem, REPO)}")
-        print(f"estimate:  {report['estimate_gb']:.2f} GiB at downsample_factor 4")
+        print(f"estimate:  {report['estimate_gb']:.2f} GiB at "
+              f"downsample_factor {downsample}, candidate_stride {stride}")
         print(f"available: {report['available_gb']:.1f} GiB"
               if report["available_gb"] else "available: unknown")
         print(f"would run: {', '.join(labels)}, then combine")

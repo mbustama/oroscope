@@ -63,6 +63,23 @@ def stores():
     return found
 
 
+def sampling(region, label):
+    """The ``downsample_factor`` / ``candidate_stride`` a region was run at.
+
+    Two regions run at different sampling are **not** comparable per pixel: striding
+    and downsampling both cost area, so a crop run at 1/1 will look better than a
+    department run at 4/5 for reasons that have nothing to do with its ground. The
+    table prints this column so the reader can see which rows are alike.
+    """
+    for stem in (f"{label}_{region}_full.json", f"{label}_{region}.json"):
+        path = os.path.join(REPO, "config", stem)
+        if os.path.exists(path):
+            cfg = ss.load_config(path)
+            return (int(cfg.get("downsample_factor") or 1),
+                    int(cfg.get("candidate_stride") or 1))
+    return None
+
+
 def read(store, label):
     path = os.path.join(store, f"{label}_results.json")
     if not os.path.exists(path):
@@ -182,6 +199,7 @@ def build():
             **{e: summarise(read(store, e)) for e in EXPERIMENTS},
             "combined": combination(store),
             "terrain": terrain(region),
+            "sampling": sampling(region, "grand") or sampling(region, "tambo"),
         }
 
     regions = sorted(data, key=lambda r: (r != BASELINE, r))
@@ -226,28 +244,35 @@ def build():
 
     for exp in EXPERIMENTS:
         L.append(f"\n## {exp.upper()}\n")
-        L.append(row(["region", "sites", "area km²", "capacity", "acceptance",
-                      "area /px", "capacity /px"]))
-        L.append(row(["---"] * 7))
+        L.append(row(["region", "ds / stride", "sites", "area km²", "capacity",
+                      "acceptance", "area /px", "capacity /px"]))
+        L.append(row(["---"] * 8))
         b = base.get(exp) if base else None
         for r in regions:
             s = data[r][exp]
+            samp = data[r]["sampling"]
+            same = samp is not None and samp == data[BASELINE]["sampling"]
+            label = f"{samp[0]} / {samp[1]}" if samp else "—"
             if not s:
-                L.append(row([r, None, None, None, None, None, None]))
+                L.append(row([r, label, None, None, None, None, None, None]))
                 continue
             scale = (px[r] / px[BASELINE]) if (px[r] and px.get(BASELINE)) else None
             def per(v, bv):
-                if not (b and bv and scale):
+                # Suppressed when the sampling differs: the ratio would be measuring
+                # the sampling, not the ground.
+                if not (b and bv and scale and same):
                     return None
                 return f"{v / bv / scale:.2f}×"
-            L.append(row([r, f"{s['sites']:,}", f"{s['area_km2']:,.1f}",
+            L.append(row([r, label, f"{s['sites']:,}", f"{s['area_km2']:,.1f}",
                           f"{s['capacity']:,}",
                           f"{s['acceptance']:.1f}%" if s["acceptance"] else None,
                           per(s["area_km2"], b["area_km2"] if b else None),
                           per(s["capacity"], b["capacity"] if b else None)]))
         L.append("\n*Acceptance is `directions accepted / kept by stride`, read by "
                  "stage **name**: a run with RFI zones carries an extra funnel stage, "
-                 "so the same index means different things in two regions.*\n")
+                 "so the same index means different things in two regions. Per-pixel "
+                 "ratios are shown only where the sampling matches the baseline — "
+                 "otherwise they would measure the sampling rather than the ground.*\n")
 
     if any(data[r]["combined"] for r in regions):
         L.append("\n## Both at once\n")
@@ -272,6 +297,28 @@ def build():
                  "GRAND almost nothing (ROADMAP §6.47). A Jaccard index that moves "
                  "while that share does not is TAMBO's mask growing, not the two "
                  "experiments agreeing more.\n")
+
+    L.append("\n## What the sampling costs\n")
+    L.append("`huaylas` is a **crop**, not a department — the Rio Santa valley cut out "
+             "of the Ancash DEM — and it is the only row run at 1 / 1. That is why its "
+             "ratios are blank: it is not comparable per pixel to a run at 4 / 5.\n")
+    L.append("It was also run a second time at 4 / 5 as a control, so the cost of the "
+             "sampling is measured rather than assumed. Same ground, same criteria, "
+             "only `downsample_factor` and `candidate_stride` changed:\n")
+    L.append(row(["", "ds 1 / stride 1", "ds 4 / stride 5", "ratio"]))
+    L.append(row(["---"] * 4))
+    L.append(row(["GRAND area km²", "8,294.9", "7,537.9", "1.1×"]))
+    L.append(row(["TAMBO sites", "109", "1", "**109×**"]))
+    L.append(row(["TAMBO area km²", "855.1", "2.9", "**291×**"]))
+    L.append(row(["TAMBO capacity", "98,696", "256", "**386×**"]))
+    L.append("\n**Acceptance is identical at 14.0% either way** — striding is unbiased "
+             "there, as ROADMAP §6.34 says. All of the loss happens between closing and "
+             "selection: at stride 5 the mask fragments into 7,954 regions of which one "
+             "clears `min_sub_array_size`, while at stride 1 it is contiguous and 109 "
+             "survive. **So every strided TAMBO area and capacity above is a lower bound "
+             "by a terrain-dependent factor — 4.75× at Colca, 291× here.** GRAND is "
+             "untouched: a 1 km closing element bridges a 154 m stride gap without "
+             "noticing. See ROADMAP §6.49.\n")
 
     overlaps = box_overlaps()
     if overlaps:

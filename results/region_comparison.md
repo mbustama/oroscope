@@ -11,6 +11,7 @@ Every criterion is held fixed across regions except where a table says otherwise
 | --- | --- | --- | --- | --- |
 | arequipa | 1 arc-sec | 128.6 | 1.000× | SRTMGL1 |
 | ancash | 1 arc-sec | 68.6 | 0.533× | SRTMGL1 |
+| huaylas | 3 arc-sec | 11.4 | 0.089× | — |
 
 ## The terrain, before any search
 
@@ -20,25 +21,28 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- |
 | arequipa | 11.1° | 70.3% | 24.1% |
 | ancash | 23.0° | 52.0% | 58.0% |
+| huaylas | — | — | — |
 
 ## GRAND
 
-| region | sites | area km² | capacity | acceptance | area /px | capacity /px |
-| --- | --- | --- | --- | --- | --- | --- |
-| arequipa | 1 | 88,527.5 | 101,948 | 61.6% | 1.00× | 1.00× |
-| ancash | 1 | 43,091.2 | 49,447 | 54.9% | 0.91× | 0.91× |
+| region | ds / stride | sites | area km² | capacity | acceptance | area /px | capacity /px |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| arequipa | 4 / 5 | 1 | 88,527.5 | 101,948 | 61.6% | 1.00× | 1.00× |
+| ancash | 4 / 5 | 1 | 43,091.2 | 49,447 | 54.9% | 0.91× | 0.91× |
+| huaylas | 1 / 1 | 1 | 8,294.9 | 9,609 | 56.6% | — | — |
 
-*Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions.*
+*Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions. Per-pixel ratios are shown only where the sampling matches the baseline — otherwise they would measure the sampling rather than the ground.*
 
 
 ## TAMBO
 
-| region | sites | area km² | capacity | acceptance | area /px | capacity /px |
-| --- | --- | --- | --- | --- | --- | --- |
-| arequipa | 26 | 111.9 | 9,024 | 9.7% | 1.00× | 1.00× |
-| ancash | 35 | 174.9 | 14,290 | 15.1% | 2.93× | 2.97× |
+| region | ds / stride | sites | area km² | capacity | acceptance | area /px | capacity /px |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| arequipa | 4 / 5 | 26 | 111.9 | 9,024 | 9.7% | 1.00× | 1.00× |
+| ancash | 4 / 5 | 35 | 174.9 | 14,290 | 15.1% | 2.93× | 2.97× |
+| huaylas | 1 / 1 | 109 | 855.1 | 98,696 | 14.0% | — | — |
 
-*Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions.*
+*Acceptance is `directions accepted / kept by stride`, read by stage **name**: a run with RFI zones carries an extra funnel stage, so the same index means different things in two regions. Per-pixel ratios are shown only where the sampling matches the baseline — otherwise they would measure the sampling rather than the ground.*
 
 
 ## Both at once
@@ -47,8 +51,25 @@ Over land only. This predicts the result: GRAND wants ground gentle enough to st
 | --- | --- | --- | --- | --- |
 | arequipa | 50.2 | 0.00057 | 44.9% | 1.00× |
 | ancash | 75.2 | 0.00174 | 43.0% | 2.81× |
+| huaylas | 637.1 | 0.07484 | 74.5% | 143.04× |
 
 **The share of TAMBO's mask is the number to watch.** It has stayed near 44% across regions whose terrain could hardly differ more, which says the joint region is TAMBO-limited and that co-location costs GRAND almost nothing (ROADMAP §6.47). A Jaccard index that moves while that share does not is TAMBO's mask growing, not the two experiments agreeing more.
+
+
+## What the sampling costs
+
+`huaylas` is a **crop**, not a department — the Rio Santa valley cut out of the Ancash DEM — and it is the only row run at 1 / 1. That is why its ratios are blank: it is not comparable per pixel to a run at 4 / 5.
+
+It was also run a second time at 4 / 5 as a control, so the cost of the sampling is measured rather than assumed. Same ground, same criteria, only `downsample_factor` and `candidate_stride` changed:
+
+|  | ds 1 / stride 1 | ds 4 / stride 5 | ratio |
+| --- | --- | --- | --- |
+| GRAND area km² | 8,294.9 | 7,537.9 | 1.1× |
+| TAMBO sites | 109 | 1 | **109×** |
+| TAMBO area km² | 855.1 | 2.9 | **291×** |
+| TAMBO capacity | 98,696 | 256 | **386×** |
+
+**Acceptance is identical at 14.0% either way** — striding is unbiased there, as ROADMAP §6.34 says. All of the loss happens between closing and selection: at stride 5 the mask fragments into 7,954 regions of which one clears `min_sub_array_size`, while at stride 1 it is contiguous and 109 survive. **So every strided TAMBO area and capacity above is a lower bound by a terrain-dependent factor — 4.75× at Colca, 291× here.** GRAND is untouched: a 1 km closing element bridges a 154 m stride gap without noticing. See ROADMAP §6.49.
 
 
 ## Where the boxes overlap

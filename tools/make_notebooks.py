@@ -2254,6 +2254,112 @@ Arequipa and 43.0% at Ancash** — essentially unchanged across two regions whos
 could hardly be more different. Co-location costs GRAND almost nothing and consumes
 roughly half of what TAMBO has, wherever you look. The Jaccard index tripling is not the
 two experiments agreeing more; it is TAMBO's mask growing while GRAND's shrinks."""),
+("md", """---
+
+## Zooming in: the Callejón de Huaylas and the Cañón del Pato
+
+The department run above uses `downsample_factor` 4 and `candidate_stride` 5, because
+69 Mpx will not fit in a desktop otherwise. Both cost area. **A crop is small enough to
+run without either**, so the Río Santa valley between the Cordillera Blanca and the
+Cordillera Negra — 11.4 million pixels, `−8.80…−9.90` lat, `−78.00…−77.20` lon — was cut
+out and searched at 1 and 1.
+
+```bash
+cd src && oroscope-crop ../input/dem/ancash_SRTMGL1.tif ../input/dem/huaylas.tif \
+    --north -8.80 --south -9.90 --west -78.00 --east -77.20
+python tools/run_full_dem.py --region huaylas
+```"""),
+("code", """HUAYLAS = os.path.abspath(os.path.join("..", "results", "huaylas_full"))
+
+
+def crop_summary(path):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        d = json.load(f)
+    r = d["results"]
+    sites = r.get("sites") or []
+    return {"sites": r["total_sites"],
+            "area km2": sum(s.get("area_km2", 0.0) for s in sites),
+            "capacity": r["total_capacity"]}
+
+
+print(f"{'':<40}{'sites':>8}{'area km2':>12}{'capacity':>12}")
+for label in ("grand", "tambo"):
+    for tag, path in (
+            ("unbiased, ds 1 / stride 1",
+             os.path.join(HUAYLAS, f"{label}_results.json")),
+            ("control, ds 4 / stride 5",
+             os.path.join(HUAYLAS, f"{label}_control_ds4_stride5.json"))):
+        s = crop_summary(path)
+        if s:
+            print(f"{label.upper() + ', ' + tag:<40}{s['sites']:>8,}"
+                  f"{s['area km2']:>12,.1f}{s['capacity']:>12,}")"""),
+("md", """**The same ground, the same criteria, and only the sampling changed.** GRAND
+moves by 1.1×. TAMBO moves by **291× in area and 386× in capacity**, and from 109 sites
+to one.
+
+That is not the 4.75× recorded in `docs/ROADMAP.md` §6.34. That figure was measured on
+Colca varying the stride alone; here both levers move, on terrain whose accepted strips
+are numerous and individually small.
+
+The funnels say exactly where it goes, and it is not where you would guess."""),
+("code", """def funnel_of(path):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)["funnel"]
+
+
+a = funnel_of(os.path.join(HUAYLAS, "tambo_results.json"))
+b = funnel_of(os.path.join(HUAYLAS, "tambo_control_ds4_stride5.json"))
+if a and b:
+    print(f"{'stage':<34}{'ds 1 / stride 1':>18}{'ds 4 / stride 5':>18}")
+    for k in a:
+        if k in b:
+            print(f"{k:<34}{a[k]:>18,}{b[k]:>18,}")
+    acc_a = 100 * a["directions accepted"] / a["slope 20.0-60.0 deg"]
+    strided_b = next(v for k, v in b.items() if k.startswith("kept by stride"))
+    acc_b = 100 * b["directions accepted"] / strided_b
+    print(f"\\nacceptance: {acc_a:.1f}% at stride 1, {acc_b:.1f}% at stride 5")"""),
+("md", """**Acceptance is identical — 14.0% either way.** Striding really is unbiased
+there, exactly as §6.34 says. Closing differs by only 2.6×. *All* of the 291× happens
+between closing and selection, in the region thresholds: at stride 5 the mask fragments
+into 7,954 labelled regions, of which 5 clear the area threshold and **one** clears
+`min_sub_array_size` of 250 detectors. At stride 1 the mask is contiguous and 109 regions
+survive.
+
+So the under-report is **fragmentation meeting a minimum-array-size cut**, not pixels
+being miscounted. GRAND never suffers it because a 1 km closing element bridges a 154 m
+stride gap without noticing.
+
+**What to take from this.** Every TAMBO area and capacity in this project that came from
+a strided, downsampled run is a lower bound by a factor that is terrain-dependent and, in
+practice, unbounded — 4.75× at Colca, 291× here. Quote TAMBO numbers from unbiased runs,
+or quote them as "at least". The Callejón de Huaylas was effectively invisible to the
+department run: its TAMBO mask contributes **1.2 km² inside this crop window** against
+the crop's own 855.1 km²."""),
+("md", """---
+
+## The full explanation of each run
+
+Every search writes a plain-language account of itself — what it found, where the
+candidates went, why each site qualifies, which numbers are assumptions and how to read
+them. Those are reproduced here in full rather than summarised, because the caveats
+matter as much as the totals."""),
+("code", """def explanation(store, name):
+    path = os.path.join(store, name)
+    if not os.path.exists(path):
+        print(f"not in the store: {os.path.basename(path)}")
+        return
+    with open(path) as f:
+        print(f.read())
+
+
+explanation(STORE, "grand_explanation.txt")"""),
+("code", """explanation(STORE, "tambo_explanation.txt")"""),
+("code", """explanation(STORE, "combination_explanation.txt")"""),
+("code", """explanation(HUAYLAS, "tambo_explanation.txt")"""),
 ("md", """## Where to go next
 
 - **[9. Arequipa, the full DEM](09_arequipa_dem.ipynb)** — the run this one is held

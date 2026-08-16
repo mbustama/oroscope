@@ -2882,6 +2882,72 @@ closing element (§6.34) and ~30% again from downsampling. **Both regions are bi
 same way, which is why the ratio is the trustworthy number and the absolute areas are
 not.**
 
+### 6.49 The striding penalty for TAMBO is not 4.75×. On the Callejón de Huaylas it is 291×
+
+A zoom-in over the Callejón de Huaylas and the Cañón del Pato — the Río Santa valley
+between the Cordillera Blanca and the Cordillera Negra, cropped out of the Ancash DEM at
+`−8.80…−9.90` lat, `−78.00…−77.20` lon, 3,961 × 2,881 = **11.4 Mpx**. Small enough to run
+at `downsample_factor` **1** and `candidate_stride` **1**: 2.64 GiB estimated against
+~7.8 GiB available. **The first unbiased run this project has done at scale.**
+
+| | GRAND | TAMBO |
+| --- | --- | --- |
+| sites | 1 | **109** |
+| area km² | 8,294.9 | **855.1** |
+| capacity | 9,609 | **98,696** |
+| joint | 637.1 km² | Jaccard 0.075, 74.5% of TAMBO |
+
+Then the control: **the same crop, the same criteria, changing only the sampling** to the
+`downsample_factor` 4 / `candidate_stride` 5 the department runs use.
+
+| | ds 1 / stride 1 | ds 4 / stride 5 | ratio |
+| --- | --- | --- | --- |
+| GRAND sites / area / capacity | 1 / 8,294.9 / 9,609 | 1 / 7,537.9 / 8,658 | **1.1×** |
+| TAMBO sites | 109 | 1 | **109×** |
+| TAMBO area km² | 855.1 | 2.9 | **291×** |
+| TAMBO capacity | 98,696 | 256 | **386×** |
+
+**§6.34's 4.75× is not the size of this effect.** That measurement was taken on Colca,
+varying the stride alone at `downsample_factor` 1. Here both levers move together, on
+terrain whose accepted strips are numerous and individually small, and TAMBO loses
+**two and a half orders of magnitude**.
+
+**The mechanism is not the area measurement.** The funnels say exactly where it goes:
+
+| stage | ds 1 / stride 1 | ds 4 / stride 5 |
+| --- | --- | --- |
+| slope 20–60° | 7,081,749 | 7,081,749 |
+| directions accepted | 991,099 | 198,353 |
+| after gap closing | 1,248,669 | 477,816 |
+| **pixels in selected sites** | **912,320** | **3,136** |
+
+Acceptance is **identical**: 991,099/7,081,749 = 14.0% at stride 1, and 198,353/1,416,351
+= 14.0% at stride 5. Striding really is unbiased in acceptance, exactly as §6.34 says.
+Closing differs by only 2.6×. **All 291× of the loss happens between closing and
+selection**, in the region thresholds: at stride 5 the mask fragments into 7,954 labelled
+regions of which 5 clear the area threshold and **1** clears `min_sub_array_size` (250
+detectors). At stride 1 the mask is contiguous and 109 regions survive. The under-report
+is fragmentation meeting a minimum-array-size cut, not pixels being miscounted.
+
+GRAND is untouched for the reason it always was: a 1 km closing element bridges a 154 m
+stride gap without noticing, so its mask never fragments.
+
+**What this changes.** Every TAMBO number this project has published from a strided,
+downsampled run is a lower bound by a factor that is **terrain-dependent and unbounded in
+practice** — 4.75× at Colca, ~291× here. The honest reading is that strided TAMBO area
+and capacity are *not* estimates of the true values at all; they are a different quantity
+that happens to correlate. **Quote TAMBO numbers only from unbiased runs, or quote them
+as "at least".** The Ancash and Arequipa department TAMBO figures (174.9 km² / 14,290 and
+111.9 km² / 9,024) should be read in that light, and the ratio between them survives
+better than either absolute.
+
+It also means the Callejón de Huaylas was effectively invisible to the department run:
+the ancash_full TAMBO mask contributes **1.2 km² inside this crop window** against the
+crop's own 855.1 km².
+
+Stored in `results/huaylas_full/`, controls included, with
+`config/{grand,tambo}_huaylas.json` and their `_control` counterparts.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
