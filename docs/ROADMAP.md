@@ -3376,6 +3376,33 @@ branch, the `--reveal` frames and an empty class.
 
 638 → 644 tests.
 
+### 6.58 The Numba kernels can be measured after all ✅ delivered
+
+`[tool.coverage.report]` excludes `^\s*@jit`, and rightly: `@jit` compiles to machine
+code and `coverage.py` traces bytecode, so a compiled body can never be recorded as
+executed. The consequence is that the seven kernels — which include `scan_candidates`,
+the whole arrival scan — sit permanently outside the coverage number, and a regression
+in them is invisible to it.
+
+There is a route the comment did not mention. `NUMBA_DISABLE_JIT=1` makes the kernels
+ordinary Python and `coverage.py` sees straight into them: **`arrival_scan.py` reports
+90%** that way, against a figure that excludes its four kernels entirely otherwise.
+
+One test stood in the way. `test_nearest_sampling_blocks_more_than_bilinear` asserted
+`>=` between two horizon angles that agree to seven digits — 3.795908212661743 against
+3.7959089087334905. Compiled with `fastmath`, the nearest form came out 7×10⁻⁷ deg the
+larger; interpreted, the bilinear one did. So the only route to kernel coverage looked
+like a failing test. The claim the test exists to make is that nearest never sees
+*further*, not that it differs at the eighth digit, so it now carries a 10⁻⁵ tolerance
+and passes both ways.
+
+Not made the default and not added to CI: interpreted, the suite does not finish in ten
+minutes. The recipe is in `pyproject.toml` beside the exclusion, to be run by hand after
+touching a kernel.
+
+*Correction to §0 of the handover:* `_rfi_exposure` is driven by `tests/test_physics.py`,
+not `test_arrival_scan.py`, and `count_grid_capacity` by `tests/test_capacity.py`.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

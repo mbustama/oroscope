@@ -708,7 +708,15 @@ class TestProfileSampling(unittest.TestCase):
                   n_elev_bins=24, max_range_m=12000.0, min_dist_km=1.0, max_dist_km=12.0)
         near = scan_mod.scan(cands, z, grid, bilinear=False, **kw)
         bil = scan_mod.scan(cands, z, grid, bilinear=True, **kw)
-        self.assertGreaterEqual(float(near["horizon_deg"][0]), float(bil["horizon_deg"][0]))
+        # Tolerance, because on this fixture the two agree to seven digits and the last
+        # of them is not a property of the sampling. Compiled with fastmath the nearest
+        # form came out 7e-7 deg the larger; interpreted, under NUMBA_DISABLE_JIT=1, the
+        # bilinear form did -- so an exact >= turned a floating-point reassociation into
+        # a failing test, and made the only route to coverage of these kernels look like
+        # a regression. The claim is that nearest never sees *further*, not that it
+        # differs at the eighth digit.
+        self.assertGreaterEqual(float(near["horizon_deg"][0]),
+                                float(bil["horizon_deg"][0]) - 1.0e-5)
 
     def test_nodata_neighbours_fall_back_to_nearest(self):
         grid = grid_at()
