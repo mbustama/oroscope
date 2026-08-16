@@ -86,7 +86,7 @@ __all__ = [
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
     "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
     "preflight_memory", "emit_explanation", "resolve_config_paths",
-    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
 ]
 
 # Try to import psutil for RAM stats
@@ -2006,8 +2006,13 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         
         if rfi_zones:
             deg_viz = cell_size_deg * viz_ds
-            legend_handles.append(Line2D([0], [0], color='red', linestyle='--', lw=2))
-            legend_labels.append("RFI exclusion zone")
+            viz_rows, viz_cols = mask_viz_labeled.shape[:2]
+
+            def on_map(x0, x1, y0, y1):
+                """Whether a zone's bounding box touches the raster at all."""
+                return not (x1 < 0 or x0 > viz_cols or y1 < 0 or y0 > viz_rows)
+
+            drawn, off_map = 0, []
             for item in rfi_zones:
                 type_tag = item[0]
                 if type_tag == 'circle':
@@ -2018,9 +2023,15 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                     # a pixel covers less ground east-west than north-south
                     w_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_x) / viz_ds
                     h_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_y) / viz_ds
-                    ax.add_patch(Ellipse((px_x, px_y), w_px, h_px, edgecolor='red', facecolor='none', ls='--', lw=2))
-                    text = ax.text(px_x, px_y-h_px/4, name, color='red', fontsize=12, ha='center')
+                    if not on_map(px_x - w_px / 2, px_x + w_px / 2,
+                                  px_y - h_px / 2, px_y + h_px / 2):
+                        off_map.append(name)
+                        continue
+                    ax.add_patch(Ellipse((px_x, px_y), w_px, h_px, edgecolor='red',
+                                         facecolor='none', ls='--', lw=2, clip_on=True))
+                    text = ax.text(px_x, px_y-h_px/4, name, color='red', fontsize=12, ha='center', clip_on=True)
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
+                    drawn += 1
                 elif type_tag == 'poly':
                     _, coords, name = item
                     verts = []
@@ -2028,17 +2039,47 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                         px = (plon - origin_lon) / deg_viz
                         py = (origin_lat - plat) / deg_viz
                         verts.append((px, py))
-                    ax.add_patch(MplPolygon(verts, closed=True, edgecolor='red', facecolor='none', ls='--', lw=2))
-                    cx = sum(p[0] for p in verts)/len(verts)
-                    cy = sum(p[1] for p in verts)/len(verts)
-                    text = ax.text(cx, cy, name, color='red', fontsize=8, ha='center')
+                    xs = [p[0] for p in verts]
+                    ys = [p[1] for p in verts]
+                    if not on_map(min(xs), max(xs), min(ys), max(ys)):
+                        off_map.append(name)
+                        continue
+                    ax.add_patch(MplPolygon(verts, closed=True, edgecolor='red',
+                                            facecolor='none', ls='--', lw=2, clip_on=True))
+                    cx = sum(xs)/len(xs)
+                    cy = sum(ys)/len(ys)
+                    text = ax.text(cx, cy, name, color='red', fontsize=8, ha='center', clip_on=True)
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
+                    drawn += 1
+
+            # Zones outside the DEM are dropped rather than drawn. They still exclude
+            # nothing inside it, and drawing them wrecked the figure: an artist beyond
+            # the image expands the axes, and `bbox_inches='tight'` then grew the saved
+            # PNG to reach a label 150 km off the south edge -- leaving the map itself
+            # in the top fifth of a mostly empty page.
+            if drawn:
+                legend_handles.append(Line2D([0], [0], color='red', linestyle='--', lw=2))
+                legend_labels.append("RFI exclusion zone")
+            if off_map:
+                print(f"      {Icon.INFO}{len(off_map)} RFI zone(s) lie outside the DEM "
+                      f"and are not drawn: {', '.join(off_map)}")
+
+        # Hold the view to the raster. Every RFI ellipse is an artist, and an artist
+        # outside the image expands the axes to contain it -- so a zone like Mollendo,
+        # 150 km off the south edge of the Colca crop, pushed the map into the top
+        # fifth of the frame and filled the rest with white. The zones are still drawn;
+        # the ones off the map are simply off the map, which is what they are.
+        viz_rows, viz_cols = mask_viz_labeled.shape[:2]
+        ax.set_xlim(-0.5, viz_cols - 0.5)
+        ax.set_ylim(viz_rows - 0.5, -0.5)
 
         deg_viz = cell_size_deg * viz_ds
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x,p: f"{origin_lon + x*deg_viz:.2f}"))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y,p: f"{origin_lat - y*deg_viz:.2f}"))
-        ax.set_xlabel("Longitude")
-        ax.set_ylabel("Latitude")
+        ax.set_xlabel("Longitude (°)")
+        ax.set_ylabel("Latitude (°)")
+        # The axes are pixels, so the bar needs the metric pixel size, not a latitude.
+        add_scale_bar(ax, map_grid.cell_size_x * viz_ds / 1000.0)
         cbar = plt.colorbar(im, fraction=0.035, pad=0.04)
         cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
         # "Oroscope", not "GRAND": this same map is written for a TAMBO run, and the
@@ -2388,6 +2429,80 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
 
     total = labelling + gradients + candidates + observables + scoring + baseline
     return total / 1024 ** 3
+
+
+def add_scale_bar(ax, km_per_x_unit, fraction=0.22, colour="black"):
+    """
+    Draws a kilometre scale bar on a map, and returns the length it chose.
+
+    A map axis labelled in degrees or in pixels does not tell a reader how far anything
+    is, and neither unit converts to distance without knowing where on the Earth it
+    sits: a degree of longitude at Arequipa is 4% shorter than a degree of latitude,
+    and a pixel is whatever the DEM says it is.
+
+    Taking ``km_per_x_unit`` rather than a latitude keeps one function usable by both
+    maps this project writes -- the search map, whose axes are pixels, and the
+    combination overlay, whose axes are degrees.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final; the bar is placed relative
+        to them.
+    km_per_x_unit : float
+        Kilometres per unit of the x axis. For degrees of longitude that is
+        ``111.32 * cos(latitude)``; for pixels it is the metric pixel size over 1000.
+    fraction : float, optional
+        Roughly what fraction of the map width the bar should span, before rounding to
+        a human number.
+    colour : str, optional
+        Bar colour. The default reads on both terrain and shaded relief.
+
+    Returns
+    -------
+    float
+        Length of the bar drawn, in km. Always 1, 2 or 5 times a power of ten.
+
+    Examples
+    --------
+    A two-degree map at 16 degrees south is about 214 km wide, so it gets a 50 km bar:
+
+    >>> import matplotlib; matplotlib.use("Agg")
+    >>> import matplotlib.pyplot as plt, numpy as np
+    >>> from oroscope import site_searcher as ss
+    >>> fig, ax = plt.subplots()
+    >>> _ = ax.set_xlim(-73.0, -71.0); _ = ax.set_ylim(-17.0, -15.0)
+    >>> ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(-16.0)))
+    50.0
+
+    The same function on a pixel axis, 3061 pixels of 30 m:
+
+    >>> _ = ax.set_xlim(0, 3061); _ = ax.set_ylim(1981, 0)
+    >>> ss.add_scale_bar(ax, 0.030)
+    20.0
+    >>> plt.close(fig)
+    """
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    span_km = abs(x1 - x0) * km_per_x_unit
+    if not np.isfinite(span_km) or span_km <= 0:     # pragma: no cover - defensive
+        return 0.0
+
+    target = span_km * fraction
+    power = 10.0 ** math.floor(math.log10(max(target, 1e-9)))
+    length_km = min((1.0, 2.0, 5.0, 10.0), key=lambda m: abs(m * power - target)) * power
+    length_units = length_km / km_per_x_unit
+
+    pad_x, pad_y = 0.04 * (x1 - x0), 0.05 * (y1 - y0)
+    bx, by = x0 + pad_x, y0 + pad_y
+    ax.plot([bx, bx + length_units], [by, by], color=colour, lw=3.4,
+            solid_capstyle="butt", zorder=20)
+    ax.plot([bx, bx + length_units], [by, by], color="white", lw=1.4,
+            solid_capstyle="butt", zorder=21)
+    ax.text(bx + 0.5 * length_units, by + 0.30 * pad_y, f"{length_km:g} km",
+            ha="center", va="bottom", fontsize=9, color=colour, zorder=22,
+            bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.75))
+    return float(length_km)
 
 
 def stride_gap_m(candidate_stride, cell_size_y_m):

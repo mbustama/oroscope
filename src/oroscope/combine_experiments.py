@@ -35,7 +35,8 @@ import os
 import numpy as np
 
 __all__ = ["load_run", "check_alignment", "read_world_file",
-           "pixel_area_km2", "capacity_of", "main"]
+           "pixel_area_km2", "capacity_of", "main",
+           "dem_for_run", "relief_for_mask", "geographic_extent"]
 import tifffile as tiff
 
 from oroscope import explain as explain_mod
@@ -49,6 +50,135 @@ from oroscope import site_searcher as ss
 import matplotlib
 import matplotlib.pyplot as plt                      # noqa: E402
 from matplotlib.patches import Patch                 # noqa: E402
+
+
+def geographic_extent(world: tuple[float, ...], shape: tuple[int, int]) -> tuple:
+    """
+    The ``(left, right, bottom, top)`` an overlay needs to sit in degrees.
+
+    Without it ``imshow`` puts a map in *pixel* coordinates, which is why the overview
+    used to carry no axes at all: pixel indices are not worth labelling, so the ticks
+    were switched off rather than made meaningful.
+
+    The world file's terms are the centre of the top-left pixel, so half a pixel is
+    added back at each edge to give the outer bounds of the raster.
+
+    Parameters
+    ----------
+    world : tuple of float
+        The six affine terms, from :func:`read_world_file`.
+    shape : tuple of int
+        ``(rows, cols)`` of the raster.
+
+    Returns
+    -------
+    tuple of float
+        ``(left, right, bottom, top)`` in degrees, for ``imshow(extent=...)``.
+
+    Examples
+    --------
+    >>> from oroscope import combine_experiments as ce
+    >>> world = (0.01, 0.0, 0.0, -0.01, -72.0, -15.0)     # 0.01 deg pixels
+    >>> left, right, bottom, top = ce.geographic_extent(world, (100, 200))
+    >>> round(left, 3), round(right, 3)
+    (-72.005, -70.005)
+    >>> round(bottom, 3), round(top, 3)
+    (-16.005, -14.995)
+    """
+    cell_x, _, _, cell_y, x0, y0 = world
+    rows, cols = shape
+    left = x0 - 0.5 * cell_x
+    right = x0 + (cols - 0.5) * cell_x
+    top = y0 - 0.5 * cell_y                          # cell_y is negative going south
+    bottom = y0 + (rows - 0.5) * cell_y
+    return (left, right, bottom, top)
+
+
+def dem_for_run(run: dict) -> str | None:
+    """
+    The DEM a run searched, if it can still be found.
+
+    The combiner works from the masks the runs wrote, so it never needed the DEM --
+    which is why the overview lost its terrain. The path is recorded twice, in the
+    results parameters and in ``provenance.json``, so it can be recovered when the file
+    is still there and reported as absent when it is not.
+
+    Parameters
+    ----------
+    run : dict
+        A run, as :func:`load_run` returns.
+
+    Returns
+    -------
+    str or None
+        Absolute path to the DEM, or ``None`` when it is not recorded or not present.
+    """
+    results = run.get("results") or {}
+    candidates = [(results.get("parameters") or {}).get("dem")]
+    prov = os.path.join(run.get("dir", ""), "provenance.json")
+    if os.path.exists(prov):
+        try:
+            with open(prov) as f:
+                candidates.append((json.load(f).get("dem") or {}).get("path"))
+        except (OSError, ValueError):                # pragma: no cover - defensive
+            pass
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def relief_for_mask(dem_path: str, shape: tuple[int, int]) -> np.ndarray | None:
+    """
+    Hillshaded relief for the mask grid, as a greyscale array in [0, 1].
+
+    Shaded relief rather than a colour elevation ramp, deliberately: the overlay needs
+    the colour for its categories, and a terrain colourmap underneath would compete
+    with them for the reader's attention. Relief carries the shape of the ground
+    without spending any hue on it.
+
+    The mask is the DEM downsampled, so the DEM is read strided to match rather than
+    resampled. The float32 ``.npy`` cache the searcher leaves beside the DEM is
+    memory-mapped when present, which makes a strided read of a 129 Mpx DEM cost
+    almost nothing; otherwise the GeoTIFF is read whole.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM the run searched.
+    shape : tuple of int
+        ``(rows, cols)`` of the mask to match.
+
+    Returns
+    -------
+    ndarray or None
+        Relief in [0, 1] with the given shape, or ``None`` if the DEM could not be
+        read or does not divide onto the mask grid.
+    """
+    cache = os.path.splitext(dem_path)[0] + ".npy"
+    try:
+        if os.path.exists(cache):
+            elevation = np.load(cache, mmap_mode="r")
+        else:
+            elevation = tiff.imread(dem_path)
+    except Exception:                                # pragma: no cover - unreadable DEM
+        return None
+
+    rows, cols = shape
+    step = max(1, int(round(elevation.shape[0] / float(rows))))
+    small = np.asarray(elevation[::step, ::step], dtype=np.float64)
+    if small.shape[0] < rows or small.shape[1] < cols:
+        return None
+    small = small[:rows, :cols]
+
+    finite = np.isfinite(small)
+    if not finite.any():                             # pragma: no cover - empty DEM
+        return None
+    small = np.where(finite, small, np.nanmedian(small[finite]))
+
+    shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).hillshade(
+        small, vert_exag=1.5, dx=1.0, dy=1.0)
+    return np.clip(shaded, 0.0, 1.0)
 
 
 def read_world_file(tfw_path: str) -> tuple[float, ...]:
@@ -341,27 +471,63 @@ def main():
 
     if not args.no_image and len(labels) == 2:
         a, b = labels
-        fig, ax = plt.subplots(figsize=(10, 7))
-        # 0 neither, 1 a only, 2 b only, 3 both
-        img = np.zeros(code.shape, dtype=np.uint8)
-        img[masks[a] & ~masks[b]] = 1
-        img[masks[b] & ~masks[a]] = 2
-        img[masks[a] & masks[b]] = 3
-        cmap = matplotlib.colors.ListedColormap(
-            ["#EDEFEC", "#2C6E8F", "#B0781E", "#7B2D8E"])
-        ax.imshow(img, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
-        ax.set_title(f"{a} and {b}: where each is viable, and where both are")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.legend(handles=[
-            Patch(facecolor="#2C6E8F", label=f"{a} only"),
-            Patch(facecolor="#B0781E", label=f"{b} only"),
-            Patch(facecolor="#7B2D8E", label="Both (co-located)"),
-        ], loc="lower right", framealpha=0.9)
+        fig, ax = plt.subplots(figsize=(11, 8))
+        extent = geographic_extent(world, code.shape)
+
+        # Shaded relief underneath, recovered from whichever run still knows where its
+        # DEM is. The overlay is what the figure is about, so the terrain is greyscale
+        # and the categories keep the colour.
+        dem_path = next((p for p in (dem_for_run(r) for r in runs) if p), None)
+        relief = relief_for_mask(dem_path, code.shape) if dem_path else None
+        if relief is not None:
+            ax.imshow(relief, cmap="gray", vmin=0.0, vmax=1.35, extent=extent,
+                      origin="upper", interpolation="bilinear", zorder=0)
+        base_alpha = 0.62 if relief is not None else 1.0
+
+        only_a = masks[a] & ~masks[b]
+        only_b = masks[b] & ~masks[a]
+        both = masks[a] & masks[b]
+
+        # Drawn as separate RGBA layers rather than one indexed image, so "neither"
+        # stays transparent and the relief shows through it.
+        for mask, colour, alpha, order in ((only_a, "#2C6E8F", base_alpha, 1),
+                                           (only_b, "#B0781E", base_alpha, 2),
+                                           (both, "#B5179E", 1.0, 3)):
+            if not mask.any():
+                continue
+            rgba = np.zeros(code.shape + (4,), dtype=np.float64)
+            rgba[..., :3] = matplotlib.colors.to_rgb(colour)
+            rgba[..., 3] = np.where(mask, alpha, 0.0)
+            ax.imshow(rgba, extent=extent, origin="upper",
+                      interpolation="nearest", zorder=order)
+
+        joint_km2 = float(both.sum()) * px_km2
+        ax.set_title(f"{a} and {b}: where each is viable, and where both are\n"
+                     f"Joint {joint_km2:,.1f} km² — "
+                     f"{100*both.sum()/max(masks[a].sum(), 1):.1f}% of {a}'s ground, "
+                     f"{100*both.sum()/max(masks[b].sum(), 1):.1f}% of {b}'s")
+        ax.set_xlabel("Longitude (°)")
+        ax.set_ylabel("Latitude (°)")
+        ax.tick_params(direction="out", length=4)
+        centre_lat = 0.5 * (extent[2] + extent[3])
+        ax.set_aspect(1.0 / np.cos(np.radians(centre_lat)))
+        ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
+
+        handles = [Patch(facecolor="#2C6E8F", alpha=base_alpha, label=f"{a} only"),
+                   Patch(facecolor="#B0781E", alpha=base_alpha, label=f"{b} only"),
+                   Patch(facecolor="#B5179E", label="Both (co-located)")]
+        if relief is not None:
+            handles.append(Patch(facecolor="#9A9A9A",
+                                 label=f"Relief from {os.path.basename(dem_path)}"))
+        ax.legend(handles=handles, loc="lower right", framealpha=0.92)
         png = os.path.join(out_dir, "combined_overview.png")
         fig.savefig(png, dpi=140, bbox_inches="tight")
         plt.close(fig)
         written.append(png)
+        if relief is None:
+            print(f"   {ss.C.WARN}{ss.Icon.WARN}No DEM found for either run, so the overview "
+                  f"has no relief. The path is recorded in each run's results and "
+                  f"provenance; it is only missing if the DEM has moved.{ss.C.RESET}")
 
     report_path = os.path.join(out_dir, "combined_report.json")
     with open(report_path, "w") as f:

@@ -75,7 +75,7 @@ from oroscope.site_searcher import (  # noqa: F401
     # memory
     preflight_memory, estimate_peak_memory_gb, apply_memory_cap, available_memory_gb,
     # the stride/closing interaction, which decides whether an area is a lower bound
-    stride_gap_m, closing_element_m, warn_stride_outruns_closing,
+    stride_gap_m, closing_element_m, warn_stride_outruns_closing, add_scale_bar,
     # geometry and the DEM
     resolve_grid_geometry, read_dem_geometry, read_dem_origin, resolve_origin,
     build_elevation_cache, load_dem_and_init_buffers, MapGrid,
@@ -152,7 +152,7 @@ __all__ = [
     "validate_parameters", "parse_score_weights", "explicitly_passed",
     "preflight_memory", "estimate_peak_memory_gb", "apply_memory_cap",
     "available_memory_gb",
-    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
     "resolve_grid_geometry", "read_dem_geometry", "read_dem_origin", "resolve_origin",
     "build_elevation_cache", "load_dem_and_init_buffers", "MapGrid",
     "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
