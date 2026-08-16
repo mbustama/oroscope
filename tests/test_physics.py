@@ -472,6 +472,83 @@ class TestProductionEscapeOptimum(unittest.TestCase):
         self.assertLess(lo, 1.0e6)
         self.assertGreater(hi, 1.0e7)
 
+
+class TestTheExitIntegralIsResolved(unittest.TestCase):
+    """
+    The integrand is a spike at the far surface, so the grid has to be in ``X - x``.
+
+    Only interactions within a few tau ranges of the exit contribute; everything deeper
+    is absorbed. Sampled uniformly in ``x`` over a range up to five decades wide, the
+    spacing outran the spike and the trapezoid rule reported the area of something it
+    never resolved -- 8x high at 3 PeV and 10^9 g/cm^2, with the trend in depth
+    inverted. These pin the converged values, so a return to a uniform grid fails here
+    rather than in a band six months later.
+    """
+
+    def test_the_converged_value_where_a_uniform_grid_was_eight_times_high(self):
+        # 1.100343e-05 from the substituted form at 200,000 points; the uniform grid
+        # needed 2,000,000 to reach it and gave 8.884e-05 at its 2000-point default.
+        self.assertAlmostEqual(physics.tau_exit_probability(1.0e9, 3.0),
+                               1.1003e-05, delta=2.0e-08)
+
+    def test_the_default_grid_is_already_converged(self):
+        """Refining by a hundredfold must not move the answer."""
+        coarse = physics.tau_exit_probability(1.0e9, 3.0)
+        fine = physics.tau_exit_probability(1.0e9, 3.0, samples=200_000)
+        self.assertAlmostEqual(coarse / fine, 1.0, delta=1.0e-4)
+
+    def test_more_rock_can_only_absorb_more(self):
+        """
+        The sign of the trend, which the unresolved grid had backwards.
+
+        A uniform grid gave 2.63e-05, 4.60e-05, 8.88e-05 over these depths -- rising,
+        with a spurious maximum at the edge of the grid.
+        """
+        p = physics.tau_exit_probability([1.0e8, 3.0e8, 1.0e9, 3.0e9], 3.0)
+        self.assertTrue(bool((np.diff(p) < 0).all()), f"should fall with depth: {p}")
+
+    def test_the_resolved_regime_is_unchanged(self):
+        """
+        At 100 PeV and above the uniform grid was already within 3%, which is why this
+        went unseen. Those values must not have moved.
+        """
+        for energy, depth, before in ((100.0, 1.0e6, 1.6255e-03),
+                                      (1000.0, 1.0e7, 1.6274e-02),
+                                      (10000.0, 1.0e8, 1.5870e-02),
+                                      (3.0, 1.0e6, 2.3461e-05)):
+            got = physics.tau_exit_probability(depth, energy)
+            self.assertAlmostEqual(got / before, 1.0, delta=2.0e-4,
+                                   msg=f"{energy} PeV at {depth:.0e}")
+
+    def test_the_published_optima_are_unchanged(self):
+        """12 km of rock at 100 PeV rising to 23 km at 10 EeV, as before."""
+        for energy, before in ((100.0, 3.302e6), (1000.0, 5.713e6), (10000.0, 6.230e6)):
+            got = physics.production_escape_optimum_gcm2(energy)
+            self.assertAlmostEqual(got / before, 1.0, delta=1.0e-3,
+                                   msg=f"{energy} PeV")
+
+    def test_tambos_configured_range_now_contains_its_own_optimum(self):
+        """
+        The band takes its low edge at the *lowest* energy asked for, and TAMBO's range
+        starts at 3 PeV -- exactly where the integral did not converge. It returned
+        (1.18e8, 2.89e8) over 3 PeV - 1 EeV, whose low edge is 20x above the 1 EeV
+        optimum of 5.7e6, so the band excluded the depth it exists to find.
+        """
+        lo, hi = physics.depth_band_from_energy(3.0, 1000.0)
+        optimum = physics.production_escape_optimum_gcm2(1000.0)
+        self.assertLess(lo, optimum)
+        self.assertGreater(hi, optimum)
+
+    def test_lowering_the_minimum_energy_cannot_raise_the_low_edge(self):
+        """
+        A wider range must give a wider band. It did not: 100 PeV - 10 EeV gave a low
+        edge of 5.2e5 and 3 PeV - 10 EeV gave 5.6e7, a hundredfold *rise* from asking
+        for more.
+        """
+        wide = physics.depth_band_from_energy(3.0, 10000.0)[0]
+        narrow = physics.depth_band_from_energy(100.0, 10000.0)[0]
+        self.assertLessEqual(wide, narrow)
+
     def test_beta_rises_with_energy_as_photonuclear_does(self):
         betas = [physics.tau_energy_loss_beta(e) for e in (100.0, 1000.0, 10000.0)]
         self.assertTrue(all(b > a for a, b in zip(betas, betas[1:])))

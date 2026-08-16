@@ -2517,10 +2517,13 @@ score against the default (10⁵, 10⁷) and never call this. `production_escape
 searches to 10⁹ but its answers are in the resolved regime at ≥100 PeV: 3.30×10⁶ at
 100 PeV, 5.71×10⁶ at 1 EeV, 6.23×10⁶ at 10 EeV, all reproducing published values.
 
-**Not fixed.** The fix is a substitution — integrate in `u = X − x` on a log grid, or
-truncate to a few tau ranges below the surface — and it changes a physics function's
-outputs, so it wants its own change with a test that pins the converged values. Left to
-the owner. `tools/make_animations.py` scores against the default band and says so.
+**Fixed in §6.56.** The substitution `u = X − x` on a log grid, with tests pinning the
+converged values. `tools/make_animations.py` scores against the default band and says so.
+
+*One correction to the numbers above.* The band quoted as "(5.6×10⁷, 2.9×10⁸) for
+TAMBO's configured 3 PeV – 1 EeV range" is the 3 PeV – **10 EeV** band. Over 3 PeV –
+1 EeV the shipped code gave (1.18×10⁸, 2.89×10⁸). The conclusion is unchanged and if
+anything understated: the low edge is 20× above the 1 EeV optimum either way.
 
 ### 6.45 Four more animations, and the two things building them measured
 
@@ -3263,6 +3266,61 @@ one estimated for it — and three that pin the monotonicity of
 `min` is only the right answer while those hold.
 
 622 → 631 tests.
+
+### 6.56 The exit integral, resolved: the grid belongs in `X − x` ✅ delivered
+
+§6.44 diagnosed this and left it to the owner. Fixed now, with the substitution it
+called obvious.
+
+The integrand of
+
+    P(X) = ∫₀^X (dx/λ) exp(−x/λ) S(X − x)
+
+is a spike against the far surface: `S` kills everything produced more than a few tau
+ranges deep, and `X` can be five decades wide. Sampled uniformly in `x`, the spacing
+outran the spike. Substituting `u = X − x` and spacing logarithmically in `u` puts the
+points where the weight is. Measured at 3 PeV, `X` = 10⁹ g/cm²:
+
+| grid | P(X) |
+| --- | --- |
+| uniform, 2000 *(the old default)* | 8.884e−05 |
+| uniform, 20,000 | 1.328e−05 |
+| uniform, 200,000 | 1.103e−05 |
+| uniform, 2,000,000 | 1.100e−05 |
+| **log in `u`, 500** | **1.1009e−05** |
+| **log in `u`, 2000** *(the new default)* | **1.1004e−05** |
+
+**Converged at a thousandth of the points**, and converged at 500 — the default of 2000
+now sits 0.003% from the 200,000-point answer. Cost: 0.016 s per 200 evaluations against
+0.012 s, which is 33% for three orders of magnitude of accuracy.
+
+**Nothing that was already right moved.** At 100 PeV and above the old grid was within
+3%, and the resolved values reproduce to 1 part in 10⁴: 1.6255e−03, 1.6274e−02,
+1.5870e−02 at the three checkpoints. `production_escape_optimum_gcm2` is unchanged at
+3.302e6, 5.713e6, 6.230e6 g/cm² — the 12 km rising to 23 km of rock — so the published
+optima stand.
+
+**What did move is the band, and it is the part that mattered.**
+`depth_band_from_energy` takes its low edge at the *lowest* energy asked for, and
+TAMBO's configured range starts at 3 PeV — precisely where the integral failed. So the
+defect reached the band in full even though the integral was fine at every energy the
+band's other edge came from:
+
+| range | before | after |
+| --- | --- | --- |
+| 3 PeV – 1 EeV | (1.18e8, 2.89e8) | **(2.18e4, 1.18e8)** |
+| 3 PeV – 10 EeV | (5.58e7, 2.89e8) | **(2.18e4, 5.58e7)** |
+| 100 PeV – 10 EeV | (5.21e5, 5.58e7) | (5.21e5, 5.58e7) |
+
+The published 1 EeV optimum, 5.7×10⁶ g/cm², lies **inside** the corrected 3 PeV – 1 EeV
+band and 20× **below** the old one: the band excluded the depth it exists to find.
+Lowering the minimum energy also used to *raise* the low edge, which a band cannot do —
+asking for a wider range gave a narrower answer. Both are now tests.
+
+**Still no published number moves.** Every config leaves `depth_band_gcm2` null, so no
+search has ever called either function; searches score against the default (10⁵, 10⁷).
+
+631 → 638 tests.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
