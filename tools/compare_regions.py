@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(REPO, "src"))
 
 import numpy as np                                          # noqa: E402
 
+from oroscope import explain                                # noqa: E402
 from oroscope import site_searcher as ss                    # noqa: E402
 from oroscope.fetch_dem import REGIONS as DEM_REGIONS       # noqa: E402
 
@@ -93,7 +94,12 @@ def summarise(results):
     if not results:
         return None
     r = results["results"]
-    sites = r.get("sites") or []
+    # The selected sites, not every site that qualified. `total_sites`,
+    # `total_capacity` and the exported mask all cover the selection only, so summing
+    # the raw list puts an all-sites area beside a selected-sites count in the same row.
+    # Latent while every stored run selects everything it found, which is why it is
+    # worth fixing now rather than after the first `stop_at_target` run lands.
+    sites, _ = explain.selected_sites(results)
     funnel = results.get("funnel") or {}
     # By name, never by position: a run with RFI zones carries an extra stage, so the
     # same index means different things in two regions. That is a real trap -- it made

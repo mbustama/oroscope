@@ -3452,6 +3452,21 @@ Recorded so the same ground is not covered twice.
   URL query parameter, so it can reach shell history and proxy logs, and no error path
   redacts it — worth knowing, not a defect in this code.
 
+### 6.61 The comparison table put an all-sites area beside a selected-sites count ✅ delivered
+
+Latent, found by audit. `compare_regions.summarise` took its site count from
+`total_sites` — the selection — and its area from `sum(s["area_km2"] for s in sites)`,
+the whole qualifying list. With `stop_at_target` those differ, and
+`explain.selected_sites` exists precisely to keep them apart; its docstring warns that
+"summing the list over-reports area and site count against every other number in the
+file". This module summed the list.
+
+Nothing has moved yet: every stored run selected every site it found, so the two are
+equal in all ten. Regenerating `results/region_comparison.md` after the fix is
+byte-identical, which is the check. Fixed now rather than after the first
+`stop_at_target` run lands, since by then the wrong number would already be published
+and would look exactly like the right one.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
