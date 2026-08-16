@@ -87,6 +87,7 @@ __all__ = [
     "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
     "preflight_memory", "emit_explanation", "resolve_config_paths",
     "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
+    "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
 ]
 
 # Try to import psutil for RAM stats
@@ -1988,21 +1989,44 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         elev_viz = elev_viz[:mr, :mc]
         mask_viz_labeled = mask_viz_labeled[:mr, :mc]
         
-        im = ax.imshow(elev_viz, cmap='terrain', vmin=0, vmax=6000)
-        
+        # Scaled to this DEM rather than a fixed 0-6000 m, so the whole colour range
+        # describes ground that is actually in the picture. Water is drawn as water
+        # instead of as the bottom of the terrain ramp, where it reads as low land.
+        vmin, vmax = altitude_limits(elev_viz)
+        terrain = plt.get_cmap('terrain').with_extremes(under=WATER_COLOUR,
+                                                       bad=NODATA_COLOUR)
+        # NaN survives this comparison as NaN -- `NaN <= x` is False -- so nodata
+        # reaches the colormap as "bad" and water as "under", and the two stay
+        # distinguishable. Collapsing both to water claimed sea where the DEM is
+        # simply silent.
+        land_only = np.where(elev_viz <= SEA_LEVEL_M, -np.inf, elev_viz)
+        im = ax.imshow(land_only, cmap=terrain, vmin=vmin, vmax=vmax)
+
         legend_handles = []
         legend_labels = []
 
         if count > 0:
-            cmap = plt.get_cmap('tab10') 
-            for i in range(1, count + 1): 
+            cmap = plt.get_cmap('tab10')
+            for i in range(1, count + 1):
                 color = cmap((i - 1) % 10)
                 ax.contour((mask_viz_labeled == i), levels=[0.5], colors=[color], linewidths=2.5)
-                    
+
                 site_data = site_details[i - 1]
                 label_str = f"Site {site_data['site_id']}: {site_data['capacity_exact']} DUs ({site_data['area_km2']} km²)"
                 legend_handles.append(Line2D([0], [0], color=color, lw=2.5))
                 legend_labels.append(label_str)
+
+                # The number on the map, so a site in the legend can be found in the
+                # picture. At its own centroid, which for a ring-shaped region may not
+                # be inside it -- acceptable for a label, and better than a corner.
+                where = np.argwhere(mask_viz_labeled == i)
+                if where.size:
+                    cy, cx = where.mean(axis=0)
+                    tag = ax.text(cx, cy, str(site_data['site_id']), color=color,
+                                  fontsize=11, fontweight='bold', ha='center',
+                                  va='center', zorder=12, clip_on=True)
+                    tag.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'),
+                                          path_effects.Normal()])
         
         if rfi_zones:
             deg_viz = cell_size_deg * viz_ds
@@ -2080,14 +2104,22 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         ax.set_ylabel("Latitude (°)")
         # The axes are pixels, so the bar needs the metric pixel size, not a latitude.
         add_scale_bar(ax, map_grid.cell_size_x * viz_ds / 1000.0)
-        cbar = plt.colorbar(im, fraction=0.035, pad=0.04)
+        cbar = plt.colorbar(im, ax=ax, fraction=0.035, pad=0.02, extend='min')
         cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
-        # "Oroscope", not "GRAND": this same map is written for a TAMBO run, and the
-        # title said GRAND on every one of them.
-        ax.set_title(f"Oroscope site search | {region_name if region_name is not None else ''} {'|' if region_name is not None else ''} {search_mode.title()} mode\nFound {count} sites | Total capacity: {cumulative_capacity if search_mode=='distributed' else 'N/A'} DUs | Grid: {grid_type} | Spacing: {antenna_spacing_km} km | Altitude restriction: {min_altitude}-{max_altitude} m")
-        
+        add_north_arrow(ax)
+
+        # No title. Everything it carried is either on the figure already (the sites,
+        # in the legend), in the run's own summary, or in the caption of whatever this
+        # ends up in -- and a two-line title over a map is a caption in the wrong place.
+        #
+        # The legend goes outside the axes for the same reason: it was a filled box
+        # sitting on top of the data it describes, and on a dense map it hid whichever
+        # sites happened to be in the top right.
         fs = 'small' if len(legend_labels) > 8 else 'medium'
-        ax.legend(legend_handles, legend_labels, loc='upper right', fontsize=fs, framealpha=0.8)
+        if legend_labels:
+            ax.legend(legend_handles, legend_labels, fontsize=fs, framealpha=0.9,
+                      loc='upper left', bbox_to_anchor=(0.0, -0.06),
+                      ncol=max(1, min(3, len(legend_labels))), borderaxespad=0.0)
         
         img_name = os.path.join(run_output_dir, base_filename + "." + output_image_format.strip('.'))
         
@@ -2429,6 +2461,93 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
 
     total = labelling + gradients + candidates + observables + scoring + baseline
     return total / 1024 ** 3
+
+
+SEA_LEVEL_M = 0.5          # at or below this is water, not ground at zero altitude
+WATER_COLOUR = "#5A7FA6"
+# Nodata is neither water nor low ground, and painting it as either is a claim the DEM
+# does not support. A warm neutral, so it cannot be mistaken for the grey ramp or the sea.
+NODATA_COLOUR = "#E0DACE"
+
+
+def altitude_limits(elevation, low_percentile=0.5, high_percentile=99.8):
+    """
+    Altitude range for a colour scale, from the DEM rather than from a constant.
+
+    A fixed 0-6000 m scale spends most of its range on altitudes a given DEM does not
+    contain: the Colca crop runs 1500-6300 m, so half the colour bar described ground
+    that is not in the picture and the relief that is there got half the contrast it
+    could have had.
+
+    Percentiles rather than the extremes, because one spurious pixel -- a nodata
+    sentinel, a spike -- otherwise sets the whole scale. Water is excluded from the
+    upper end and pinned to the bottom, so a coastal DEM does not spend a third of its
+    range on ocean.
+
+    Parameters
+    ----------
+    elevation : ndarray
+        Elevation in metres. NaN is ignored.
+    low_percentile, high_percentile : float, optional
+        Percentiles of the land pixels to clip to.
+
+    Returns
+    -------
+    tuple of float
+        ``(vmin, vmax)`` in metres, rounded outward to a round number.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import site_searcher as ss
+    >>> z = np.linspace(1500.0, 6300.0, 1000)
+    >>> ss.altitude_limits(z)
+    (1500.0, 6300.0)
+
+    Ocean does not drag the floor down with it:
+
+    >>> z = np.concatenate([np.zeros(500), np.linspace(2000.0, 5000.0, 500)])
+    >>> ss.altitude_limits(z)
+    (0.0, 5000.0)
+    """
+    values = np.asarray(elevation, dtype=np.float64).ravel()
+    values = values[np.isfinite(values)]
+    if values.size == 0:                             # pragma: no cover - empty DEM
+        return (0.0, 6000.0)
+    land = values[values > SEA_LEVEL_M]
+    if land.size == 0:                               # pragma: no cover - all water
+        return (0.0, 1.0)
+    lo = float(np.percentile(land, low_percentile))
+    hi = float(np.percentile(land, high_percentile))
+    if (values <= SEA_LEVEL_M).any():
+        lo = 0.0
+    step = 100.0
+    return (math.floor(lo / step) * step, math.ceil(hi / step) * step)
+
+
+def add_north_arrow(ax, x=0.965, y=0.955, size=0.055):
+    """
+    Draws a north arrow in axes coordinates.
+
+    Both maps this project writes are north-up, so the arrow is a convention rather
+    than information -- but a map without one asks the reader to assume, and a map in a
+    talk gets read by people who did not make it.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on.
+    x, y : float, optional
+        Position of the arrow's tip, in axes coordinates.
+    size : float, optional
+        Length of the arrow, as a fraction of the axes height.
+    """
+    ax.annotate("N", xy=(x, y), xytext=(x, y - size), xycoords="axes fraction",
+                textcoords="axes fraction", ha="center", va="top",
+                fontsize=11, fontweight="bold", color="black", zorder=25,
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.6,
+                                shrinkA=0, shrinkB=0),
+                bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.7))
 
 
 def add_scale_bar(ax, km_per_x_unit, fraction=0.22, colour="black"):

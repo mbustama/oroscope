@@ -36,7 +36,7 @@ import numpy as np
 
 __all__ = ["load_run", "check_alignment", "read_world_file",
            "pixel_area_km2", "capacity_of", "main",
-           "dem_for_run", "relief_for_mask", "geographic_extent"]
+           "dem_for_run", "relief_for_mask", "elevation_for_mask", "geographic_extent"]
 import tifffile as tiff
 
 from oroscope import explain as explain_mod
@@ -50,6 +50,7 @@ from oroscope import site_searcher as ss
 import matplotlib
 import matplotlib.pyplot as plt                      # noqa: E402
 from matplotlib.patches import Patch                 # noqa: E402
+from matplotlib.lines import Line2D                  # noqa: E402
 
 
 def geographic_extent(world: tuple[float, ...], shape: tuple[int, int]) -> tuple:
@@ -126,6 +127,45 @@ def dem_for_run(run: dict) -> str | None:
         if path and os.path.exists(path):
             return path
     return None
+
+
+def elevation_for_mask(dem_path: str, shape: tuple[int, int]) -> np.ndarray | None:
+    """
+    The run's DEM, read strided onto the mask grid.
+
+    The mask is the DEM downsampled, so it is read strided to match rather than
+    resampled. The float32 ``.npy`` cache the searcher leaves beside the DEM is
+    memory-mapped when present, which makes a strided read of a 129 Mpx DEM cost almost
+    nothing; otherwise the GeoTIFF is read whole.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM the run searched.
+    shape : tuple of int
+        ``(rows, cols)`` of the mask to match.
+
+    Returns
+    -------
+    ndarray or None
+        Elevation in metres with the given shape, or ``None`` if the DEM could not be
+        read or is smaller than the mask.
+    """
+    cache = os.path.splitext(dem_path)[0] + ".npy"
+    try:
+        if os.path.exists(cache):
+            elevation = np.load(cache, mmap_mode="r")
+        else:
+            elevation = tiff.imread(dem_path)
+    except Exception:                                # pragma: no cover - unreadable DEM
+        return None
+
+    rows, cols = shape
+    step = max(1, int(round(elevation.shape[0] / float(rows))))
+    small = np.asarray(elevation[::step, ::step], dtype=np.float64)
+    if small.shape[0] < rows or small.shape[1] < cols:
+        return None
+    return small[:rows, :cols]
 
 
 def relief_for_mask(dem_path: str, shape: tuple[int, int]) -> np.ndarray | None:
@@ -474,26 +514,59 @@ def main():
         fig, ax = plt.subplots(figsize=(11, 8))
         extent = geographic_extent(world, code.shape)
 
-        # Shaded relief underneath, recovered from whichever run still knows where its
-        # DEM is. The overlay is what the figure is about, so the terrain is greyscale
-        # and the categories keep the colour.
+        # Altitude in greyscale, shaded for relief, with a colour bar that reads it.
+        #
+        # Grey rather than a terrain ramp, deliberately, and it is the whole reason this
+        # figure works: the categories are the only hues on the map, so nothing competes
+        # with them. A terrain ramp underneath put tan and brown next to TAMBO's orange
+        # and the two became hard to tell apart -- the overlay started looking like
+        # geology. Grey costs nothing here because altitude is on the bar.
         dem_path = next((p for p in (dem_for_run(r) for r in runs) if p), None)
-        relief = relief_for_mask(dem_path, code.shape) if dem_path else None
-        if relief is not None:
-            ax.imshow(relief, cmap="gray", vmin=0.0, vmax=1.35, extent=extent,
-                      origin="upper", interpolation="bilinear", zorder=0)
-        base_alpha = 0.62 if relief is not None else 1.0
+        elevation = elevation_for_mask(dem_path, code.shape) if dem_path else None
+        im = None
+        if elevation is not None:
+            vmin, vmax = ss.altitude_limits(elevation)
+            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            # Light greys only, so the darkest ground still sits well behind the
+            # overlay rather than competing with it for contrast.
+            grey = matplotlib.colors.LinearSegmentedColormap.from_list(
+                "altitude_grey", ["#3C3C3C", "#F2F2F2"])
+            shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).shade(
+                np.nan_to_num(elevation, nan=vmin), cmap=grey, norm=norm,
+                blend_mode="soft", vert_exag=2.0, dx=1.0, dy=1.0)
+            # Water is water, not the bottom of the ramp, where flat ocean hillshades to
+            # a featureless tone that reads as land with no data. And nodata is neither:
+            # filling NaN with vmin before shading painted it as dark low ground, which
+            # is why the corner of the Arequipa DEM came out as a grey rectangle.
+            water = elevation <= ss.SEA_LEVEL_M
+            missing = ~np.isfinite(elevation)
+            shaded[water & ~missing, :3] = matplotlib.colors.to_rgb(ss.WATER_COLOUR)
+            shaded[missing, :3] = matplotlib.colors.to_rgb(ss.NODATA_COLOUR)
+            ax.imshow(shaded, extent=extent, origin="upper",
+                      interpolation="bilinear", zorder=0)
+            im = matplotlib.cm.ScalarMappable(norm=norm, cmap=grey)
+        base_alpha = 0.55 if elevation is not None else 1.0
 
         only_a = masks[a] & ~masks[b]
         only_b = masks[b] & ~masks[a]
         both = masks[a] & masks[b]
 
-        # Drawn as separate RGBA layers rather than one indexed image, so "neither"
-        # stays transparent and the relief shows through it.
-        for mask, colour, alpha, order in ((only_a, "#2C6E8F", base_alpha, 1),
-                                           (only_b, "#B0781E", base_alpha, 2),
-                                           (both, "#B5179E", 1.0, 3)):
+        # A class covering most of the frame is outlined, not filled. Once the terrain
+        # underneath carries altitude in colour, a translucent wash over 80% of the map
+        # turns the whole thing to mud and makes the other classes look like terrain --
+        # so the big one gets a boundary and the small ones, which are what a reader is
+        # hunting for, keep their solid colour.
+        fill_limit = 0.40 * code.size
+        outlined = []
+        for mask, colour, alpha, order in ((only_a, "#1B6CA8", base_alpha, 1),
+                                           (only_b, "#C8621B", 0.95, 2),
+                                           (both, "#E8189B", 1.0, 3)):
             if not mask.any():
+                continue
+            if mask.sum() > fill_limit and elevation is not None:
+                ax.contour(mask.astype(float), levels=[0.5], colors=[colour],
+                           linewidths=1.4, extent=extent, origin="upper", zorder=order)
+                outlined.append(colour)
                 continue
             rgba = np.zeros(code.shape + (4,), dtype=np.float64)
             rgba[..., :3] = matplotlib.colors.to_rgb(colour)
@@ -502,29 +575,41 @@ def main():
                       interpolation="nearest", zorder=order)
 
         joint_km2 = float(both.sum()) * px_km2
-        ax.set_title(f"{a} and {b}: where each is viable, and where both are\n"
-                     f"Joint {joint_km2:,.1f} km² — "
-                     f"{100*both.sum()/max(masks[a].sum(), 1):.1f}% of {a}'s ground, "
-                     f"{100*both.sum()/max(masks[b].sum(), 1):.1f}% of {b}'s")
+        # No title: the joint number belongs in the legend, where a reader looking up
+        # what magenta means finds it, and the rest belongs in the caption.
         ax.set_xlabel("Longitude (°)")
         ax.set_ylabel("Latitude (°)")
         ax.tick_params(direction="out", length=4)
         centre_lat = 0.5 * (extent[2] + extent[3])
         ax.set_aspect(1.0 / np.cos(np.radians(centre_lat)))
         ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(centre_lat)))
+        ss.add_north_arrow(ax)
 
-        handles = [Patch(facecolor="#2C6E8F", alpha=base_alpha, label=f"{a} only"),
-                   Patch(facecolor="#B0781E", alpha=base_alpha, label=f"{b} only"),
-                   Patch(facecolor="#B5179E", label="Both (co-located)")]
-        if relief is not None:
-            handles.append(Patch(facecolor="#9A9A9A",
-                                 label=f"Relief from {os.path.basename(dem_path)}"))
-        ax.legend(handles=handles, loc="lower right", framealpha=0.92)
+        if im is not None:
+            cbar = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.02)
+            cbar.set_label("Altitude (m)", rotation=270, labelpad=15)
+
+        pct_a = 100.0 * both.sum() / max(masks[a].sum(), 1)
+        pct_b = 100.0 * both.sum() / max(masks[b].sum(), 1)
+        def key(colour, label, alpha=1.0):
+            """A filled patch, or a line when that class was outlined rather than filled."""
+            if colour in outlined:
+                return Line2D([0], [0], color=colour, lw=1.6, label=f"{label} (outline)")
+            return Patch(facecolor=colour, alpha=alpha, label=label)
+
+        handles = [
+            key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²", base_alpha),
+            key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
+            key("#E8189B", f"Both — {joint_km2:,.1f} km²  "
+                           f"({pct_a:.1f}% of {a}, {pct_b:.1f}% of {b})"),
+        ]
+        ax.legend(handles=handles, framealpha=0.9, fontsize="small",
+                  loc="upper left", bbox_to_anchor=(0.0, -0.07), borderaxespad=0.0)
         png = os.path.join(out_dir, "combined_overview.png")
         fig.savefig(png, dpi=140, bbox_inches="tight")
         plt.close(fig)
         written.append(png)
-        if relief is None:
+        if elevation is None:
             print(f"   {ss.C.WARN}{ss.Icon.WARN}No DEM found for either run, so the overview "
                   f"has no relief. The path is recorded in each run's results and "
                   f"provenance; it is only missing if the DEM has moved.{ss.C.RESET}")
