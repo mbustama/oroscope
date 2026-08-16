@@ -6,11 +6,11 @@ WHAT EACH BRINGS
 ----------------
   experiment |     area km² |   sites |  detectors |  in joint
   ----------------------------------------------------------
-  GRAND      |     51,677.5 |       1 |     59,270 |      0.2%
-  TAMBO      |        190.9 |      40 |     15,775 |     46.2%
+  GRAND      |     51,677.5 |       1 |     59,270 |      0.9%
+  TAMBO      |        842.7 |      73 |     39,115 |     55.0%
 
-  Ground satisfying GRAND and TAMBO at once: 88.3 km². Ground useful to any
-  of them: 51,780.2 km². The first is the number that matters for one site,
+  Ground satisfying GRAND and TAMBO at once: 463.7 km². Ground useful to any
+  of them: 52,056.5 km². The first is the number that matters for one site,
   one road and one power feed serving two experiments; the second is what the
   programme as a whole could use.
 
@@ -38,9 +38,9 @@ WHAT DECIDES IT
 
 PAIRWISE
 --------
-  GRAND & TAMBO: 88.3 km² shared, Jaccard 0.0017.
-        0.2% of GRAND's own ground
-       46.2% of TAMBO's own ground
+  GRAND & TAMBO: 463.7 km² shared, Jaccard 0.0089.
+        0.9% of GRAND's own ground
+       55.0% of TAMBO's own ground
 
 HOW TO READ THIS
 ----------------

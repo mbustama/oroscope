@@ -1698,7 +1698,7 @@ for units in (1000, 5000, 20000):
 
 # The trap the spacing term exists to avoid: the same ground, counted two ways.
 same = aperture.array_scale_factor(11250, "tambo_aperture_fig3", target_spacing_km=0.10)
-print(f"\\n11,250 units at 100 m cover the same ground as 5,000 at 150 m.")
+print("\\n11,250 units at 100 m cover the same ground as 5,000 at 150 m.")
 print(f"  correct factor          : {same:.2f}x")
 print(f"  by detector count alone : {11250/5000:.2f}x   <- wrong by the density ratio")"""),
 ("md", """### 5. And the one that is not an assumption at all

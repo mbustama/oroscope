@@ -251,11 +251,19 @@ def combine(paths, out_root, roads=None, places=None, reveal=True):
         sys.argv = argv
 
     os.makedirs(paths["store"], exist_ok=True)
-    report = os.path.join(out_dir, "combined_report.json")
-    if os.path.exists(report):
-        shutil.copy(report, os.path.join(paths["store"], "combined_report.json"))
-        return ["combined_report.json"]
-    return []
+    # Both artefacts, not just the JSON. `store()` copies each search's explanation
+    # beside its results for exactly this reason, and the combination's was left out --
+    # so a re-combine refreshed the numbers while the prose beside them kept the old
+    # ones. The region notebooks print that file verbatim, which is how a stale
+    # explanation becomes a stale *published* number: notebooks 10 and 11 were still
+    # showing TAMBO's 100 m capacity after the 150 m re-run.
+    kept = []
+    for name in ("combined_report.json", "combination_explanation.txt"):
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            shutil.copy(path, os.path.join(paths["store"], name))
+            kept.append(name)
+    return kept
 
 
 def write_manifest(paths, region, kept):

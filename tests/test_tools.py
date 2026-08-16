@@ -111,6 +111,73 @@ class TestTheCostliestSamplingIsWhatIsPreflighted(unittest.TestCase):
                                          f"than a run's own")
 
 
+class TestTheStoreHoldsEveryArtefactItPromises(unittest.TestCase):
+    """
+    A store that is half-refreshed is worse than a stale one: it looks current.
+
+    ``combine()`` copied ``combined_report.json`` back and left
+    ``combination_explanation.txt`` behind, so a re-combine updated the numbers while
+    the prose beside them kept the old ones. The region notebooks print that file
+    verbatim, so notebooks 10 and 11 went on showing TAMBO's 100 m capacity after the
+    150 m re-run -- a published number that no amount of re-executing would fix,
+    because the input itself was stale.
+    """
+
+    STORES = ("arequipa", "ancash", "lima", "huaylas", "cajatambo")
+
+    def test_combine_copies_both_artefacts(self):
+        """Asserted on the function, so the omission cannot come back quietly."""
+        import inspect
+        source = inspect.getsource(run_full_dem.combine)
+        self.assertIn("combination_explanation.txt", source)
+        self.assertIn("combined_report.json", source)
+
+    def test_every_store_carries_its_combination_explanation(self):
+        for region in self.STORES:
+            store = os.path.join(_support.REPO_ROOT, "results", f"{region}_full")
+            if not os.path.isdir(store):
+                continue
+            report = os.path.join(store, "combined_report.json")
+            prose = os.path.join(store, "combination_explanation.txt")
+            if not os.path.exists(report):
+                continue
+            self.assertTrue(os.path.exists(prose),
+                            f"{region}: a combined report with no explanation beside it")
+
+    def test_the_stored_prose_agrees_with_the_stored_numbers(self):
+        """
+        The check that would have caught it. Every capacity the explanation quotes must
+        appear in the report it sits beside.
+        """
+        import json
+        import re
+        checked = []
+        for region in self.STORES:
+            store = os.path.join(_support.REPO_ROOT, "results", f"{region}_full")
+            report = os.path.join(store, "combined_report.json")
+            prose = os.path.join(store, "combination_explanation.txt")
+            if not (os.path.exists(report) and os.path.exists(prose)):
+                continue
+            with open(report) as f:
+                data = json.load(f)
+            with open(prose) as f:
+                text = f.read()
+            capacities = {int(r["reported_capacity"]) for r in data.get("runs", [])
+                          if r.get("reported_capacity")}
+            self.assertTrue(capacities,
+                            f"{region}: no capacities in the report, so this test would "
+                            f"pass by checking nothing")
+            checked.append(region)
+            quoted = {int(m.replace(",", ""))
+                      for m in re.findall(r"\b\d{1,3}(?:,\d{3})+\b", text)}
+            missing = sorted(c for c in capacities if c not in quoted)
+            self.assertEqual(
+                missing, [],
+                f"{region}: the stored explanation does not quote {missing}, so it was "
+                f"written against a different run than the report beside it")
+        self.assertTrue(checked, "no store was actually checked")
+
+
 class TestTheEstimatorIsMonotonicInBothKnobs(unittest.TestCase):
     """
     ``costliest_sampling`` is only correct while these hold, so they are asserted.
