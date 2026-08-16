@@ -2273,6 +2273,34 @@ legitimately slower, by 1.62× — is now absorbed into the baseline rather than
 outstanding. It sits at 0.340 s on `arequipa_2500` with a 5.1% spread, so it is
 measurable, and future changes to it can be gated properly.
 
+### 6.38 β is configurable, and does not affect a search — which the run had been claiming it did
+
+§9.5 asked for β, the tau energy-loss constant, to stop being a source literal.
+`physics.set_tau_energy_loss(reference=..., index=...)` adopts a value in one place for
+every function that uses it, `tau_energy_loss_settings()` reports what is in force, and
+`restore_tau_energy_loss()` puts the shipped estimate back. The `BETA_*` constants stay
+as the documented default, and an explicit argument still overrides the module setting
+for a single call.
+
+**The more useful finding is where β does not reach.** Tracing it before plumbing it:
+nothing in the search path uses β at all. It enters `tau_range_gcm2`, `tau_survival` and
+`tau_exit_probability` — tau production and escape *through rock* — and the search does
+not model those. What the search weights by is the decay length `L = (E/m_τ)·cτ`, which
+is kinematics and carries no β. `aperture.py` likewise uses only that length.
+
+So the run's own summary was wrong. `explain.py` listed β under **"WHICH OF THESE ARE
+ASSUMPTIONS — Choices, not measurements. Check them before quoting a result"**, with a
+hardcoded `0.6e-6 cm²/g`, for a quantity no reported number depends on. That is the
+worse direction for an error of this kind: it invites a reader to discount a result over
+a parameter that never touched it, and it pads a list whose whole value is that
+everything on it matters. β has moved to the "not modelled at all" sentence, alongside
+neutral-current regeneration and the trigger, and the text now says explicitly that the
+decay length carries no β.
+
+A test pins that, by asserting `tau_decay_length_m` is unchanged by a tenfold β. If β
+ever does enter the search, the claim in the explanation becomes false and that test
+fails — which is the only way a statement like this stays true.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

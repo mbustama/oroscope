@@ -821,3 +821,53 @@ class TestSpectralIndexPinnedOrMarginalised(unittest.TestCase):
         marginal = time.perf_counter() - t0
         self.assertLess(marginal, 5.0 * pinned + 1.0,
                         "marginalising should fold into the weights, not re-integrate")
+
+
+class TestBetaIsConfigurable(unittest.TestCase):
+    """
+    beta is the least certain number in the module, so adopting a collaboration value
+    must not mean editing the source of an installed package.
+    """
+
+    def tearDown(self):
+        physics.restore_tau_energy_loss()
+
+    def test_setting_beta_changes_what_every_caller_sees(self):
+        before = physics.tau_energy_loss_beta(100.0)
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        self.assertAlmostEqual(physics.tau_energy_loss_beta(100.0), 0.8e-6)
+        self.assertAlmostEqual(physics.tau_energy_loss_beta(10000.0), 0.8e-6,
+                               msg="index 0 means a constant beta")
+        self.assertNotAlmostEqual(physics.tau_energy_loss_beta(100.0), before)
+
+    def test_it_reaches_range_and_survival(self):
+        loose = physics.tau_range_gcm2(100.0)
+        physics.set_tau_energy_loss(reference=2.0e-6, index=0.0)
+        tighter = physics.tau_range_gcm2(100.0)
+        self.assertLess(tighter, loose, "a larger beta means a shorter range")
+
+    def test_restore_puts_the_shipped_estimate_back(self):
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        physics.restore_tau_energy_loss()
+        self.assertEqual(physics.tau_energy_loss_settings(),
+                         {"reference": physics.BETA_REFERENCE_CM2G,
+                          "reference_energy_pev": physics.BETA_REFERENCE_ENERGY_PEV,
+                          "index": physics.BETA_ENERGY_INDEX})
+
+    def test_an_explicit_argument_still_wins_over_the_module_setting(self):
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        self.assertAlmostEqual(
+            physics.tau_energy_loss_beta(100.0, reference=1.0e-6, index=0.0), 1.0e-6)
+
+    def test_a_nonsense_beta_is_refused(self):
+        for bad in (0.0, -1.0e-6):
+            with self.assertRaises(ValueError):
+                physics.set_tau_energy_loss(reference=bad)
+
+    def test_beta_does_not_enter_the_decay_length_the_search_uses(self):
+        # The search weights by the decay length E/m*c*tau, which is kinematics. If
+        # beta ever leaks into it, this catches it -- and the explanation's claim that
+        # beta does not affect a search result would become false.
+        before = physics.tau_decay_length_m(100.0)
+        physics.set_tau_energy_loss(reference=5.0e-6, index=0.0)
+        self.assertEqual(physics.tau_decay_length_m(100.0), before)

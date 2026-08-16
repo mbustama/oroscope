@@ -29,6 +29,7 @@ __all__ = [
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
+    "set_tau_energy_loss", "restore_tau_energy_loss", "tau_energy_loss_settings",
     "production_escape_optimum_gcm2", "depth_band_from_energy",
     "earth_absorption_cutoff_deg", "spectrum_weighted_decay_probability",
     "geomagnetic_latitude_deg",
@@ -623,14 +624,129 @@ BETA_REFERENCE_CM2G = 0.6e-6
 BETA_REFERENCE_ENERGY_PEV = 1.0e3        # 1 EeV
 BETA_ENERGY_INDEX = 0.20
 
+# The live values, which set_tau_energy_loss() replaces. The BETA_* constants above
+# stay as the shipped estimate, so restore_tau_energy_loss() has something to restore
+# to and a reader can always see what the default was.
+_TAU_BETA = {"reference": BETA_REFERENCE_CM2G,
+             "reference_energy_pev": BETA_REFERENCE_ENERGY_PEV,
+             "index": BETA_ENERGY_INDEX}
+
+
+def tau_energy_loss_settings() -> dict:
+    """
+    The beta parameters currently in force.
+
+    Returns
+    -------
+    dict
+        ``{"reference", "reference_energy_pev", "index"}``, in cm^2/g and PeV.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.tau_energy_loss_settings()["reference"]
+    6e-07
+    """
+    return dict(_TAU_BETA)
+
+
+def set_tau_energy_loss(reference: float | None = None,
+                        reference_energy_pev: float | None = None,
+                        index: float | None = None) -> dict:
+    """
+    Adopts a different beta, in one place, for every function that uses it.
+
+    beta is the least certain number in this module -- an estimate from mass scaling,
+    in the range (0.4-1.0)e-6 cm^2/g -- and the collaboration's own value should replace
+    it when there is one. Until now that meant editing the source, which is not
+    something a user of an installed package can reasonably do, and which leaves no
+    record of what was used.
+
+    **This does not change any site-search result.** beta enters tau *range* and
+    *survival* -- production and escape through rock -- and the search does not model
+    those: it uses the decay length ``L = (E/m_tau) c*tau``, which is kinematics and
+    carries no beta. So this affects :func:`tau_range_gcm2`, :func:`tau_survival` and
+    :func:`tau_exit_probability`, which the notebooks and the physics page use, and
+    nothing in a search. See ROADMAP 6.38.
+
+    Parameters
+    ----------
+    reference : float, optional
+        beta at ``reference_energy_pev``, in cm^2/g. Left unchanged when None.
+    reference_energy_pev : float, optional
+        Energy at which ``reference`` applies, in PeV.
+    index : float, optional
+        Power-law index of the energy dependence. Zero gives a constant beta.
+
+    Returns
+    -------
+    dict
+        The settings now in force, as :func:`tau_energy_loss_settings` returns.
+
+    Examples
+    --------
+    A collaboration value, adopted once:
+
+    >>> from oroscope import physics
+    >>> _ = physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+    >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
+    '8.00e-07'
+
+    A constant beta means the same value at every energy:
+
+    >>> f"{physics.tau_energy_loss_beta(10000.0):.2e}"
+    '8.00e-07'
+
+    And back to the shipped estimate, which does rise with energy:
+
+    >>> _ = physics.restore_tau_energy_loss()
+    >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
+    '3.79e-07'
+    """
+    if reference is not None:
+        if reference <= 0.0:
+            raise ValueError("beta reference must be positive")
+        _TAU_BETA["reference"] = float(reference)
+    if reference_energy_pev is not None:
+        if reference_energy_pev <= 0.0:
+            raise ValueError("beta reference energy must be positive")
+        _TAU_BETA["reference_energy_pev"] = float(reference_energy_pev)
+    if index is not None:
+        _TAU_BETA["index"] = float(index)
+    return tau_energy_loss_settings()
+
+
+def restore_tau_energy_loss() -> dict:
+    """
+    Restores the shipped estimate, undoing :func:`set_tau_energy_loss`.
+
+    Returns
+    -------
+    dict
+        The settings now in force.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.restore_tau_energy_loss() == {
+    ...     "reference": physics.BETA_REFERENCE_CM2G,
+    ...     "reference_energy_pev": physics.BETA_REFERENCE_ENERGY_PEV,
+    ...     "index": physics.BETA_ENERGY_INDEX}
+    True
+    """
+    _TAU_BETA.update(reference=BETA_REFERENCE_CM2G,
+                     reference_energy_pev=BETA_REFERENCE_ENERGY_PEV,
+                     index=BETA_ENERGY_INDEX)
+    return tau_energy_loss_settings()
+
 # Mean inelasticity of a charged-current interaction at these energies: the tau carries
 # away roughly (1 - y) of the neutrino energy, with <y> about 0.2.
 CC_INELASTICITY = 0.2
 
 
-def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM2G,
-                         reference_energy_pev: float = BETA_REFERENCE_ENERGY_PEV,
-                         index: float = BETA_ENERGY_INDEX) -> float:
+def tau_energy_loss_beta(energy_pev: float, reference: float | None = None,
+                         reference_energy_pev: float | None = None,
+                         index: float | None = None) -> float:
     """
     Energy-loss coefficient beta(E), rising with energy as photonuclear does.
 
@@ -643,7 +759,9 @@ def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM
     energy_pev : float
         Tau energy, in PeV.
     reference : float, optional
-        Value of beta at ``reference_energy_pev``, in cm^2/g.
+        Value of beta at ``reference_energy_pev``, in cm^2/g. Defaults to whatever
+        :func:`set_tau_energy_loss` last established, and to
+        :data:`BETA_REFERENCE_CM2G` if it has not been called.
     reference_energy_pev : float, optional
         Energy at which ``reference`` applies, in PeV.
     index : float, optional
@@ -659,7 +777,17 @@ def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM
     >>> from oroscope import physics
     >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
     '3.79e-07'
+
+    An argument overrides the module setting for that one call:
+
+    >>> f"{physics.tau_energy_loss_beta(100.0, reference=1.0e-6, index=0.0):.2e}"
+    '1.00e-06'
     """
+    live = _TAU_BETA
+    reference = live["reference"] if reference is None else reference
+    reference_energy_pev = (live["reference_energy_pev"]
+                            if reference_energy_pev is None else reference_energy_pev)
+    index = live["index"] if index is None else index
     if index == 0.0:
         return reference
     return reference * (energy_pev / reference_energy_pev) ** index

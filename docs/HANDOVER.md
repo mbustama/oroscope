@@ -70,14 +70,15 @@ rather do them separately.
 `output/arequipa_full_{grand,tambo,combined}/`, which is gitignored. The small artefacts
 — results JSON, provenance, explanation, a few hundred KB — are copied into
 `results/arequipa_full/`, **which is committed**, along with a `manifest.json` recording
-when and from what. That store is currently **empty except for its README**.
+when and from what. That store is **populated** as of 2026-08-16.
 
 ### 1.2 Why the store exists
 
 [Notebook 8](../notebooks/08_the_full_dem.ipynb) *reads* those results rather than
-producing them. Three searches at half an hour each, against CI that executes every
-notebook on every push, is ninety minutes of compute per commit for something that
-changes only when a configuration does. This works only because
+producing them. GRAND alone is 25 minutes, against CI that executes every notebook on
+every push, for something that changes only when a configuration does. (TAMBO is ~1
+minute; the whole store rebuilds in 26, not the ninety once assumed.) This works only
+because
 `explain.explain_results()` is a pure function of the results dictionary — no DEM,
 nothing re-run.
 
@@ -103,7 +104,7 @@ measured on the downsampled mask while capacity is measured at full resolution, 
 feature a few pixels wide keeps its detectors and loses area. That matters more for
 TAMBO's canyon strips than for GRAND's blobs. **Read these areas as lower bounds.**
 
-### 1.4 What to look at when it finishes, in this order
+### 1.4 What was looked at, in this order — all four answered in roadmap §6.26
 
 1. **Is the binding constraint the same one the crops found?** This is the most
    consequential question in the whole run. If a full DEM is bound by a different funnel
@@ -137,9 +138,10 @@ machine.
 - **The sensitivity sweeps.** Both the single-energy and spectrum-folded sweeps are in
   `docs/ROADMAP.md` §6.20–6.21 with their tables. Re-running costs ~10 minutes and will
   reproduce them.
-- **The stride-1 control run** at GRAND settings. `config/grand_colca_stride1.json`
-  exists and its result is recorded: striding is unbiased, closing inflates 2.29×. **But
-  see §9.9 — that was never measured at TAMBO's element size, and should be.**
+- **The stride-1 control runs**, at both GRAND and TAMBO settings.
+  `config/grand_colca_stride1.json` and `config/tambo_colca_stride1.json` exist and their
+  results are recorded. Striding is unbiased in acceptance at both. At TAMBO's 100 m
+  element it costs **4.75× of the reported area** — roadmap §6.34.
 - **The notebooks.** All eight are committed *with their outputs* and were executed
   against the installed package at this head.
 - **DEM downloads.** `input/dem/` holds `arequipa_SRTMGL1.tif`, `lima_AW3D30.tif` and the
@@ -369,8 +371,12 @@ obstacle: a pixel has one slope and both must accept it.
    scale-free alternative; the configs still use the absolute cut. Consider switching.
 3. Column depth is bounded by the walk unless `max_range_km` is set.
 4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
-5. β, the tau energy-loss constant, is an estimate (0.4–1.0×10⁻⁶). Needs a collaboration
-   value.
+5. ~~β, the tau energy-loss constant, is an estimate.~~ ✅ configurable, 2026-08-16 —
+   `physics.set_tau_energy_loss()`. Still wants a collaboration value, but adopting one
+   no longer means editing source. **Note it does not affect a search**: β enters tau
+   range and survival through rock, which the search does not model; the search uses
+   the decay length E/m·cτ, which carries no β. The run's summary had been listing it
+   as an assumption behind its numbers, and no longer does. Roadmap §6.38.
 6. Geomagnetic **declination** does not follow the site (inclination does). Needs IGRF.
 
 **Verification**

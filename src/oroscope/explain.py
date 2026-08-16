@@ -1010,19 +1010,18 @@ def _section_assumptions(results):
                       "then stops at max_dist_km — so the reported depth is a property "
                       "of where the walk stopped, not of the target's thickness."))
 
-    items.append(("β, the tau energy-loss constant", "0.6e-6 cm²/g",
-                  "Estimated from mass scaling, in the range (0.4–1.0)e-6. Moves the "
-                  "production-and-escape optimum in proportion. Not yet pinned to a "
-                  "collaboration value."))
 
     for name, value, why in items:
         out.append(f"  • {name} = {value}")
         out += _wrap(why, indent="      ")
     out.append("")
-    out += _wrap("Not modelled at all: neutral-current regeneration (so Earth-chord "
-                 "suppression is overstated), shower simulation, detector response and "
-                 "trigger, and any geology beyond one standard rock density. Nothing "
-                 "here has been checked against an external simulation.")
+    out += _wrap("Not modelled at all: tau production and escape through rock (so β, "
+                 "the energy-loss constant, does not enter these numbers — the decay "
+                 "length used here is kinematics, E/m·cτ, and carries no β), "
+                 "neutral-current regeneration (so Earth-chord suppression is "
+                 "overstated), shower simulation, detector response and trigger, and "
+                 "any geology beyond one standard rock density. Nothing here has been "
+                 "checked against an external simulation.")
     return out
 
 
