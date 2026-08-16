@@ -2448,6 +2448,41 @@ published number is unmoved. `flux_times_acceptance` is usable now and costs ~6%
 capacity. **`acceptance` alone should not be used with an inferred response** — it wants
 a real differential acceptance table, which remains the outstanding ask of §10.
 
+### 6.43 `min_score` against `score_percentile`, measured — and left to the owner
+
+§9.2 called `min_score` the dominant assumption and noted `--score_percentile` as the
+scale-free alternative the configs do not use. Measured on TAMBO over the Colca crop:
+
+| cut | sites | area km² | capacity | kept, of strided |
+| --- | --- | --- | --- | --- |
+| `min_score` 0.35 *(current)* | 15 | 83.6 | 9,717 | 17.49% |
+| `score_percentile` 5 | 1 | 3.1 | 363 | 3.84% |
+| `score_percentile` 10 | 5 | 18.3 | 2,121 | 7.68% |
+| `score_percentile` 17.5 | 15 | 60.9 | 7,004 | 13.43% |
+| `score_percentile` 25 | 17 | 94.2 | 10,976 | 19.19% |
+| `score_percentile` 40 | 31 | 186.8 | 21,539 | 30.71% |
+
+**`min_score` 0.35 is `score_percentile` 22.8 on this terrain**, by interpolation. Note
+the percentile is taken over *viable* candidates rather than all strided ones, which is
+why 17.5 keeps 13.4% of the strided set rather than 17.5%.
+
+**There is no knee.** Area runs 3.1 → 18.3 → 60.9 → 94.2 → 186.8 km² across the range —
+smooth, monotone, and close to linear above 10%. Nothing in the data marks 0.35 or any
+other value as the natural cut. That is the strongest form of §5.1's claim that
+`min_score` is an assumption rather than a measurement: if the terrain had a natural
+threshold, a scan across the cut would show it, and it does not.
+
+The case for switching is that a percentile means the same thing when the composition
+changes, and an absolute cut on a product does not — add a component and every score
+falls, so 0.35 silently becomes a harsher cut. The case against is that every published
+number used 0.35, and switching restates all of them.
+
+**Not switched.** The configs are unchanged. This changes published science and is the
+owner's call, not a refactor to be slipped in; §10 already lists `min_score` among the
+TAMBO assumptions to check with the collaboration, and this is the table to check it
+against. If it is switched, `score_percentile: 22.8` reproduces the current selection
+most closely.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

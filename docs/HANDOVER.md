@@ -370,8 +370,12 @@ obstacle: a pixel has one slope and both must accept it.
    alone with an inferred response** — `A(E)` from `infer_response` absorbs everything
    our geometric model fails to reproduce at high energy, and weighting by it returns
    zero sites. That wants a real differential table, still the ask of §10. §6.42.
-2. **`min_score` is the dominant assumption.** `--score_percentile` exists as the
-   scale-free alternative; the configs still use the absolute cut. Consider switching.
+2. **`min_score` is the dominant assumption** — now measured, still not switched.
+   `min_score` 0.35 ≡ `score_percentile` **22.8** on Colca, and a scan across the cut
+   shows **no knee** (area 3.1 → 186.8 km² over percentiles 5 → 40, smooth and near
+   linear), which is the strongest evidence yet that 0.35 is a choice rather than a
+   discovery. Switching restates every published number, so it is left as the owner's
+   call. Table in roadmap §6.43.
 3. ~~Column depth is bounded by the walk unless `max_range_km` is set.~~ ✅ measured,
    2026-08-16. It is a **6.4× under-report** at the default, and walking 4× the distance
    window fixes it with an *identical* selection. But at 12× the same run keeps 6.0% of
