@@ -6,8 +6,9 @@ Written to be fed to a fresh session. It assumes no memory of the previous one.
 A `site_search` symlink sits beside it for anything pointing at the old path; the owner
 knows about it and has chosen to keep it.
 
-**Branch:** `dev`, head **`d333841`**, pushed. `main` is 14 commits behind — the
-last merge was PR #4. **Tests:** 600, stdlib `unittest`, ~30 s. **CI:** 8 jobs.
+**Branch:** `dev`, head **`c910462`**, pushed, **CI all green** — 8 jobs: `docs`, `ruff`,
+`Notebooks execute`, and tests on Python 3.9 through 3.13. `main` is 15 commits behind;
+the last merge was PR #4. **Tests:** 600, stdlib `unittest`, ~30 s.
 **Documentation:** <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
 `main` is protected: no direct push, PR required, seven status checks, **zero
@@ -24,7 +25,8 @@ What follows is what is genuinely next, in the order I would take it.
 
 ### 1. Open the PR
 
-`dev` is pushed and there is no open PR for it. Seven commits are waiting to land.
+`dev` is pushed with CI green and there is no open PR for it. Eight commits are waiting
+to land.
 
 ```bash
 GIT_CONFIG_NOSYSTEM=1 gh pr create --base main --head dev --title "..." --body-file -
@@ -82,7 +84,7 @@ the obvious approach assumes. Summary in §5 below; the whole thing is §6.47.
 
 ## 1. What the previous session did
 
-Six commits, `35d7814` → `b70ef72`.
+Eight commits, `35d7814` → `c910462`.
 
 **Four more animations**, taking `tools/make_animations.py` to eight (§6.45). The filter
 was whether the intermediate states carry the argument; six candidates were rejected
@@ -137,6 +139,10 @@ it.
 **The joint-realization question was answered.** §6.47, and §5 below.
 
 **A memory safeguard**, after the machine went down. §6.46 and Trap 1.
+
+**The CI docs job was red before this session started** and is now green. The scipy
+intersphinx entry was fetched on every build, referenced by nothing, and timed out from
+the runner twice. Trap 10.
 
 ---
 
