@@ -3209,12 +3209,24 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         cap bites before the kernel does; 0 disables capping entirely.
     quiet : bool, optional
         Suppress the printed report, keeping the cap and the returned numbers.
+    refuse : bool, optional
+        Raise :exc:`MemoryError` instead of warning when the estimate exceeds
+        :data:`REFUSE_FRACTION` of what is available. Default ``False``, which only
+        warns — but warning is what it did while three runs died anyway, so a caller
+        that can afford to stop should pass ``True``.
 
     Returns
     -------
     dict
-        ``{"estimate_gb", "available_gb", "cap_gb", "capped", "cap_exceeds_available"}``.
-        ``estimate_gb`` is ``None`` when the DEM could not be measured.
+        ``{"estimate_gb", "search_gb", "visualisation_gb", "available_gb", "cap_gb",
+        "capped", "cap_exceeds_available"}``. ``estimate_gb`` is the sum of the search
+        and visualisation terms, and is ``None`` when the DEM could not be measured.
+
+    Raises
+    ------
+    MemoryError
+        When ``refuse`` is set and the estimate exceeds :data:`REFUSE_FRACTION` of the
+        available memory.
 
     Notes
     -----
