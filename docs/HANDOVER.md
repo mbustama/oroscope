@@ -146,13 +146,15 @@ machine.
   derived `colca.tif` crop. **The Arequipa DEM already covers Colca Canyon** — verified,
   1673 m of incision against the published ~1.5 km.
 
-**The benchmark baseline is a special case.** `bench/baseline.json` has *not* been
-refreshed since `capacity_analysis` legitimately slowed by 1.62× (measured properly, A/B
-alternating in one process; +48 ms against a 19 s search). It was left alone
-deliberately, because this machine could not resolve the difference — two consecutive
-passes over *identical* code reported `synthetic_1800/ray_tracing` at +3.4% and then
-+72.1%. **Refresh it on a quiet machine**, and expect `capacity_analysis` to be the only
-stage that legitimately moved. See ROADMAP §6.25.
+**The benchmark baseline is refreshed** (2026-08-16), and the way it was done is the
+part to carry forward. This machine still cannot resolve a 30% change on a short stage —
+two identical passes gave `arequipa_900/ray_tracing` 1.228 s then 1.820 s, 48% apart — so
+rather than wait for a quiet machine the harness was taught to cope:
+`--repeat N` keeps the per-stage **minimum** (timing noise is one-sided: nothing runs
+faster than its true cost), `spread_pct` records what the machine could resolve, and the
+gate skips any stage whose spread exceeds half of it. **Re-measure with
+`python bench/benchmark.py --update --repeat 5`**, never `--update` alone. Only
+`arequipa_2500` is genuinely gateable here. ROADMAP §6.37; §6.25 for the history.
 
 **Do not re-derive:** everything in §6. **Do not retry:** everything in §7.
 
@@ -394,7 +396,14 @@ obstacle: a pixel has one slope and both must accept it.
     `oroscope-fetch-dem` is not covered** — it writes `../input/dem/` and `../config/`
     relative to the working directory and has no configuration file to be relative to,
     so it still wants running from `src/`.
-12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
+12. ~~**Refresh `bench/baseline.json` on a quiet machine.**~~ ✅ done, 2026-08-16 —
+    without a quiet machine, by measuring what this one can resolve first. Two
+    identical passes disagreed by **48%** on a short stage, so `--repeat N` now keeps
+    the per-stage **minimum** (noise is one-sided), `spread_pct` records the resolution
+    alongside the measurement, and the gate ignores any stage whose spread exceeds half
+    of it. Refreshed with `--repeat 5`. **Only `arequipa_2500` is really gateable here**
+    (ray tracing 8.4% spread); `synthetic_900/ray_tracing` spreads 149.6% and is now
+    excluded rather than failing builds at random. Roadmap §6.37.
 13. **No release.** Nothing on PyPI. The logo question is settled: it is a **PNG
     everywhere** (1024×1024 RGBA), because PyPI does not render SVG and a project
     carrying both formats eventually ships two different logos.

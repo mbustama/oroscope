@@ -2218,6 +2218,61 @@ caller, because that is their own instruction rather than the configuration's.
 relative to the working directory and has no configuration file to be relative to, so it
 still wants running from `src/`. Documented rather than fixed.
 
+### 6.37 The benchmark baseline, and measuring the machine before trusting it
+
+§9.12 asked for `bench/baseline.json` to be refreshed "on a quiet machine". There is no
+quiet machine here, so the first job was to find out what this one can actually resolve.
+
+**Two consecutive passes over identical code**, nothing changed between them:
+
+| case/stage | pass 1 | pass 2 | spread |
+| --- | --- | --- | --- |
+| `arequipa_900/ray_tracing` | 1.228 s | 1.820 s | **48.2%** |
+| `synthetic_1800/ray_tracing` | 5.833 s | 8.036 s | **37.8%** |
+| `arequipa_2500/ray_tracing` | 17.553 s | 16.489 s | 6.5% |
+
+Both of the first two exceed the 30% regression gate. A single-pass baseline on this
+host does not record the cost of the code; it records one sample of the noise and then
+gates on it. Note the pattern, which is the useful part: the 17-second case is stable
+and the short ones are not. Scheduler placement — a thread landing on a 4.6 GHz P-core
+or a 3.4 GHz E-core — is a roughly fixed cost, so it dominates a one-second stage and
+averages out over a seventeen-second one.
+
+**Three changes, and then the refresh.**
+
+`--repeat N` runs each case N times and keeps the **minimum** per stage. The minimum
+rather than the mean, for a reason worth stating: timing noise is one-sided. Nothing
+makes a stage run faster than its true cost, while a great many things make it slower.
+The minimum therefore converges on the real cost as N rises, where the mean wanders with
+whatever else the machine was doing.
+
+`spread_pct` is recorded per stage, so the baseline carries **what the machine could
+resolve** alongside what it measured. This is the field that makes the rest honest.
+
+The gate is now **spread-aware**: a stage whose recorded spread is at least half the
+gate is reported with a `~` and never failed on. Verified on the refreshed baseline —
+`synthetic_900/ray_tracing` came in at 1.20 s → 3.07 s, a 156% "regression", and was
+correctly not gated, because its own baseline spread is 150%. Gating on it would fail
+builds at random while telling nobody anything.
+
+Refreshed with `--repeat 5` at a load average of 2.39 — *not* a quiet machine, and
+recorded as such. What it is worth is now legible from the file itself:
+
+| | resolvable (spread < 15%) | not resolvable |
+| --- | --- | --- |
+| `arequipa_2500` | ray_tracing 8.4%, capacity 5.1%, morphology 3.7%, outputs 1.7% | topographic_screen 18.3% |
+| everything else | a few stages | most stages, up to 149.6% |
+
+**So `arequipa_2500` is the case this host can gate on, and largely the only one.** A
+re-run against the fresh baseline reproduces it to 0.0% on total and −0.3% on ray
+tracing, which is the confirmation that the methodology works rather than that the
+machine got quieter.
+
+The expectation from §6.25 — that `capacity_analysis` would be the one stage
+legitimately slower, by 1.62× — is now absorbed into the baseline rather than
+outstanding. It sits at 0.340 s on `arequipa_2500` with a 5.1% spread, so it is
+measurable, and future changes to it can be gated properly.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

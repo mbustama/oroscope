@@ -139,25 +139,102 @@ def run_case(name, builder, params, tmp):
     }
 
 
+def best_of(name, builder, params, tmp, repeat):
+    """
+    Runs a case ``repeat`` times and keeps the *fastest* time for each stage.
+
+    The minimum, not the mean, and for a measured reason. Two consecutive passes over
+    identical code on this host disagreed by **48%** on ``arequipa_900/ray_tracing``
+    (1.23 s then 1.82 s) and 38% on ``synthetic_1800/ray_tracing`` -- both far outside
+    the 30% regression gate, which makes a single-pass baseline worse than useless: it
+    bakes one sample of the noise in as if it were the cost.
+
+    The noise is one-sided. Nothing makes a stage run faster than its true cost, while
+    a great many things make it run slower -- a scheduler moving the thread from a
+    4.6 GHz P-core to a 3.4 GHz E-core, another process waking, a cache evicted. So the
+    minimum over several passes is the closest estimate of the real cost available, and
+    it converges as ``repeat`` rises rather than wandering as the mean does.
+
+    Note which cases actually needed it: ``arequipa_2500``, at 17 seconds, was stable to
+    6.5% across the same two passes. It is the short stages that are unmeasurable
+    singly, because scheduler placement is a fixed cost amortised over a longer run.
+
+    Returns the fastest run's structure, with per-stage minima substituted and the
+    observed spread recorded so a later reader can see what the machine could resolve.
+    """
+    runs = []
+    for i in range(repeat):
+        if repeat > 1:
+            print(f"   pass {i + 1}/{repeat} ...", flush=True)
+        runs.append(run_case(name, builder, params, tmp))
+
+    best = dict(runs[0])
+    stages = runs[0]["timings_sec"]
+    best["timings_sec"] = {
+        stage: round(min(r["timings_sec"][stage] for r in runs), 4)
+        for stage in stages
+    }
+    if repeat > 1:
+        best["spread_pct"] = {}
+        for stage in stages:
+            times = [r["timings_sec"][stage] for r in runs]
+            lo, hi = min(times), max(times)
+            best["spread_pct"][stage] = round((hi / lo - 1) * 100, 1) if lo > 0 else None
+        best["repeat"] = repeat
+    best["peak_rss_mb"] = round(max(r["peak_rss_mb"] for r in runs), 1)
+    return best
+
+
+# A stage may only be gated when the machine can resolve a change smaller than the
+# gate. Half the gate is the working rule: if repeated passes over identical code
+# already spread by that much, a "regression" at the gate is as likely to be the
+# scheduler as the code.
+RESOLVABLE_SPREAD = (REGRESSION_FACTOR - 1) * 100 / 2.0
+
+
 def report(current, baseline):
-    """Prints a stage-by-stage table, flagging slowdowns against the baseline."""
+    """
+    Prints a stage-by-stage table, flagging slowdowns the machine can actually resolve.
+
+    A stage whose baseline records a ``spread_pct`` at or above half the regression
+    gate is reported but never failed on. On this host that silences
+    ``synthetic_900/ray_tracing``, which spread **149.6%** over five identical passes --
+    gating on it would fail builds at random while telling nobody anything.
+    """
     regressed = []
+    unresolvable = []
     for case, data in current.items():
         print(f"\n{case}   ({data['total_sites']} sites, {data['total_capacity']} DUs,"
               f" peak RSS {data['peak_rss_mb']} MiB)")
         print(f"   {'stage':<22} | {'seconds':>9} | {'baseline':>9} | {'change':>9}")
         print("   " + "-" * 58)
-        base = (baseline or {}).get(case, {}).get("timings_sec", {})
+        base_case = (baseline or {}).get(case, {})
+        base = base_case.get("timings_sec", {})
+        spreads = base_case.get("spread_pct", {})
         for stage, secs in data["timings_sec"].items():
             was = base.get(stage)
+            noisy = (spreads.get(stage) or 0) >= RESOLVABLE_SPREAD
             if was:
                 ratio = secs / was
                 change = f"{(ratio - 1) * 100:+8.1f}%"
+                if noisy:
+                    change += " ~"
                 if ratio > REGRESSION_FACTOR and secs > 0.05:
-                    regressed.append(f"{case}/{stage}: {was:.2f}s -> {secs:.2f}s")
+                    line = f"{case}/{stage}: {was:.2f}s -> {secs:.2f}s"
+                    if noisy:
+                        unresolvable.append(
+                            f"{line}  (baseline spread {spreads[stage]:.0f}%, "
+                            f"not gated)")
+                    else:
+                        regressed.append(line)
             else:
                 change = "        -"
             print(f"   {stage:<22} | {secs:>9.3f} | {(f'{was:.3f}' if was else '-'):>9} | {change:>9}")
+
+    if unresolvable:
+        print("\nSLOWER, BUT BELOW THIS MACHINE'S RESOLUTION (~ marks these stages):")
+        for line in unresolvable:
+            print(f"   {line}")
     return regressed
 
 
@@ -166,7 +243,19 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--update", action="store_true", help="rewrite baseline.json")
     ap.add_argument("--quick", action="store_true", help="skip the large cases")
+    ap.add_argument("--repeat", type=int, default=1, metavar="N",
+                    help="Run each case N times and keep the fastest time per stage. "
+                         "The minimum is the honest estimate: timing noise is one-sided, "
+                         "since nothing runs faster than its true cost. Two identical "
+                         "passes on this host disagreed by 48%% on a short stage, so "
+                         "--repeat 5 is the minimum worth using with --update.")
     args = ap.parse_args()
+
+    if args.update and args.repeat < 3:
+        print(f"   WARNING: --update with --repeat {args.repeat}. Identical code has "
+              f"varied by 48% between consecutive passes on this host, which is beyond "
+              f"the {int((REGRESSION_FACTOR - 1) * 100)}% regression gate -- a baseline "
+              f"from one pass records the noise as if it were the cost. Use --repeat 5.\n")
 
     baseline = None
     if os.path.exists(BASELINE) and not args.update:
@@ -187,7 +276,7 @@ def main():
                 print(f"skipping {name}: real DEM not present under input/dem/")
                 continue
             print(f"running {name} ...", flush=True)
-            current[name] = run_case(name, builder, params, tmp)
+            current[name] = best_of(name, builder, params, tmp, args.repeat)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -197,14 +286,18 @@ def main():
         import platform
         with open(BASELINE, "w") as f:
             json.dump({
-                "note": ("Cold-cache runs. Regenerate with: python bench/benchmark.py --update. "
-                         "Check host.load_average_1min_at_start: a baseline taken on a "
-                         "busy machine is inflated and will hide real regressions. Note "
-                         "this host is a hybrid CPU whose wall times vary by ~10% between "
-                         "identical runs; see docs/ROADMAP.md 6.12 before reading much "
-                         "into a single comparison."),
+                "note": ("Cold-cache runs, per-stage MINIMUM over host.repeat passes. "
+                         "Regenerate with: python bench/benchmark.py --update --repeat 5. "
+                         "The minimum, not the mean: timing noise here is one-sided, so "
+                         "the fastest pass is the closest estimate of the real cost. "
+                         "cases.*.spread_pct records what the machine could actually "
+                         "resolve for each stage -- a stage whose spread approaches the "
+                         "30% regression gate cannot be gated on this host, however many "
+                         "passes are taken. Check host.load_average_1min_at_start too. "
+                         "See docs/ROADMAP.md 6.12 and 6.37."),
                 "host": {"platform": platform.platform(), "python": platform.python_version(),
                          "cpu_count": os.cpu_count(), "bench_cores": BENCH_CORES,
+                         "repeat": args.repeat,
                          "load_average_1min_at_start": (round(load_at_start, 2)
                                                         if load_at_start is not None else None)},
                 "cases": current,
