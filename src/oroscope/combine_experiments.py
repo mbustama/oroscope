@@ -819,9 +819,14 @@ def main():
                 ss.attach_colorbar(fig, ax, im, "Altitude (m)")
 
             handles = [
-                key("#1B6CA8", f"{a} only — {masks[a].sum() * px_km2:,.0f} km²",
+                # The class each colour actually paints, not the experiment's total:
+                # `masks[a]` includes the overlap, which "Both" already reports, so the
+                # three legend numbers double-counted the intersection -- TAMBO read
+                # "only - 992 km2" beside "Both - 597.9" where the orange it labels is
+                # 393.6.
+                key("#1B6CA8", f"{a} only — {only_a.sum() * px_km2:,.0f} km²",
                     base_alpha),
-                key("#C8621B", f"{b} only — {masks[b].sum() * px_km2:,.0f} km²", 0.95),
+                key("#C8621B", f"{b} only — {only_b.sum() * px_km2:,.0f} km²", 0.95),
                 key("#E8189B", f"Both — {joint_km2:,.1f} km²"),
             ]
             if roads_drawn:

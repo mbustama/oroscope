@@ -33,6 +33,7 @@ import time
 # Three levels up now: src/oroscope/sensitivity.py -> src/oroscope -> src -> repo
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from oroscope import explain                     # noqa: E402
 from oroscope import site_searcher as ss         # noqa: E402
 
 __all__ = ["run_once", "summarise", "main"]
@@ -157,6 +158,10 @@ def summarise(results: dict | None) -> dict:
     if results is None:
         return dict(sites=0, capacity=0, area_km2=0.0, accepted=0, kept=0, acceptance=0.0)
     r = results["results"]
+    # The selected sites, not every site that qualified: `sites` and `capacity` below
+    # come from total_sites/total_capacity, which cover the selection only, so summing
+    # the raw list puts an all-sites area in the same row as a selected-sites count.
+    selected, _ = explain.selected_sites(results)
     funnel = results.get("funnel", {})
     kept = next((v for k, v in funnel.items() if k.startswith("kept by stride")), 0)
     # Whatever reached the closing stage, which is the score row when a cut is in force
@@ -168,7 +173,7 @@ def summarise(results: dict | None) -> dict:
     return dict(
         sites=r["total_sites"],
         capacity=r["total_capacity"],
-        area_km2=round(sum(s["area_km2"] for s in r["sites"]), 1),
+        area_km2=round(sum(s.get("area_km2", 0.0) for s in selected), 1),
         accepted=accepted,
         kept=kept,
         acceptance=(accepted / kept) if kept else 0.0,

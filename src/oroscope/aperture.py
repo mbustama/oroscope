@@ -25,14 +25,19 @@ regardless of normalisation.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from oroscope import arrival_scan
 
+_SIN_60 = math.sin(math.radians(60.0))
+
 __all__ = ["unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
            "aperture_vs_energy", "peak_energy_pev", "infer_response",
            "load_curve_csv", "summarize_sites", "PUBLISHED_ARRAYS",
-           "array_scale_factor", "scale_published_curve"]
+           "array_scale_factor", "scale_published_curve",
+           "absolute_from_published"]
 
 # The array each published curve in ``data/`` was simulated for. A published aperture
 # is a property of *that* array at *that* site, and neither factor is separable from
@@ -45,18 +50,21 @@ __all__ = ["unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
 PUBLISHED_ARRAYS = {
     "tambo_aperture_fig3": {
         "units": 5000, "spacing_km": 0.15, "grid_type": "hex",
+        "curve_units": "m^2 sr",
         "site": "Colca Canyon",
         "source": "TAMBO Collaboration, Nature Astronomy (2026), Fig. 3",
     },
     "grand_effective_area_fig25": {
         "units": 10000, "spacing_km": 1.0, "grid_type": "hex",
+        "curve_units": "cm^2",
         "site": "HotSpot1 (a prototypical site, not a surveyed one)",
         "source": "GRAND Collaboration, arXiv:1810.09994, Fig. 25",
     },
 }
 
 
-def array_scale_factor(target_units, published, target_spacing_km=None):
+def array_scale_factor(target_units, published, target_spacing_km=None,
+                       target_grid_type=None):
     """
     How much larger this array is than the one a published curve was simulated for.
 
@@ -85,6 +93,10 @@ def array_scale_factor(target_units, published, target_spacing_km=None):
     target_spacing_km : float, optional
         Lattice spacing oroscope used. Defaults to the published spacing, which makes
         the factor a plain ratio of counts.
+    target_grid_type : {'hex', 'square'}, optional
+        Lattice oroscope used. Ground per detector is ``spacing^2`` times sin60 for a
+        triangular lattice and 1 for a square one, so the factor cancels only when both
+        lattices match. Defaults to the published array's.
 
     Returns
     -------
@@ -124,6 +136,14 @@ def array_scale_factor(target_units, published, target_spacing_km=None):
                 f"unknown published array {published!r}; "
                 f"expected one of {sorted(PUBLISHED_ARRAYS)}")
         published = PUBLISHED_ARRAYS[published]
+    # Ground per detector is spacing^2 times a lattice factor -- sin60 for a triangular
+    # lattice, 1 for a square one. It cancels only when both lattices match, and they
+    # need not: a square-gridded run against the hex-simulated TAMBO array covers
+    # 1/sin60 = 1.1547x the ground per detector, so ignoring it under-scales by 15.5%.
+    lattice = {"hex": _SIN_60, "square": 1.0}
+    f_pub = lattice.get(str(published.get("grid_type", "hex")).lower(), _SIN_60)
+    f_target = lattice.get(str(target_grid_type or
+                               published.get("grid_type", "hex")).lower(), _SIN_60)
     n_pub = float(published["units"])
     s_pub = float(published["spacing_km"])
     n_target = float(target_units)
@@ -135,10 +155,11 @@ def array_scale_factor(target_units, published, target_spacing_km=None):
         raise ValueError("detector counts must be positive")
     if s_pub <= 0 or s_target <= 0:
         raise ValueError("spacings must be positive")
-    return (n_target * s_target ** 2) / (n_pub * s_pub ** 2)
+    return (n_target * s_target ** 2 * f_target) / (n_pub * s_pub ** 2 * f_pub)
 
 
-def scale_published_curve(values, target_units, published, target_spacing_km=None):
+def scale_published_curve(values, target_units, published,
+                          target_spacing_km=None, target_grid_type=None):
     """
     A published curve rescaled to the array oroscope actually found room for.
 
@@ -152,6 +173,8 @@ def scale_published_curve(values, target_units, published, target_spacing_km=Non
     published : dict or str
         As :func:`array_scale_factor`.
     target_spacing_km : float, optional
+        As :func:`array_scale_factor`.
+    target_grid_type : {'hex', 'square'}, optional
         As :func:`array_scale_factor`.
 
     Returns
@@ -168,11 +191,13 @@ def scale_published_curve(values, target_units, published, target_spacing_km=Non
     >>> aperture.scale_published_curve(published, 2500, "tambo_aperture_fig3")
     array([  5.,  50., 500.])
     """
-    factor = array_scale_factor(target_units, published, target_spacing_km)
+    factor = array_scale_factor(target_units, published, target_spacing_km,
+                                target_grid_type)
     return np.asarray(values, dtype=np.float64) * factor
 
 
-def absolute_from_published(results, curve_path, published, target_spacing_km=None):
+def absolute_from_published(results, curve_path, published,
+                            target_spacing_km=None, target_grid_type=None):
     """
     A run's absolute aperture, by scaling a published curve to the array it found room for.
 
@@ -189,9 +214,11 @@ def absolute_from_published(results, curve_path, published, target_spacing_km=No
         The array that curve was simulated for -- an entry of :data:`PUBLISHED_ARRAYS`
         or its key.
     target_spacing_km : float, optional
-        Spacing this run used. Read from the run's own parameters when omitted, which
-        is what makes the answer honest: reading it from anywhere else invites the
-        density error :func:`array_scale_factor` exists to prevent.
+        Spacing this run used. Read from the run's own ``spacing_km`` when omitted,
+        which is what makes the answer honest: reading it from anywhere else invites
+        the density error :func:`array_scale_factor` exists to prevent.
+    target_grid_type : {'hex', 'square'}, optional
+        Lattice this run used. Read from the run's own ``grid_type`` when omitted.
 
     Returns
     -------
@@ -225,12 +252,28 @@ def absolute_from_published(results, curve_path, published, target_spacing_km=No
     if isinstance(published, str):
         published = PUBLISHED_ARRAYS[published]
     params = results.get("parameters", {}) or {}
-    detectors = int((results.get("results", {}) or {}).get("total_capacity", 0))
+    # `spacing_km` is what a results file records; `antenna_spacing_km` is the config
+    # spelling and never appears there, so reading it left target_spacing_km None and
+    # silently fell back to the *published* spacing -- a 44x under-report on a real
+    # 1 km GRAND run, which is the density error this argument exists to prevent.
+    raw = (results.get("results", {}) or {}).get("total_capacity", 0)
+    if not isinstance(raw, (int, float)):
+        raise ValueError(
+            f"this run reports total_capacity={raw!r} rather than a number, so there "
+            f"is no detector count to scale by. Capacity is only counted in "
+            f"search_mode 'distributed'.")
+    detectors = int(raw)
     if target_spacing_km is None:
-        target_spacing_km = params.get("antenna_spacing_km")
+        target_spacing_km = params.get("spacing_km",
+                                       params.get("antenna_spacing_km"))
+    if target_grid_type is None:
+        target_grid_type = params.get("grid_type")
     energies, values = load_curve_csv(curve_path)
-    factor = array_scale_factor(detectors, published, target_spacing_km)
-    units = "m^2 sr" if "aperture" in str(curve_path) else "cm^2"
+    factor = array_scale_factor(detectors, published, target_spacing_km,
+                                target_grid_type)
+    # From the registry, which knows what each curve is, rather than sniffed out of the
+    # path: a file moved into a directory named "aperture" relabelled cm^2 as m^2 sr.
+    units = published.get("curve_units", "unknown")
     return {
         "energies_pev": [float(e) for e in energies],
         "aperture": [float(v) for v in np.asarray(values) * factor],

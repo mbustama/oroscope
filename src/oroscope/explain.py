@@ -417,9 +417,12 @@ def constraint_overlap(params_a, params_b, bands=None):
         out.append({
             "label": label, "unit": unit,
             "a": (a_lo, a_hi), "b": (b_lo, b_hi),
-            # The widest piece, which is the one worth quoting. `width` is the total
-            # across all pieces, and they differ only for a band that wraps.
+            # `overlap` is the widest piece and `width` the total across all of them.
+            # For a band that wraps these differ, and the renderer prints them in one
+            # sentence -- "shared 350-360 deg (100%)" for a 10 deg piece of a 20 deg
+            # overlap. `pieces` carries the whole answer so a consumer can say so.
             "overlap": max(pieces, key=lambda p: p[1] - p[0]) if pieces else None,
+            "pieces": pieces,
             "width": total,
             "share_of_narrower": (total / narrower) if pieces and narrower else 0.0,
         })

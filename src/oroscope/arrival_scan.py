@@ -848,6 +848,12 @@ def scan(candidates, elevation, map_grid, *,
     offsets = azimuth_fan(n_azimuths, half_width_deg)
     # The arc the fan covers, which sets how much sky each sampled azimuth stands for.
     # A full sweep covers the circle; a wedge covers twice its half-width and no more.
+    # A zero-width fan subtends no sky, so `solid_angle_sr` is exactly 0 for every
+    # candidate while `cells` stays positive. That is arithmetically right and it is a
+    # legitimate thing to ask of this function -- several tests fire a single ray along
+    # the aspect and check what it hits -- but it makes every score zero under a product
+    # composition, so a *search* must not be configured that way. `validate_parameters`
+    # rejects it there; here it is left to the caller.
     azimuth_span_deg = 360.0 if half_width_deg is None else 2.0 * float(half_width_deg)
     # Fresnel clearance is measured only when a band is given; 0 disables the second pass
     wavelength_m = 0.0 if not frequency_mhz else SPEED_OF_LIGHT / (frequency_mhz * 1.0e6)
@@ -874,7 +880,10 @@ def scan(candidates, elevation, map_grid, *,
     }
     # A target-slope band, when requested. Tangents, because the walk works in slope;
     # None means unbounded, and the vertical is a limit tan cannot represent.
-    min_target_tan = (-1.0e30 if not min_target_slope_deg
+    # `is None`, not falsiness: 0 degrees is a real floor -- reject targets sloping
+    # away from the observer -- and reading it as "unbounded" accepted every downhill
+    # target silently. max_target_slope_deg two lines below already tests `is None`.
+    min_target_tan = (-1.0e30 if min_target_slope_deg is None
                       else math.tan(math.radians(min_target_slope_deg)))
     max_target_tan = (1.0e30 if (max_target_slope_deg is None
                                  or max_target_slope_deg >= 90.0)

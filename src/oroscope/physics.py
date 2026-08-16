@@ -1045,9 +1045,11 @@ def tau_exit_probability(column_depth_gcm2: float | np.ndarray, energy_pev: floa
 
     So the old default was **8x** the converged value, and the substitution reaches that
     value with a thousandth of the points. Worse than the magnitude, it inverted the
-    trend: uniform, the exit probability *rose* with depth, giving a spurious maximum at
-    the edge of the grid; converged, it falls monotonically, as it must, since more rock
-    can only absorb more.
+    trend. P(X) has a genuine maximum -- :func:`production_escape_optimum_gcm2` exists
+    to find it, and dP/dX = (S(X) - P(X))/lambda is positive wherever S(X) exceeds
+    P(X) -- so it rises to that peak and falls beyond. At 3 PeV the peak sits near
+    3.1e5 g/cm^2. What the unresolved grid did was invent a *second*, spurious rise far
+    past the peak, at the edge of the grid, where the converged curve is falling.
 
     The error was confined to low energy against deep rock -- at 100 PeV and above the
     worst case over the same grid was 3%, and below 10^7 g/cm^2 it was exact everywhere

@@ -134,6 +134,8 @@ from oroscope.scoring import (  # noqa: F401
 from oroscope.aperture import (  # noqa: F401
     unit_response, TabulatedResponse, geometric_aperture_m2sr, aperture_vs_energy,
     peak_energy_pev, infer_response, load_curve_csv, summarize_sites,
+    PUBLISHED_ARRAYS, array_scale_factor, scale_published_curve,
+    absolute_from_published,
 )
 
 # --- the tools, as functions
@@ -194,7 +196,8 @@ __all__ = [
     "summarize_scores", "COMPOSITION_MODES", "DEFAULT_SCORE_CONFIG",
     "unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
     "aperture_vs_energy", "peak_energy_pev", "infer_response", "load_curve_csv",
-    "summarize_sites",
+    "summarize_sites", "PUBLISHED_ARRAYS", "array_scale_factor",
+    "scale_published_curve", "absolute_from_published",
     # the tools
     "crop", "read_geo",
     "load_run", "check_alignment", "read_world_file", "pixel_area_km2", "capacity_of",

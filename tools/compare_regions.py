@@ -105,7 +105,13 @@ def summarise(results):
     # same index means different things in two regions. That is a real trap -- it made
     # GRAND's acceptance look like 20% at Arequipa when it is 61.6%.
     strided = next((v for k, v in funnel.items() if k.startswith("kept by stride")), None)
-    accepted = funnel.get("directions accepted")
+    # Whatever reached closing: the score row where a cut is in force, the geometry
+    # otherwise. Reading `directions accepted` alone reports the geometry, which since
+    # roadmap 6.53 is no longer the number that belongs beside the post-cut sites, area
+    # and capacity in the same row -- it put TAMBO's acceptance at 63.0% where the run
+    # kept 9.7%. sensitivity.summarise was given this fix; this twin was missed.
+    accepted = next((v for k, v in funnel.items() if k.startswith("score ")),
+                    funnel.get("directions accepted"))
     band = next((v for k, v in funnel.items() if k.startswith("slope ")), None)
     return {
         "sites": r.get("total_sites"),
@@ -181,7 +187,7 @@ def box_overlaps():
             if lat_lo >= lat_hi or lon_lo >= lon_hi:
                 continue
             mid = (lat_hi + lat_lo) / 2.0
-            km_ns = (lat_hi - lat_lo) * 111.32
+            km_ns = (lat_hi - lat_lo) * ss.KM_PER_DEG_LAT
             km_ew = (lon_hi - lon_lo) * 111.32 * math.cos(math.radians(mid))
             out.append({"a": a, "b": b, "km2": km_ns * km_ew,
                         "lat": (lat_lo, lat_hi), "lon": (lon_lo, lon_hi),

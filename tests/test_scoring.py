@@ -410,8 +410,6 @@ class TestSiteSummary(unittest.TestCase):
                                                   5e3, 2.5e4, [10.0]), {})
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestScalingAPublishedCurveToOurArray(unittest.TestCase):
@@ -482,6 +480,51 @@ class TestScalingAPublishedCurveToOurArray(unittest.TestCase):
             with self.assertRaises(ValueError):
                 aperture.array_scale_factor(units, "tambo_aperture_fig3",
                                             target_spacing_km=spacing)
+
+    def test_a_run_records_its_spacing_as_spacing_km(self):
+        """
+        `antenna_spacing_km` is the *config* spelling; a results file writes
+        `spacing_km`. Reading the config key meant target_spacing_km stayed None and
+        silently fell back to the published spacing -- a 44x under-report on a real
+        1 km GRAND run, which is the density error the argument exists to prevent.
+        """
+        results = {"results": {"total_capacity": 10000},
+                   "parameters": {"spacing_km": 1.0, "grid_type": "hex"}}
+        curve = os.path.join(_support.REPO_ROOT, "data", "tambo_aperture_fig3.csv")
+        out = aperture.absolute_from_published(results, curve, "tambo_aperture_fig3")
+        # 10000 units at 1 km against 5000 at 150 m: (10000*1.0^2)/(5000*0.15^2)
+        self.assertAlmostEqual(out["scale_factor"], 88.888888, places=4)
+
+    def test_units_come_from_the_registry_not_the_path(self):
+        """A file moved into a directory named 'aperture' relabelled cm^2 as m^2 sr."""
+        results = {"results": {"total_capacity": 5000},
+                   "parameters": {"spacing_km": 1.0}}
+        curve = os.path.join(_support.REPO_ROOT, "data",
+                             "grand_effective_area_fig25.csv")
+        out = aperture.absolute_from_published(results, curve,
+                                               "grand_effective_area_fig25")
+        self.assertEqual(out["units"], "cm^2")
+
+    def test_a_capacity_that_is_not_a_number_is_refused(self):
+        """A non-distributed run writes the string 'N/A', which int() blew up on."""
+        results = {"results": {"total_capacity": "N/A"}, "parameters": {}}
+        curve = os.path.join(_support.REPO_ROOT, "data", "tambo_aperture_fig3.csv")
+        with self.assertRaises(ValueError) as caught:
+            aperture.absolute_from_published(results, curve, "tambo_aperture_fig3")
+        self.assertIn("distributed", str(caught.exception))
+
+    def test_a_square_lattice_covers_more_ground_per_detector(self):
+        """
+        sin60 cancels only when both lattices match. A square-gridded run stands on
+        1/sin60 = 1.1547x the ground per detector that the hex-simulated array does.
+        """
+        hexy = aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                           target_grid_type="hex")
+        square = aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                             target_grid_type="square")
+        self.assertAlmostEqual(hexy, 1.0, places=9)
+        self.assertAlmostEqual(square / hexy, 1.0 / math.sin(math.radians(60.0)),
+                               places=6)
 
     def test_the_grand_linearity_claim_the_scaling_rests_on(self):
         """
@@ -657,3 +700,6 @@ class TestDecayTerm(unittest.TestCase):
                 v = float(comp["decay"][0])
                 self.assertGreaterEqual(v, 0.0)
                 self.assertLessEqual(v, 1.0)
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3668,6 +3668,69 @@ the documentation — and none guarding `config/`. Now there is.
 
 669 → 672 tests.
 
+### 6.66 What a max-effort review found in the audit's own work ✅ mostly delivered
+
+Ten finder angles over `994fa62..3121e1a`. Fifteen findings survived verification; the
+sharpest were in code this audit had just written.
+
+**Two put wrong numbers in committed artefacts.**
+
+`compare_regions.summarise` read `directions accepted` for its acceptance column. §6.53
+had redefined that stage to hold the *geometry*, and `sensitivity.summarise` was given
+the matching fix while this twin was missed — so the committed
+`results/region_comparison.md` showed TAMBO acceptance at **63.0 / 82.9 / 85.5 / 82.9 /
+81.0%** beside post-cut sites, area and capacity, where the runs kept 9.7 / 15.1 / 21.0 /
+14.0 / 12.9%. Fixed the same way.
+
+The combination legend printed each experiment's **total** area against the label
+"X only", while colouring only the exclusive class and listing "Both" separately — so
+the three numbers double-counted the intersection. At Arequipa: "TAMBO only — 992 km²"
+where the orange it labels is 393.6 km², beside "Both — 597.9 km²".
+
+**One was severe and entirely mine.** `absolute_from_published` read the run's spacing
+from `antenna_spacing_km`. That is the *config* spelling; a results file records
+`spacing_km`. The key was therefore always absent, `target_spacing_km` stayed `None`,
+and it fell back to the *published* spacing — a **44× under-report** on a real 1 km GRAND
+run, which is exactly the density error the argument exists to prevent. The doctest
+passed because it was built from a hand-written dict using the config spelling.
+
+**And the retune reached the values but not what explains them.** `make_notebooks.py` and
+`make_animations.py` still *execute* searches at `solid_angle_half_sr=0.8` against the
+corrected `d_phi`; the CLI help and all eight `_comment_scoring` blocks still quoted
+0.05 and 0.8, the latter sitting two lines above a value of 0.267 — a config
+contradicting itself. `_comment_layout` still said "5000 units at 100 m" beside
+`antenna_spacing_km: 0.15`.
+
+Also fixed: `COMBINE_BYTES_PER_PIXEL` was 145 where the fit gave 145.1 **MiB per Mpx** =
+152.2 bytes/px, so the model under-predicted its own table by 2.3–4.5% — the wrong
+direction for a pre-flight; `array_scale_factor` ignored `grid_type`, under-scaling a
+square lattice by 15.5% since sin60 cancels only when both lattices match; a capacity of
+`'N/A'` (any non-distributed run) crashed on `int()`; `units` was sniffed from the file
+path, so moving a curve into a directory named "aperture" relabelled cm² as m² sr;
+`min_target_slope_deg=0` was read as unbounded by a falsy test rather than as the floor
+it is; `azimuth_half_width_deg=0` silently zeroed every score, now refused by
+`validate_parameters` (the library call stays permissive — several tests fire a single
+ray to check `cells`); provenance stored a closure's `repr()`, a memory address that
+changes every process; three test classes sat *below* the `__main__` guard and never ran
+under direct execution; and `absolute_from_published` was missing from `__all__` while
+none of the four new aperture names were re-exported by the package.
+
+**Two are left open deliberately, because both move published scores and the fix shape is
+a physics decision:**
+
+1. **The retune cannot track the fan.** Dividing `solid_angle_half_sr` by 3 is exact only
+   for a ±60° wedge. A full sweep's Ω is unchanged by the correction, so its scores moved
+   (×1.5 at Ω = 0.05 sr, ×2.5 at 0.005). The deep fix is to score the *fraction* of
+   available sky — the scan already knows `span × (sin hi − sin lo)` — which makes the
+   half-value dimensionless and removes the retune forever.
+2. **The wedge fan is endpoint-inclusive**, so `span/n_az` is not the right cell width:
+   the true weights for `azimuth_fan(9, 60)` are 7.5°, 15°×7, 7.5°. Totals agree only
+   when every azimuth accepts, which is exactly what the new test asserts, so it cannot
+   see this. Partial acceptance is off by up to 1.78×. The midpoint rule fixes it and
+   changes which azimuths are sampled.
+
+672 → 676 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

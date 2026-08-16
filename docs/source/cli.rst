@@ -718,7 +718,7 @@ option below exists and that every option that exists appears below.
    * - ``--solid_angle_half_sr``
      - float
      - ``—``
-     - Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.
+     - Accepted solid angle scoring 0.5, in steradians (default: 0.0167). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at the default saturates the term so it stops discriminating. It is calibrated against the reported solid angle, which depends on azimuth_half_width_deg and the elevation window -- change either and this wants re-checking.
    * - ``--distance_band_m``
      - float ×2
      - ``—``

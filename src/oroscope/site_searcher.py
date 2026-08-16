@@ -500,8 +500,14 @@ def collect_provenance(dem_path, map_grid):
         # indistinguishable from a default one.
         "physics_state": {
             "tau_energy_loss": physics.tau_energy_loss_settings(),
-            "declination_model": (None if physics.declination_model() is None
-                                  else repr(physics.declination_model())),
+            # Presence and qualified name, not repr(): a closure's repr is a
+            # memory address that changes every process, so two runs under
+            # different declination grids recorded strings differing only in
+            # noise -- neither identifying nor comparable, which was the point.
+            "declination_model": (
+                None if physics.declination_model() is None else
+                getattr(physics.declination_model(), "__qualname__",
+                        type(physics.declination_model()).__name__)),
         },
     }
 
@@ -3292,7 +3298,7 @@ def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1, combine=Fa
     3200 x 3900 (12.5 Mpx)  1.95 GiB
     ======================  ===================
 
-    which fits 182 MB + 145 bytes per pixel to within 1.1% at every point. Four points
+    which fits 182 MiB + 152.2 bytes per pixel to within 1.2% at every point. Four points
     rather than the one the search estimator is calibrated on.
 
     Parameters
@@ -3319,7 +3325,7 @@ def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1, combine=Fa
     The same DEM's combination, which the search's own estimate does not cover:
 
     >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1, combine=True), 2)
-    1.72
+    1.8
     """
     d = max(1, int(downsample_factor or 1))
     if combine:
@@ -3332,7 +3338,10 @@ def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1, combine=Fa
 # Measured, not assumed: see estimate_visualisation_memory_gb for the tables.
 VIZ_BYTES_PER_PIXEL = 190.0
 MATPLOTLIB_FIXED_BYTES = 130 * 1024 ** 2
-COMBINE_BYTES_PER_PIXEL = 145.0
+# 152.2, not 145: the fit was in MiB per Mpx, and 1 MiB/Mpx is 1.048576
+# bytes/px. Taking the slope straight across under-predicted every point in
+# the table above by 2.3-4.5%, which is the wrong direction for a pre-flight.
+COMBINE_BYTES_PER_PIXEL = 152.2
 COMBINE_FIXED_BYTES = 182 * 1024 ** 2
 
 # How much of what the system reports available a run may be estimated to need before
@@ -3446,8 +3455,13 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         if have and need > REFUSE_FRACTION * have:
             message = (f"This run is estimated to need {need:.1f} GiB "
                        f"({breakdown}) "
-                       f"against {have:.1f} GiB available. Raise candidate_stride, "
-                       f"which is the memory lever, or crop the DEM.")
+                       f"against {have:.1f} GiB available. "
+                       + ("Lower downsample_factor's map cost or crop the DEM: the "
+                          "binding term is the combination, which candidate_stride "
+                          "does not enter."
+                          if joint is not None and joint >= search + viz else
+                          "Raise candidate_stride, which is the memory lever, or crop "
+                          "the DEM."))
             if refuse:
                 raise MemoryError(
                     message + " Refused before allocating anything: a run that reaches "
@@ -3508,6 +3522,17 @@ def validate_parameters(params):
         than one per run, since the expensive stages come afterwards.
     """
     errors = []
+    # A fan of zero width accepts no sky at all: solid_angle_sr comes out 0 for every
+    # candidate, so under the default product composition every score is 0 and any
+    # min_score empties the run while the funnel still shows the geometry accepting
+    # everything. -1 is the documented sentinel for a full sweep; 0 is not a pencil.
+    half_width = params.get("azimuth_half_width_deg")
+    if half_width is not None and 0.0 == float(half_width):
+        errors.append(
+            "azimuth_half_width_deg is 0, which gives the fan no angular width: the "
+            "accepted solid angle is then zero for every candidate and so is every "
+            "score. Use a negative value for a full 360 degree sweep, or a positive "
+            "half-width for a wedge.")
     
     # 1. Check DEM path existence
     if not os.path.exists(params['dem_path']):
@@ -5037,7 +5062,7 @@ def main():
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
     parser.add_argument("--shower_elongation_rate_gcm2", type=float, default=None, help="How much deeper shower maximum sits per decade of primary energy, in g/cm2 (default: 55, the usual hadronic value; a purely electromagnetic cascade is nearer 85).")
     parser.add_argument("--shower_lambda_gcm2", type=float, default=None, help="Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).")
-    parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.")
+    parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.0167). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at the default saturates the term so it stops discriminating. It is calibrated against the reported solid angle, which depends on azimuth_half_width_deg and the elevation window -- change either and this wants re-checking.")
     parser.add_argument("--distance_band_m", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Exit-point distance band scoring 1, in metres. Defaults to the configured decay-baseline window.")
     parser.add_argument("--clearance_full_at", type=float, default=None, help="Fresnel clearance ratio, in first-Fresnel radii, that scores 1 (default: 1.0).")
     parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1; a weight of 0 excludes a component. Names are checked against the score components and a misspelling is refused, because a dropped weight changes every number in the run and leaves no trace in the output.")
