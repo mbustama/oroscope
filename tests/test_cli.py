@@ -50,8 +50,9 @@ def cli(argv, cwd, fallbacks=None):
         with open(os.path.join(config_dir, "fallbacks.json"), "w") as f:
             json.dump(fallbacks, f)
 
-    # main() reads ../config/fallbacks.json and writes ../output/, i.e. relative to a
-    # working directory one level down. That is the `cd src` requirement.
+    # main() reads ../config/fallbacks.json relative to a working directory one level
+    # down. Config paths and the output base are resolved against the configuration
+    # file now, but the fallbacks lookup is still cwd-relative, so these run from src/.
     work = os.path.join(cwd, "src")
     os.makedirs(work, exist_ok=True)
 
@@ -411,6 +412,171 @@ class TestFailFast(CliCase):
         with self.assertRaises(SystemExit):
             with cli(["--config_path", config], self.tmp):
                 pass
+
+
+class TestConfigPathsAreRelativeToTheConfig(unittest.TestCase):
+    """
+    A configuration describes where its DEM sits relative to *itself*.
+
+    Resolving against the working directory instead is what made the bundled configs
+    run only from ``src/``. These pin the new rule and the fallback that keeps the old
+    one working.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.cfg_dir = os.path.join(self.tmp, "config")
+        self.dem_dir = os.path.join(self.tmp, "input", "dem")
+        os.makedirs(self.cfg_dir)
+        os.makedirs(self.dem_dir)
+        self.dem = os.path.join(self.dem_dir, "x.tif")
+        with open(self.dem, "w") as f:
+            f.write("not really a tif")
+
+    def write(self, **keys):
+        path = os.path.join(self.cfg_dir, "run.json")
+        with open(path, "w") as f:
+            json.dump(keys, f)
+        return path
+
+    def test_a_relative_dem_resolves_against_the_config_from_any_cwd(self):
+        path = self.write(dem_path=os.path.join("..", "input", "dem", "x.tif"))
+        here = os.getcwd()
+        try:
+            for cwd in (self.tmp, self.cfg_dir, tempfile.gettempdir()):
+                os.chdir(cwd)
+                with self.subTest(cwd=cwd):
+                    self.assertEqual(ss.load_config(path)["dem_path"], self.dem)
+        finally:
+            os.chdir(here)
+
+    def test_an_absolute_path_is_left_alone(self):
+        path = self.write(dem_path="/data/elsewhere.tif")
+        self.assertEqual(ss.load_config(path)["dem_path"], "/data/elsewhere.tif")
+
+    def test_a_working_directory_relative_path_still_works_with_a_warning(self):
+        # The old behaviour. Breaking it silently to fix the wart would be a poor trade.
+        path = self.write(dem_path=os.path.join("input", "dem", "x.tif"))
+        here = os.getcwd()
+        buf = io.StringIO()
+        try:
+            os.chdir(self.tmp)
+            with contextlib.redirect_stdout(buf):
+                loaded = ss.load_config(path)
+        finally:
+            os.chdir(here)
+        self.assertEqual(loaded["dem_path"], os.path.join("input", "dem", "x.tif"))
+        self.assertIn("working directory", buf.getvalue())
+
+    def test_a_path_that_exists_nowhere_names_what_the_config_asked_for(self):
+        path = self.write(dem_path=os.path.join("..", "input", "dem", "absent.tif"))
+        resolved = ss.load_config(path)["dem_path"]
+        self.assertTrue(resolved.endswith(os.path.join("input", "dem", "absent.tif")))
+        self.assertTrue(os.path.isabs(resolved),
+                        "an error should name the path the config meant, not a fragment")
+
+    def test_the_repository_layout_reads_the_same_either_way(self):
+        # config/ and src/ are both one level below the root, so no shipped config had
+        # to change: ../input/... names the same file read from either.
+        from_config = os.path.normpath(os.path.join("/repo/config", "../input/d.tif"))
+        from_src = os.path.normpath(os.path.join("/repo/src", "../input/d.tif"))
+        self.assertEqual(from_config, from_src)
+
+
+class TestOneTranslationForEveryCaller(unittest.TestCase):
+    """
+    ``config_to_pipeline_kwargs`` is the single translation, and the reason it exists.
+
+    The mapping was written out three times -- ``main()``, the child ``sensitivity``
+    spawns, and ``tools/run_arequipa_full.py`` -- and the copies drifted. The sweep
+    child splatted the config straight into the pipeline, so a preset name reached a
+    function that iterates its argument, every character failed the ``item[0] ==
+    'circle'`` test, and the point searched with no exclusion zones at all. No
+    exception, no warning, a plausible wrong answer. These pin the translation itself,
+    away from ``main()``, so every caller is covered by testing one function.
+    """
+
+    def test_an_rfi_preset_resolves_rather_than_being_iterated(self):
+        kw = ss.config_to_pipeline_kwargs({"rfi_zones": "arequipa"}, quiet=True)
+        self.assertEqual(len(kw["rfi_zones"]), 5)
+        self.assertEqual(kw["rfi_zones"][0][0], "circle",
+                         "a resolved zone list, not the letters of 'arequipa'")
+
+    def test_the_silent_failure_this_prevents(self):
+        # What the sweep child used to do: hand the raw string to a consumer that
+        # iterates it. Every character is skipped, and the result is indistinguishable
+        # from having asked for no zones.
+        zones = [item for item in "arequipa" if item[0] == "circle"]
+        self.assertEqual(zones, [], "the old path silently yielded nothing")
+        self.assertEqual(len(ss.resolve_rfi_zones("arequipa")), 5,
+                         "the translation yields the five real zones")
+
+    def test_none_and_missing_both_mean_no_zones(self):
+        for value in ("none", "NONE", None):
+            self.assertIsNone(ss.resolve_rfi_zones(value))
+
+    def test_require_sky_is_inverted_for_every_caller(self):
+        self.assertTrue(ss.config_to_pipeline_kwargs({}, quiet=True)["require_terrain"])
+        kw = ss.config_to_pipeline_kwargs({"require_sky": True}, quiet=True)
+        self.assertFalse(kw["require_terrain"])
+        self.assertNotIn("require_sky", kw, "the pipeline does not take that spelling")
+
+    def test_command_line_only_keys_do_not_reach_the_pipeline(self):
+        kw = ss.config_to_pipeline_kwargs(
+            {"print_info": True, "output_directory_base_with_given_json": "../output/"},
+            quiet=True)
+        for key in ("print_info", "output_directory_base_with_given_json"):
+            self.assertNotIn(key, kw)
+
+    def test_bands_become_tuples_because_json_has_no_tuples(self):
+        kw = ss.config_to_pipeline_kwargs(
+            {"grammage_band_gcm2": [236.0, 1287.0], "depth_band_gcm2": [700.0, 2800.0]},
+            quiet=True)
+        self.assertEqual(kw["grammage_band_gcm2"], (236.0, 1287.0))
+        self.assertEqual(kw["depth_band_gcm2"], (700.0, 2800.0))
+
+    def test_a_misspelled_key_is_dropped_and_named(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            kw = ss.config_to_pipeline_kwargs({"min_slop_deg": 3.0})
+        self.assertNotIn("min_slop_deg", kw, "an unknown key must not reach the pipeline")
+        self.assertIn("min_slop_deg", buf.getvalue(),
+                      "and it must be named, or a typo is silently ignored")
+
+    def test_overrides_win_over_the_configuration(self):
+        kw = ss.config_to_pipeline_kwargs({"dem_path": "from_config.tif"},
+                                          quiet=True, dem_path="override.tif")
+        self.assertEqual(kw["dem_path"], "override.tif")
+
+    def test_every_real_config_translates(self):
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "config")
+        expected_zones = {"grand_colca_config": 5, "tambo_colca_config": 0,
+                          "grand_arequipa_full": 5, "tambo_arequipa_full": 0}
+        for name, zones in expected_zones.items():
+            path = os.path.join(root, f"{name}.json")
+            if not os.path.exists(path):                 # pragma: no cover - layout
+                continue
+            with self.subTest(config=name):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    kw = ss.config_to_pipeline_kwargs(ss.load_config(path))
+                self.assertNotIn("Ignoring", buf.getvalue(),
+                                 "a shipped config must translate without complaint")
+                self.assertEqual(len(kw["rfi_zones"] or []), zones)
+
+    def test_the_filter_is_bound_to_the_real_signature(self):
+        # Read at call time, the filter followed whatever the pipeline name pointed at,
+        # so a test double or a decorator presenting (*args, **kwargs) collapsed it and
+        # every parameter was dropped.
+        real = ss.find_grand_regions_interactive
+        try:
+            ss.find_grand_regions_interactive = lambda *a, **k: None
+            kw = ss.config_to_pipeline_kwargs({"min_slope_deg": 11.0}, quiet=True)
+        finally:
+            ss.find_grand_regions_interactive = real
+        self.assertEqual(kw["min_slope_deg"], 11.0)
 
 
 if __name__ == "__main__":

@@ -28,15 +28,32 @@ These are the ones to check before quoting a result.
      - What it rests on
    * - ``beta``, the tau energy-loss constant
      - :math:`0.6\times10^{-6}\,(E/{\rm EeV})^{0.20}` cm²/g
-     - Estimated from mass scaling, in the range (0.4–1.0)×10⁻⁶. Moves the
-       production-and-escape optimum in proportion, though not the siting conclusion.
-       Worth pinning to whatever the collaboration uses.
+     - Estimated from mass scaling, in the range (0.4–1.0)×10⁻⁶. **Does not affect a
+       site search**: it enters tau range and survival through rock, which the search
+       does not model, while the search weights by the decay length :math:`E/m\cdot c\tau`,
+       which carries no beta. Set it with ``physics.set_tau_energy_loss()``.
    * - Geomagnetic declination
      - −6.9° (Arequipa IGRF)
-     - **Does not follow the site.** Inclination is derived from the DEM's own
-       coordinates through a centred dipole, but the dipole is unreliable for
-       declination (−0.2° against a measured −6.9°) and is deliberately not used for
-       it. Supply the IGRF value per site.
+     - **Constant across the DEM unless a model is supplied.** Inclination is derived
+       from the DEM's own coordinates through a centred dipole, but the dipole is
+       unreliable for declination (−0.2° against a measured −6.9°) and is deliberately
+       not used for it. ``physics.set_declination_model()`` takes any callable and
+       ``declination_from_grid()`` builds one from a NOAA export.
+   * - ``decay_weight_by``
+     - ``flux``
+     - What weights the spectrum-folded decay term: the flux, the detector acceptance
+       :math:`A(E)`, or their product — the event-rate integrand. Every number here was
+       computed with ``flux``. Weighting by an ``A(E)`` *inferred* from a published
+       integral curve is not safe: the inferred response absorbs everything the
+       geometric model fails to reproduce at high energy.
+   * - ``max_range_km``
+     - unset (= ``max_dist_km``)
+     - How far each profile is walked. Column depth accumulates over the walk, so
+       leaving it tied to the distance window makes the reported depth a property of
+       where the walk stopped. Measured on TAMBO at Colca: walking to 20 km instead of
+       5 raised the reported depth **6.4×** and changed the selection not at all. At
+       60 km the same run kept 6.0% of directions against 17.5% — not a knob to
+       maximise.
    * - ``grammage_band_fraction``
      - 0.1
      - How far down the Gaisser–Hillas profile still counts as a usable shower. A
@@ -89,10 +106,19 @@ against the flux, the same result varies by 1.46× across a plausible range of s
 index. The remaining exposure is the index itself, and it can be marginalised rather
 than chosen.
 
-What has *not* been done is the full job: the number of detected events is
-:math:`\int \Phi(E)\,A(E)\,P_{\rm decay}(E)\,{\rm d}E`, and the acceptance
-:math:`A(E)` is exactly what no available table supplies. The weight here is the flux
-alone.
+The full job is the number of detected events,
+:math:`\int \Phi(E)\,A(E)\,P_{\rm decay}(E)\,{\rm d}E`. What weights the fold is now
+selectable — ``decay_weight_by`` takes ``flux``, ``acceptance`` or
+``flux_times_acceptance`` — but the acceptance :math:`A(E)` is still what no available
+table supplies. **Every number on this page was computed with the flux alone.**
+
+An :math:`A(E)` can be *inferred* from a published integral curve by dividing out the
+geometric model (:func:`oroscope.aperture.infer_response`), and it is not a safe weight
+on its own: for TAMBO the inferred response rises monotonically to the top of the
+published range, so weighting by it alone puts all the weight where the decay length is
+hundreds of kilometres against a 3 km canyon and the search returns **zero sites**. That
+is the model's high-energy shortfall being attributed to "response", not a statement
+about TAMBO. A real differential table remains the outstanding ask.
 
 **A product score has no safe threshold.** Six components each in :math:`[0,1]`
 multiply to a distribution piled up near zero, so ``min_score`` anywhere in the middle
@@ -112,19 +138,59 @@ closing with a 1 km element more than doubles the area — **2.29×**. So a repo
 wrong: a site has to be a deployable region rather than a scatter of pixels. But the
 reported figure is an upper bound, and the two should not be conflated.
 
-**Candidate striding is unbiased, which was worth checking.** ``candidate_stride: 5``
-samples one pixel in five. The same control run gives acceptance of 60.1% at both
-strides, and the stride-corrected area matches the stride-1 truth to 0.05%, so this
-costs nothing and saves five sixths of the scan.
+**Candidate striding is unbiased in acceptance, at both element sizes.**
+``candidate_stride: 5`` samples one pixel in five. Control runs give 60.1% against 60.1%
+for GRAND and 17.491% against 17.494% for TAMBO, so which pixels get *tested* is a fair
+sample either way.
 
-**But that was measured with a 1 km closing element, and does not transfer to a small
-one.** Each run's own funnel gives the closing factor directly, as closed pixels over
-stride-corrected accepted pixels. For GRAND at Colca it gives 2.19× — an independent
-check on the 2.29× above, agreeing to 4%. For TAMBO it gives **0.53×**: a 100 m element
-is about three pixels, too small to bridge the gaps ``candidate_stride: 5`` leaves, so
-the reported area *understates* the accepted set instead of inflating it. Until a
-stride-1 control is run at TAMBO's settings, treat TAMBO areas as a lower bound. The
-run summary reports whichever case applies.
+**But which pixels survive to be measured is another matter, and for TAMBO it costs
+4.75×.** The mask is closed morphologically before any area is taken. Marking one pixel
+in five leaves gaps of five pixels — 154 m at Colca's 30.7 m resolution. GRAND's closing
+element is 1 km, thirty-two pixels, and bridges that without noticing. TAMBO's element is
+``antenna_spacing_km`` = 100 m, three pixels, and **cannot**: the mask never reconnects,
+most regions fall below ``min_sub_array_size``, and the area collapses.
+
+Measured with a stride-1 control at TAMBO's own settings on the Colca crop:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 22 22 22
+
+   * -
+     - stride 5
+     - stride 1
+     -
+   * - directions accepted
+     - 17.491%
+     - 17.494%
+     - unbiased
+   * - **area**
+     - **83.6 km²**
+     - **396.9 km²**
+     - **4.75× low**
+   * - capacity
+     - 9,717
+     - 45,856
+     - 4.72× low
+
+So **read TAMBO's Colca area as ~397 km² and its capacity as ~45,856**. The full-DEM
+figure of 111.9 km² is low for the same reason and by downsampling on top.
+
+The rule generalises: *the closing element must outrun the stride gap.* Every run now
+warns when it does not. The funnel's own closing factor — closed pixels over
+stride-corrected accepted pixels — conflates the two effects and should not be read as
+the inflation alone: for TAMBO it reports 0.53× where closing by itself inflates 1.17×
+and fragmentation costs 4.75×.
+
+.. figure:: _static/stride_and_closing.gif
+   :alt: A strided mask closed with elements smaller and larger than the stride gap
+   :align: center
+   :width: 78%
+
+   The same accepted set, marked one pixel in five, then closed with elements either
+   side of the gap. The transition is **at** the gap and it is abrupt, not gradual: a
+   3-pixel element recovers 0.04× of the accepted set and a 5-pixel one recovers 0.61×.
+   Regenerate with ``python tools/make_animations.py --only stride_and_closing``.
 
 **Not every site in the file is in the result.** ``sites`` lists everything that cleared
 the area and capacity thresholds. With ``stop_at_target`` the selection stops once the

@@ -74,6 +74,8 @@ from oroscope.site_searcher import (  # noqa: F401
     validate_parameters, parse_score_weights, explicitly_passed,
     # memory
     preflight_memory, estimate_peak_memory_gb, apply_memory_cap, available_memory_gb,
+    # the stride/closing interaction, which decides whether an area is a lower bound
+    stride_gap_m, closing_element_m, warn_stride_outruns_closing,
     # geometry and the DEM
     resolve_grid_geometry, read_dem_geometry, read_dem_origin, resolve_origin,
     build_elevation_cache, load_dem_and_init_buffers, MapGrid,
@@ -103,11 +105,14 @@ from oroscope.physics import (  # noqa: F401
     air_density_kgm3, slant_grammage_gcm2, shower_maturity, shower_maximum_gcm2,
     shower_size_fraction, grammage_band_from_energy, earth_chord_m, earth_chord_gcm2,
     neutrino_survival, muon_shielding_gcm2, tau_decay_length_m, cc_cross_section_cm2,
+    nc_regeneration_factor,
     neutrino_interaction_length_gcm2, tau_energy_loss_beta, tau_range_gcm2,
+    set_tau_energy_loss, restore_tau_energy_loss, tau_energy_loss_settings,
     tau_survival, tau_exit_probability, production_escape_optimum_gcm2,
     depth_band_from_energy, earth_absorption_cutoff_deg,
     spectrum_weighted_decay_probability, geomagnetic_latitude_deg,
     centered_dipole_inclination, default_field_for_site, geomagnetic_unit_vector,
+    set_declination_model, declination_model, declination_from_grid,
     geomagnetic_sin_alpha, refractivity, cherenkov_angle_rad,
     cherenkov_footprint_radius_m, footprint_sampling,
 )
@@ -147,6 +152,7 @@ __all__ = [
     "validate_parameters", "parse_score_weights", "explicitly_passed",
     "preflight_memory", "estimate_peak_memory_gb", "apply_memory_cap",
     "available_memory_gb",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
     "resolve_grid_geometry", "read_dem_geometry", "read_dem_origin", "resolve_origin",
     "build_elevation_cache", "load_dem_and_init_buffers", "MapGrid",
     "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
@@ -166,8 +172,10 @@ __all__ = [
     "air_density_kgm3", "slant_grammage_gcm2", "shower_maturity",
     "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
+    "nc_regeneration_factor",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
+    "set_tau_energy_loss", "restore_tau_energy_loss", "tau_energy_loss_settings",
     "production_escape_optimum_gcm2", "depth_band_from_energy",
     "earth_absorption_cutoff_deg", "spectrum_weighted_decay_probability",
     "geomagnetic_latitude_deg", "centered_dipole_inclination", "default_field_for_site",

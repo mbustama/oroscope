@@ -33,6 +33,7 @@ re-read the file it was just handed the path to.
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 import numpy as np
 import tifffile as tiff
@@ -84,7 +85,8 @@ __all__ = [
     # files, the memory pre-flight, and the run summary.
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
     "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
-    "preflight_memory", "emit_explanation",
+    "preflight_memory", "emit_explanation", "resolve_config_paths",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
 ]
 
 # Try to import psutil for RAM stats
@@ -2388,6 +2390,124 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     return total / 1024 ** 3
 
 
+def stride_gap_m(candidate_stride, cell_size_y_m):
+    """
+    Distance between kept candidates, in metres, after striding.
+
+    ``candidate_stride`` subsamples the *list* of surviving pixels rather than the map,
+    so the gap it leaves is a stride's worth of pixels along a scanline.
+
+    Parameters
+    ----------
+    candidate_stride : int
+        Keeps every Nth surviving pixel.
+    cell_size_y_m : float
+        Metric pixel size, N-S.
+
+    Returns
+    -------
+    float
+        Gap between kept candidates, in metres.
+    """
+    return float(max(1, int(candidate_stride))) * float(cell_size_y_m)
+
+
+def closing_element_m(gap_close_km, antenna_spacing_km):
+    """
+    Size of the morphological closing element in metres, defaulting as the pipeline does.
+
+    Parameters
+    ----------
+    gap_close_km : float or None
+        Closing element in km. ``None`` defaults to ``antenna_spacing_km``.
+    antenna_spacing_km : float
+        Detector spacing, which the closing element defaults to.
+
+    Returns
+    -------
+    float
+        Closing element size, in metres.
+    """
+    km = antenna_spacing_km if gap_close_km is None else gap_close_km
+    return float(km) * 1000.0
+
+
+def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
+                                gap_close_km, antenna_spacing_km, quiet=False):
+    """
+    Warns when the closing element is too small to bridge the gaps striding leaves.
+
+    Striding is unbiased in *acceptance* -- measured at both scales, 60.1% against
+    60.1% for GRAND and 17.491% against 17.494% for TAMBO -- so it is tempting to treat
+    it as free. It is not. Accepted pixels are marked one in ``candidate_stride``, and
+    the mask is then closed morphologically before areas are measured. If the closing
+    element is smaller than the gap the stride leaves, the mask never reconnects: it
+    stays a scatter of isolated pixels, small regions fall below the size and capacity
+    thresholds, and the reported area collapses.
+
+    Measured at Colca with a 100 m element against a 154 m stride-5 gap: **83.6 km²
+    reported against 396.9 km² at stride 1, a 4.75x under-report**, with acceptance
+    identical to three decimal places. The same run at GRAND's 1 km element -- 32 px,
+    against the same 154 m gap -- is unaffected, which is why this went unnoticed.
+
+    The rule is simply that the element must outrun the gap. Raise ``gap_close_km``,
+    lower ``candidate_stride``, or accept the area as a lower bound and say so.
+
+    Parameters
+    ----------
+    candidate_stride : int
+        Keeps every Nth surviving pixel.
+    cell_size_y_m : float
+        Metric pixel size, N-S.
+    gap_close_km : float or None
+        Closing element in km. ``None`` defaults to ``antenna_spacing_km``.
+    antenna_spacing_km : float
+        Detector spacing, which the closing element defaults to.
+    quiet : bool, optional
+        Suppress the printed warning, keeping the returned verdict.
+
+    Returns
+    -------
+    dict or None
+        ``{"gap_m", "element_m", "ratio"}`` when the element cannot bridge the gap,
+        and ``None`` when it can.
+
+    Examples
+    --------
+    GRAND's 1 km element easily bridges a stride-5 gap at 30 m pixels:
+
+    >>> from oroscope import site_searcher as ss
+    >>> ss.warn_stride_outruns_closing(5, 30.72, None, 1.0, quiet=True) is None
+    True
+
+    TAMBO's 100 m element does not, and that is the 4.75x:
+
+    >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.1, quiet=True)
+    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
+    (154, 100, 1.54)
+
+    Closing disabled entirely is not this failure, so it does not warn:
+
+    >>> ss.warn_stride_outruns_closing(5, 30.72, 0.0, 0.1, quiet=True) is None
+    True
+    """
+    element = closing_element_m(gap_close_km, antenna_spacing_km)
+    if element <= 0.0:                    # closing switched off deliberately
+        return None
+    gap = stride_gap_m(candidate_stride, cell_size_y_m)
+    if element >= gap:
+        return None
+
+    if not quiet:
+        print(f"{C.WARN}{Icon.WARN}The closing element ({element:.0f} m) is smaller "
+              f"than the gap candidate_stride {int(candidate_stride)} leaves "
+              f"({gap:.0f} m). Accepted pixels will not reconnect, so the reported "
+              f"AREA will be an under-report while acceptance stays unbiased -- "
+              f"measured 4.75x at Colca on TAMBO's settings. Raise gap_close_km, "
+              f"lower candidate_stride, or read the area as a lower bound.{C.RESET}")
+    return {"gap_m": gap, "element_m": element, "ratio": gap / element}
+
+
 def apply_memory_cap(max_memory_gb):
     """
     Caps this process's address space, so a runaway fails instead of taking the machine.
@@ -2696,6 +2816,11 @@ def default_config(preset="default"):
         "require_sky": False,
         "decay_energy_pev": None,
         "max_range_km": None,
+        # What weights the spectrum-folded decay probability: "flux" (the default, and
+        # what every published number used), "acceptance", or "flux_times_acceptance".
+        # The latter two need decay_response_csv, a two-column A(E) table.
+        "decay_weight_by": "flux",
+        "decay_response_csv": None,
         "score_percentile": None,
         "stop_at_target": False,
         "max_memory_gb": None,
@@ -2798,9 +2923,85 @@ def generate_config(path, preset="default"):
     return config
 
 
+# Configuration keys naming a file or directory the run needs to find. Resolved
+# relative to the configuration file, which is the only fixed point a config can
+# reason about; the working directory is not.
+_PATH_KEYS = ("dem_path", "road_map_path", "resume_dir")
+
+
+def resolve_config_paths(config, config_dir, quiet=False):
+    """
+    Makes a configuration's relative paths absolute, against the config's own directory.
+
+    A configuration that says ``"dem_path": "../input/dem/colca.tif"`` is describing
+    where the DEM sits relative to *itself*, which is the only thing it can know. The
+    pipeline resolved it against the working directory instead, so the bundled configs
+    ran only from ``src/`` and produced a `FileNotFoundError` anywhere else -- the
+    long-standing "you must ``cd src`` first" wart.
+
+    A path that does not resolve against the configuration's directory but does resolve
+    against the working directory is left alone, with a warning: that is the old
+    behaviour, and silently breaking someone's working setup to fix a wart is a poor
+    trade. Absolute paths are untouched.
+
+    Parameters
+    ----------
+    config : dict
+        A configuration mapping. Not modified; a copy is returned.
+    config_dir : str
+        Directory holding the configuration file.
+    quiet : bool, optional
+        Suppress the warning about a working-directory-relative fallback.
+
+    Returns
+    -------
+    dict
+        A copy with the path keys resolved.
+
+    Examples
+    --------
+    The repository's own layout is why this is safe to change: ``config/`` and ``src/``
+    are both one level below the root, so ``../input/dem/colca.tif`` names the same file
+    read either way, and no shipped configuration has to change.
+
+    >>> import os
+    >>> from oroscope import site_searcher as ss
+    >>> a = os.path.normpath(os.path.join("/repo/config", "../input/dem/colca.tif"))
+    >>> b = os.path.normpath(os.path.join("/repo/src", "../input/dem/colca.tif"))
+    >>> a == b == "/repo/input/dem/colca.tif"
+    True
+
+    An absolute path is left as it is:
+
+    >>> cfg = ss.resolve_config_paths({"dem_path": "/data/x.tif"}, "/repo/config")
+    >>> cfg["dem_path"]
+    '/data/x.tif'
+    """
+    resolved = dict(config)
+    for key in _PATH_KEYS:
+        value = resolved.get(key)
+        if not value or not isinstance(value, str) or os.path.isabs(value):
+            continue
+        candidate = os.path.normpath(os.path.join(config_dir, value))
+        if os.path.exists(candidate):
+            resolved[key] = candidate
+            continue
+        if os.path.exists(value):
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}{key}={value!r} was found relative to the "
+                      f"working directory but not to the configuration file. That is "
+                      f"the old behaviour and still works; making it relative to the "
+                      f"config (or absolute) will keep working from anywhere.{C.RESET}")
+            continue
+        # Neither exists. Resolve against the config anyway, so the error names the
+        # path the configuration actually asked for.
+        resolved[key] = candidate
+    return resolved
+
+
 def load_config(path):
     """
-    Reads a configuration JSON.
+    Reads a configuration JSON, resolving its relative paths against its own directory.
 
     Parameters
     ----------
@@ -2814,6 +3015,10 @@ def load_config(path):
         how the command line has always treated a missing ``--config_path``, and
         matching it here keeps one behaviour rather than two.
 
+        Path-valued keys (``dem_path``, ``road_map_path``, ``resume_dir``) come back
+        absolute, resolved against the directory holding the configuration rather than
+        the working directory. See :func:`resolve_config_paths`.
+
     Raises
     ------
     json.JSONDecodeError
@@ -2823,7 +3028,8 @@ def load_config(path):
     if not path or not os.path.exists(path):
         return {}
     with open(path, 'r') as f:
-        return json.load(f)
+        config = json.load(f)
+    return resolve_config_paths(config, os.path.dirname(os.path.abspath(path)))
 
 
 def emit_explanation(results, run_output_dir=None, print_it=True):
@@ -2875,6 +3081,203 @@ def emit_explanation(results, run_output_dir=None, print_it=True):
 
 
 # ==========================================
+#        CONFIGURATION -> PIPELINE
+# ==========================================
+# Keys a configuration file carries that are not pipeline parameters: they steer the
+# command line, not the search.
+_NOT_PIPELINE_KEYS = frozenset({
+    "print_info", "output_directory_base_with_given_json", "require_sky",
+})
+
+
+def resolve_rfi_zones(value, quiet=False):
+    """
+    Turns the many spellings of ``rfi_zones`` into the list the pipeline wants.
+
+    A configuration may carry a preset name, a JSON string from the command line, an
+    explicit list of zones, or nothing. The pipeline accepts only the list, and it
+    iterates whatever it is given -- so a preset name reaching it unresolved is iterated
+    *character by character*, each character failing the ``item[0] == 'circle'`` test.
+    That is silent: no exception, no warning, and a search that believes it is excluding
+    five radio-noise zones runs with none.
+
+    Parameters
+    ----------
+    value : str, list, or None
+        ``'lima'`` or ``'arequipa'`` for a preset, ``'none'`` or ``None`` for no zones,
+        a JSON string, or an explicit list of zone tuples.
+    quiet : bool, optional
+        Suppress the warning printed when a string cannot be parsed.
+
+    Returns
+    -------
+    list or None
+        Zones for the pipeline, or ``None``.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> len(ss.resolve_rfi_zones("arequipa"))
+    5
+    >>> ss.resolve_rfi_zones("none") is None
+    True
+    >>> ss.resolve_rfi_zones(None) is None
+    True
+
+    An explicit list is passed through untouched:
+
+    >>> ss.resolve_rfi_zones([("circle", -16.4, -71.5, 25.0, "Arequipa")])
+    [('circle', -16.4, -71.5, 25.0, 'Arequipa')]
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        key = value.lower()
+        if key == "lima":
+            return LIMA_RFI_ZONES
+        if key == "arequipa":
+            return AREQUIPA_RFI_ZONES
+        if key == "none":
+            return None
+        try:
+            return json.loads(value)
+        except Exception as e:                           # pragma: no cover - defensive
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}Could not parse rfi_zones {value!r}; "
+                      f"proceeding with none. {e}{C.RESET}")
+            return None
+    return list(value) if value else None
+
+
+def config_to_pipeline_kwargs(config, quiet=False, **overrides):
+    """
+    Translates a configuration mapping into :func:`find_grand_regions_interactive` kwargs.
+
+    This translation was written out three times -- in ``main()``, in the child process
+    ``sensitivity`` spawns, and in ``tools/run_arequipa_full.py`` -- and the copies had
+    already drifted. The sweep child passed ``rfi_zones`` through as the raw preset
+    name, which the pipeline then iterated character by character and silently resolved
+    to no zones at all; it never inverted ``require_sky`` either. Having one function
+    do it means a new parameter is added once, and means the drift cannot recur.
+
+    What the translation actually consists of:
+
+    - comment keys (``_``-prefixed) and command-line-only keys are dropped;
+    - ``require_sky`` is inverted into the pipeline's positive ``require_terrain``;
+    - ``rfi_zones`` presets are resolved to lists (:func:`resolve_rfi_zones`);
+    - the bands are made tuples, since JSON gives lists;
+    - ``score_weights`` is parsed from its ``"name=value"`` spelling;
+    - ``decay_spectral_index`` accepts a scalar or a ``(low, high)`` pair;
+    - a negative ``azimuth_half_width_deg`` means "unbounded", i.e. ``None``;
+    - anything the pipeline does not accept is dropped, with a warning naming it, so a
+      misspelled key is reported rather than silently ignored.
+
+    Parameters
+    ----------
+    config : dict
+        A configuration mapping, as :func:`load_config` returns.
+    quiet : bool, optional
+        Suppress the warnings about unknown keys and unparseable zones.
+    **overrides
+        Applied after the translation, so a caller can set ``run_output_dir`` or force
+        ``generate_kml=False`` without having to edit the mapping.
+
+    Returns
+    -------
+    dict
+        Keyword arguments for :func:`find_grand_regions_interactive`.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> kw = ss.config_to_pipeline_kwargs(
+    ...     {"_comment": "ignored", "dem_path": "d.tif", "require_sky": True,
+    ...      "rfi_zones": "arequipa", "grammage_band_gcm2": [236.0, 1287.0],
+    ...      "print_info": True})
+    >>> kw["require_terrain"], kw["grammage_band_gcm2"], len(kw["rfi_zones"])
+    (False, (236.0, 1287.0), 5)
+
+    The command-line-only keys do not reach the pipeline:
+
+    >>> "print_info" in kw or "require_sky" in kw
+    False
+    """
+    params = {k: v for k, v in config.items()
+              if not k.startswith("_") and k not in _NOT_PIPELINE_KEYS}
+
+    # The pipeline asks the positive question; the config and the CLI ask the negative.
+    params["require_terrain"] = not config.get("require_sky", False)
+
+    params["rfi_zones"] = resolve_rfi_zones(config.get("rfi_zones"), quiet=quiet)
+
+    # JSON has no tuples, and these are compared and unpacked as pairs downstream.
+    for key in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
+        if params.get(key) is not None:
+            params[key] = tuple(params[key])
+
+    if params.get("score_weights") is not None:
+        params["score_weights"] = parse_score_weights(params["score_weights"])
+
+    if params.get("decay_spectral_index") is not None:
+        params["decay_spectral_index"] = _one_or_pair(params["decay_spectral_index"])
+
+    # Negative means unbounded: scan every azimuth rather than a wedge around aspect.
+    half_width = params.get("azimuth_half_width_deg")
+    if half_width is not None and half_width < 0:
+        params["azimuth_half_width_deg"] = None
+
+    params.update(overrides)
+
+    unknown = sorted(k for k in params if k not in _PIPELINE_PARAMS)
+    for key in unknown:
+        del params[key]
+    if unknown and not quiet:
+        print(f"{C.WARN}{Icon.WARN}Ignoring {len(unknown)} key(s) the pipeline does not "
+              f"take: {', '.join(unknown)}. Check the spelling against "
+              f"default_config().{C.RESET}")
+    return params
+
+
+def run_from_config(config, run_output_dir=".", quiet=False, **overrides):
+    """
+    Runs one search from a configuration mapping or a path to one.
+
+    The library counterpart of ``oroscope --config_path ...``: one call, from a file a
+    run can be reproduced from, returning the results dictionary.
+
+    Parameters
+    ----------
+    config : dict or str
+        A configuration mapping, or a path to a JSON configuration file.
+    run_output_dir : str, optional
+        Where the run writes its outputs.
+    quiet : bool, optional
+        Passed to :func:`config_to_pipeline_kwargs`.
+    **overrides
+        Applied after the translation.
+
+    Returns
+    -------
+    dict
+        The results dictionary, as :func:`find_grand_regions_interactive` returns.
+
+    Examples
+    --------
+    Translation and execution are separable, which is what makes the mapping testable
+    without running a search:
+
+    >>> from oroscope import site_searcher as ss
+    >>> kw = ss.config_to_pipeline_kwargs(ss.default_config(), quiet=True)
+    >>> kw["require_terrain"], kw["rfi_zones"]
+    (True, None)
+    """
+    if isinstance(config, str):
+        config = load_config(config)
+    kwargs = config_to_pipeline_kwargs(config, quiet=quiet, **overrides)
+    return find_grand_regions_interactive(run_output_dir=run_output_dir, **kwargs)
+
+
+# ==========================================
 #             MAIN EXECUTION ORCHESTRATOR
 # ==========================================
 def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas=10000,
@@ -2897,6 +3300,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_column_depth_gcm2=0.0, require_terrain=True,
                             min_target_slope_deg=None, max_target_slope_deg=None,
                             max_range_km=None, score_percentile=None,
+                            decay_weight_by='flux', decay_response_csv=None,
                             stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
@@ -3051,12 +3455,22 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         setting larger for a short-range search: column depth accumulates over the
         whole walk, so tying the two makes the reported depth a property of where the
         walk stopped rather than of the target's thickness.
-
     score_percentile : float, optional
         Keep this percentage of viable candidates, ranked by score, instead of cutting
         at an absolute ``min_score``. Preferred, and for the same reason: a rank is
         scale-free, so it does not move when the composition or the number of
         components changes.
+
+    decay_weight_by : {'flux', 'acceptance', 'flux_times_acceptance'}, optional
+        What weights the spectrum-folded decay probability. ``'flux'`` asks what
+        fraction of arriving neutrinos decays usefully and is the default;
+        ``'acceptance'`` asks the same over the energies the detector responds to, with
+        no assumed spectrum; ``'flux_times_acceptance'`` is the event-rate integrand.
+        The latter two require ``decay_response_csv``.
+    decay_response_csv : str or callable, optional
+        Detection response ``A(E)`` for the acceptance weightings: a path to a
+        two-column CSV of energy in PeV against relative response, or a callable.
+        :func:`aperture.infer_response` recovers one from a published integral curve.
 
     stop_at_target : bool, optional
         In distributed mode, stop selecting sites once ``target_antennas`` is reached.
@@ -3251,6 +3665,18 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
 
     # Field for this site: inclination follows from its own coordinates, so moving
     # the search elsewhere gets that right automatically (roadmap 4.12b)
+    # A(E) for the acceptance weightings. A config carries a path rather than a
+    # callable, since JSON cannot hold a function; a library caller may pass either.
+    _decay_response = decay_response_csv
+    if isinstance(_decay_response, str):
+        _decay_response = aperture_mod.TabulatedResponse.from_csv(_decay_response)
+    if decay_weight_by != "flux" and _decay_response is None:
+        raise ValueError(
+            f"decay_weight_by={decay_weight_by!r} needs decay_response_csv: a two-column "
+            f"CSV of energy in PeV against relative response. See data/ for the "
+            f"published curves and aperture.infer_response() for recovering A(E) from "
+            f"one of them.")
+
     geomag_declination_deg, geomag_inclination_deg = physics.default_field_for_site(
         map_grid.center_lat, origin_lon, geomag_declination_deg, geomag_inclination_deg)
 
@@ -3320,6 +3746,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "decay_spectral_index": decay_spectral_index,
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "max_range_km": max_range_km, "score_percentile": score_percentile,
+        "decay_weight_by": decay_weight_by, "decay_response_csv": decay_response_csv,
         "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -3370,6 +3797,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     print(f"   -> Resolution: {C.MAGENTA}{cell_size_deg:.8f} deg/px{C.RESET} [{map_grid.source}]")
     print(f"   -> Pixel Size: {C.MAGENTA}{cell_size_y:.2f} m N-S x {cell_size_x:.2f} m E-W{C.RESET} (at lat {map_grid.center_lat:.3f})")
     print(f"   -> Candidate Stride: {C.MAGENTA}every {candidate_stride} px{C.RESET}")
+    warn_stride_outruns_closing(candidate_stride, cell_size_y,
+                                gap_close_km, antenna_spacing_km)
     _sb = f"{slope_baseline_m:.0f} m" if slope_baseline_m else "native DEM resolution"
     print(f"   -> Slope Baseline: {C.MAGENTA}{_sb}{C.RESET}")
     print(f"   -> Memory: Tile Size {C.MAGENTA}{tile_size}x{tile_size} px{C.RESET}")
@@ -3486,6 +3915,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "decay_energy_min_pev": decay_energy_min_pev,
                                   "decay_energy_max_pev": decay_energy_max_pev,
                                   "decay_spectral_index": decay_spectral_index,
+                                  "decay_weight_by": decay_weight_by,
+                                  "decay_response": _decay_response,
                                   "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
                                   "clearance_full_at": clearance_full_at,
@@ -3627,6 +4058,16 @@ class TeeLogger:
         self.terminal.flush()
         self.log_file.flush()
 
+
+# Bound once, to the real function, rather than read inside
+# config_to_pipeline_kwargs on every call. Reading it at call time meant the filter
+# followed whatever `find_grand_regions_interactive` happened to be at that moment --
+# so a test double, or any decorator, presented a bare (*args, **kwargs) signature and
+# the translation quietly dropped every parameter it was supposed to pass.
+_PIPELINE_PARAMS = frozenset(
+    inspect.signature(find_grand_regions_interactive).parameters)
+
+
 def main():
     """
     Command-line entry point: parses arguments, reconciles them against the config
@@ -3690,6 +4131,22 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--decay_weight_by", type=str, default="flux",
+                        choices=list(physics.DECAY_WEIGHTINGS),
+                        help="What weights the spectrum-folded decay probability. "
+                             "'flux' (default) asks what fraction of arriving neutrinos "
+                             "decay usefully, and is what every published number here "
+                             "used. 'acceptance' asks the same over the energies the "
+                             "detector responds to, with no assumed spectrum -- useful "
+                             "precisely because the spectral index is an assumption. "
+                             "'flux_times_acceptance' is the event-rate integrand. The "
+                             "latter two need --decay_response_csv.")
+    parser.add_argument("--decay_response_csv", type=str, default=None,
+                        help="Two-column CSV of energy in PeV against relative detector "
+                             "response A(E), for the acceptance weightings. data/ holds "
+                             "the published integral curves; aperture.infer_response() "
+                             "recovers A(E) from one by dividing out the geometric "
+                             "model.")
     parser.add_argument("--max_range_km", type=float, default=None, help="How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.")
     parser.add_argument("--score_percentile", type=float, default=None, help="Keep this percentage of viable candidates, ranked by score, instead of cutting at an absolute --min_score. Preferred: the default score is a product whose distribution piles up near zero, so an absolute threshold sits on a cliff, while a percentile is scale-free.")
     parser.add_argument("--stop_at_target", action="store_true", help="In distributed mode, stop selecting sites once target_antennas is reached. Sites are ranked by capacity, so this reports the best sites for the array actually wanted rather than every patch of qualifying ground.")
@@ -3778,6 +4235,15 @@ def main():
 
     if args.config_path and os.path.exists(args.config_path):
         config_basename = os.path.splitext(os.path.basename(args.config_path))[0]
+        # Relative to the configuration, not the working directory -- the same rule
+        # load_config applies to dem_path, and for the same reason. Without it, fixing
+        # the inputs to run from anywhere would leave the *outputs* still landing
+        # wherever the caller happened to stand: from the repository root the default
+        # "../output/" writes a sibling of the repository. A base typed on the command
+        # line is the caller's own instruction and is left relative to where they are.
+        if key not in explicit_cli and not os.path.isabs(base_dir):
+            config_dir = os.path.dirname(os.path.abspath(args.config_path))
+            base_dir = os.path.normpath(os.path.join(config_dir, base_dir))
         run_output_dir = os.path.join(base_dir, config_basename)
     else:
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3872,114 +4338,15 @@ def _run_from_arguments(parser, args, explicit_cli, config_params, fallback_para
     # pipeline itself (preflight_memory), so a library caller gets all three without
     # having to know they exist. main() only passes the ceiling through.
 
-    # Handle RFI Zone selection mapping (Checks Config-passed custom lists, or matches string presets)
-    rfi_input = final_params.get('rfi_zones', 'none')
-    selected_rfi = None
-    
-    if isinstance(rfi_input, str):
-        if rfi_input.lower() == 'lima':
-            selected_rfi = LIMA_RFI_ZONES
-        elif rfi_input.lower() == 'arequipa':
-            selected_rfi = AREQUIPA_RFI_ZONES
-        elif rfi_input.lower() != 'none':
-            # Attempt to parse as JSON if a raw string array was passed via CLI
-            try:
-                selected_rfi = json.loads(rfi_input)
-            except Exception as e:
-                print(f"{C.WARN}{Icon.WARN}WARNING: Could not parse custom rfi_zones string. Proceeding with 'none'. Error: {e}{C.RESET}")
-    elif isinstance(rfi_input, list):
-        # Naturally supports custom RFI arrays loaded cleanly from the JSON config file
-        selected_rfi = rfi_input
-
     # Output explanations if requested (either via flag or configured true)
     if final_params.get('print_info', True):
         print_tool_explanation()
 
-    # Execute main search pipeline with our integrated parameters
-    return find_grand_regions_interactive(
-        dem_path=final_params['dem_path'],
-        target_antennas=final_params['target_antennas'], 
-        rfi_zones=selected_rfi,
-        min_width_km=final_params['min_width_km'],
-        origin_lat=final_params['origin_lat'],
-        origin_lon=final_params['origin_lon'],
-        min_altitude=final_params['min_altitude'], 
-        max_altitude=final_params['max_altitude'],
-        antenna_spacing_km=final_params['antenna_spacing_km'],
-        min_dist_km=final_params['min_dist_km'],
-        max_dist_km=final_params['max_dist_km'],
-        grid_type=final_params['grid_type'],       
-        generate_kml=final_params['generate_kml'],     
-        road_map_path=final_params['road_map_path'],    
-        max_road_dist_km=final_params['max_road_dist_km'],
-        search_mode=final_params['search_mode'],
-        min_sub_array_size=final_params['min_sub_array_size'],
-        min_aspect_deg=final_params['min_aspect_deg'], 
-        max_aspect_deg=final_params['max_aspect_deg'],
-        min_slope_deg=final_params['min_slope_deg'],
-        max_slope_deg=final_params['max_slope_deg'],
-        region_name=final_params['region_name'],
-        downsample_factor=final_params['downsample_factor'],
-        run_output_dir=run_output_dir,
-        output_image_format=final_params['output_image_format'],
-        tile_size=final_params['tile_size'],
-        resume=final_params.get('resume', False),
-        resume_dir=final_params.get('resume_dir'),
-        num_cores=final_params.get('num_cores', -1),
-        cell_size_deg=final_params.get('cell_size_deg'),
-        candidate_stride=final_params.get('candidate_stride', 5),
-        slope_baseline_m=final_params.get('slope_baseline_m'),
-        energy_min_pev=final_params.get('energy_min_pev'),
-        energy_max_pev=final_params.get('energy_max_pev'),
-        n_azimuths=final_params.get('n_azimuths', 9),
-        azimuth_half_width_deg=(None if (final_params.get('azimuth_half_width_deg', 60.0) or 0) < 0
-                                else final_params.get('azimuth_half_width_deg', 60.0)),
-        elev_min_deg=final_params.get('elev_min_deg', -3.0),
-        elev_max_deg=final_params.get('elev_max_deg', 3.0),
-        n_elev_bins=final_params.get('n_elev_bins', 12),
-        min_column_depth_gcm2=final_params.get('min_column_depth_gcm2', 0.0),
-        require_terrain=not final_params.get('require_sky', False),
-        fresnel_frequency_mhz=final_params.get('fresnel_frequency_mhz'),
-        refraction_k=final_params.get('refraction_k'),
-        antenna_height_m=final_params.get('antenna_height_m', 2.0),
-        exclude_near_field=final_params.get('exclude_near_field', True),
-        fresnel_near_field_m=final_params.get('fresnel_near_field_m', 500.0),
-        depth_band_gcm2=(tuple(final_params['depth_band_gcm2'])
-                         if final_params.get('depth_band_gcm2') else None),
-        score_composition=final_params.get('score_composition', 'product'),
-        min_score=final_params.get('min_score', 0.0),
-        geomag_declination_deg=final_params.get('geomag_declination_deg'),
-        geomag_inclination_deg=final_params.get('geomag_inclination_deg'),
-        muon_shielding_km=final_params.get('muon_shielding_km'),
-        bilinear_sampling=final_params.get('bilinear_sampling', True),
-        use_geomagnetic=final_params.get('use_geomagnetic', True),
-        grammage_mode=final_params.get('grammage_mode', 'radio'),
-        grammage_band_gcm2=(tuple(final_params['grammage_band_gcm2'])
-                            if final_params.get('grammage_band_gcm2') else None),
-        grammage_maturity_gcm2=final_params.get('grammage_maturity_gcm2'),
-        decay_energy_pev=final_params.get('decay_energy_pev'),
-        decay_energy_min_pev=final_params.get('decay_energy_min_pev'),
-        decay_energy_max_pev=final_params.get('decay_energy_max_pev'),
-        decay_spectral_index=_one_or_pair(final_params.get('decay_spectral_index')),
-        shower_development_m=final_params.get('shower_development_m', 3000.0),
-        gap_close_km=final_params.get('gap_close_km'),
-        max_range_km=final_params.get('max_range_km'),
-        score_percentile=final_params.get('score_percentile'),
-        stop_at_target=final_params.get('stop_at_target', False),
-        min_target_slope_deg=final_params.get('min_target_slope_deg'),
-        max_target_slope_deg=final_params.get('max_target_slope_deg'),
-        grammage_band_fraction=final_params.get('grammage_band_fraction'),
-        shower_elongation_rate_gcm2=final_params.get('shower_elongation_rate_gcm2'),
-        shower_lambda_gcm2=final_params.get('shower_lambda_gcm2'),
-        solid_angle_half_sr=final_params.get('solid_angle_half_sr'),
-        distance_band_m=(tuple(final_params['distance_band_m'])
-                         if final_params.get('distance_band_m') else None),
-        clearance_full_at=final_params.get('clearance_full_at'),
-        score_weights=parse_score_weights(final_params.get('score_weights')),
-        nu_interaction_length_gcm2=final_params.get('nu_interaction_length_gcm2'),
-        max_memory_gb=final_params.get('max_memory_gb'),
-        explain=final_params.get('explain', True)
-    )
+    # Execute the search. The configuration-to-pipeline translation lives in
+    # config_to_pipeline_kwargs, so main(), the sensitivity child and the full-DEM
+    # runner all use the same one and a new parameter is added in a single place.
+    # run_output_dir is an override because main() derives it from the config's name.
+    return run_from_config(final_params, run_output_dir=run_output_dir)
 
 
 if __name__ == "__main__":

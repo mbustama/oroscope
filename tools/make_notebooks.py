@@ -1344,6 +1344,79 @@ interesting is not a survey**, and that is the gap this run exists to close.""")
     print("   TAMBO: bound by 'directions accepted' (kept 17.5%)")
 else:
     print("Run both searches to make this comparison.")"""),
+("md", """## Every assumption behind these numbers
+
+A search produces authoritative-looking areas and detector counts, and the only defence
+against those being over-read is writing down what is behind them. This is the complete
+list for *this* run — not a generic one. Where an effect has been measured, the measured
+size is given; where it has not, that is said instead.
+
+The run says most of this about itself: `explanation.txt` carries a
+**WHICH OF THESE ARE ASSUMPTIONS** block, and the cell below prints it. What follows adds
+the ones that live in the configuration rather than the pipeline, and the ones measured
+after the run."""),
+("code", """for label, res in (("GRAND", grand_full), ("TAMBO", tambo_full)):
+    if res is None:
+        continue
+    text = res.get("explanation") or explain.explain_results(res)
+    block = text.split("WHICH OF THESE ARE ASSUMPTIONS")
+    if len(block) > 1:
+        print(f"===== {label} =====")
+        print("WHICH OF THESE ARE ASSUMPTIONS" + block[1].split("WHAT TO TRY NEXT")[0])"""),
+("md", """### 1. Choices written into the configuration
+
+Both configs mark these `ASSUMPTION` in their own comments. They are the numbers a
+collaboration should be asked about before any of this is quoted.
+
+| | value | what it rests on |
+|---|---|---|
+| **`solid_angle_half_sr`** (TAMBO) | 0.8 sr | The scale at which accepted sky stops being scarce. The default 0.05 is GRAND-scale and saturates the term to ~1 across a canyon, so it stops discriminating. **This is what the TAMBO result actually turns on** — `solid_angle` is the weakest component at 26 of 26 sites. |
+| **`min_score`** (TAMBO) | 0.35 | A cut on a *product* of components, whose distribution piles up near zero. Equivalent to `score_percentile` **22.8** on this terrain, and a scan across the cut shows **no knee** — area runs 3.1 → 186.8 km² across percentiles 5 → 40, smooth and near linear. Nothing marks 0.35 as natural. |
+| **near-wall band** (TAMBO) | 20–60° | The wall the array stands on. Colca's walls are ~40°, far outside GRAND's 3–25°. |
+| **`min_target_slope_deg`** (TAMBO) | 25° | The far wall the tau exits, measured along the arrival azimuth. Deliberately permissive against ~40° walls. Without it the scan only asks that rock is present at the right range, which is true almost everywhere in the Andes. |
+| **arrival window** (TAMBO) | ±20° | What the far wall subtends from a detector on the near wall. |
+| **`grammage_band_gcm2`** (TAMBO) | 236–1287 | = `grammage_band_from_energy(3, 1000, fraction=0.1)`. The 0.1 is a choice about detector capability — how far down the profile still counts as a usable shower — not a property of the shower. |
+| **`decay_spectral_index`** (TAMBO) | 2.0 | The flux slope the decay term folds against. The canonical value. Costs 1.46× across a plausible range; may be given as a `(low, high)` pair to marginalise instead of choosing. |
+| **arrival window** (GRAND) | ±3° | The Earth-skimming geometry. Note the ±3° window sits *below* the horizon almost everywhere: the median horizon is +7.3°. |
+| **distance window** (GRAND) | 10–40 km | Far enough for the shower to develop, close enough for the signal. |
+
+### 2. Choices forced by running at full scale
+
+These are not physics. They are the price of searching 128.6 Mpx on one machine, and
+each one moves a reported number.
+
+| | value | what it costs |
+|---|---|---|
+| **`downsample_factor`** | 4 | Area is measured on the downsampled mask while capacity is measured at full resolution, so a feature a few pixels wide keeps its detectors and loses area — **~30% for a canyon strip**. Affects TAMBO far more than GRAND. |
+| **`candidate_stride`** | 5 | Unbiased in *acceptance* — 17.494% against 17.491% at stride 1 — but the mask is closed before area is taken, and a 100 m element cannot bridge the 154 m gap stride 5 leaves. **TAMBO's area is 4.75× low** because of this. GRAND's 1 km element is unaffected. |
+| **`gap_close_km`** | = detector spacing | Closing inflates GRAND's area **2.10×** in this run (2.29× measured against a stride-1 control). Reported area is not physics-accepted area. |
+| **`max_range_km`** | unset | The profile walk stops at `max_dist_km`, so the reported **column depth is a property of where the walk stopped**. Measured on TAMBO: walking 4× further raised it **6.4×** with an identical selection. Read the depths as lower bounds. |
+| **`min_width_km`** | 2.0 GRAND / 0.0 TAMBO | The opening step prunes tendrils. At GRAND's 2 km it would delete exactly the strip a canyon array is, which is why TAMBO sets it to 0. |
+
+### 3. Physics not modelled at all
+
+| | |
+|---|---|
+| **Detector acceptance `A(E)`** | An event rate is ∫Φ·A·P dE. `decay_weight_by` now selects flux, acceptance, or both — **these numbers used `flux`**. No real differential table exists; one inferred from a published curve is not a safe substitute. |
+| **Tau production and escape through rock** | Not modelled, so β does not enter. The search weights by the decay length E/m·cτ, which is kinematics. |
+| **Neutral-current regeneration** | Available (`nc_regeneration=True`) but **off here**, so Earth-chord suppression is overstated — by 1.06× at −0.5° rising to 1.56× at −5°. |
+| **Shower simulation, detector response, trigger** | None of it. The scores rank sites; they are not apertures. |
+| **Geology** | One standard rock density throughout. |
+| **Geomagnetic declination** | Constant at Arequipa's −6.9° across the whole DEM. Inclination does follow the site. Right for southern Peru, and this DEM is southern Peru. |
+| **External validation** | **Nothing here has been checked against an external simulation.** The Earth-absorption prediction — the window's lower edge climbing from −4.4° at 100 PeV to −0.9° at 10 EeV — is the cheapest such test and is ready for someone to run. |
+
+### 4. And the one that is not an assumption at all
+
+The layout is **anchored, not fitted**: detectors are placed from each site's bounding-box
+corner rather than optimised. Capacity is an estimate for an arbitrarily placed array, and
+a real deployment would do better.
+
+---
+
+**If you quote one number from this notebook, quote it with its caveat.** GRAND's
+88,527.5 km² is a closed mask, 2.10× the accepted set. TAMBO's 111.9 km² is low by ~4.75×
+from striding and ~30% again from downsampling. The joint 50.2 km² inherits both, and is
+a floor rather than an estimate."""),
 ("md", footer(prev=("06_combining_and_sensitivity.ipynb", "Combining and sensitivity"))),
 ]
 

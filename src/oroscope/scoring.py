@@ -268,6 +268,12 @@ DEFAULT_SCORE_CONFIG = {
     "decay_energy_min_pev": None,
     "decay_energy_max_pev": None,
     "decay_spectral_index": physics.DEFAULT_SPECTRAL_INDEX,
+    # What weights the spectrum fold: the flux, the detector acceptance A(E), or their
+    # product -- the event-rate integrand. "flux" is the default and is what every
+    # published number here was computed with. The acceptance weightings need
+    # "decay_response", a callable A(E).
+    "decay_weight_by": "flux",
+    "decay_response": None,
     "shower_development_m": 3000.0,
     "solid_angle_half_sr": 0.05,
     "clearance_full_at": 1.0,          # clearance ratio scoring 1 (Fresnel radii)
@@ -404,7 +410,9 @@ def score_candidates(observables: dict[str, np.ndarray],
             dist, e_lo, e_hi,
             spectral_index=cfg.get("decay_spectral_index",
                                    physics.DEFAULT_SPECTRAL_INDEX),
-            shower_development_m=shower_m)
+            shower_development_m=shower_m,
+            weight_by=cfg.get("decay_weight_by", "flux"),
+            response=cfg.get("decay_response"))
     elif decay_energy:
         length_m = physics.tau_decay_length_m(decay_energy)
         if length_m > 0:

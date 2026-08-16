@@ -2085,8 +2085,403 @@ line actually needs it. **A library must not decide how its user's figures are
 rendered.** The same applied to `sensitivity`, which set `MPLBACKEND` at import for the
 benefit of its subprocesses.
 
-Still open for the release: PyPI does not render SVG, so the project page will need a
-PNG of the logo even though GitHub and Sphinx are happy with the vector.
+Settled for the release: the logo is a **PNG everywhere** — 1024×1024 RGBA, used by
+Sphinx's `html_logo`, by the README and by PyPI alike. PyPI does not render SVG, and
+carrying a vector for two of those and a raster for the third is how a project ends up
+shipping two different logos.
+
+### 6.34 The stride-1 control at TAMBO settings: acceptance is unbiased, area is not
+
+§9.9 asked whether TAMBO's area is a lower bound. It is, **by 4.75×**, and the reason is
+not the one the funnel's own closing factor suggested.
+
+`config/tambo_colca_stride1.json` is `tambo_colca_config.json` with `candidate_stride: 1`
+and nothing else moved. 26 seconds. Against the stride-5 run on the same crop:
+
+| | stride 5 | stride 1 | |
+| --- | --- | --- | --- |
+| directions accepted | **17.491%** | **17.494%** | unbiased, 0.017% apart |
+| accepted pixels | 83,343 (×5 = 416,715) | 416,776 | agree to 0.01% |
+| after gap closing | 222,658 | 486,322 | |
+| **area** | **83.6 km²** | **396.9 km²** | **4.75× under-report** |
+| sites | 15 | 29 | |
+| capacity | 9,717 | 45,856 | 4.72× |
+
+**Acceptance is unbiased and area is not, and the two facts are not in tension.**
+Striding decides which pixels are *tested*, and it tests a fair sample — 17.491 against
+17.494 is as close as this measurement gets. But it also decides which pixels are
+*marked*, and the mask is closed morphologically before any area is measured. Marking
+one pixel in five leaves gaps of 5 px; at Colca's 30.7 m that is **154 m**. TAMBO's
+closing element is `antenna_spacing_km` = 100 m, or 3.3 px. **A 100 m element cannot
+bridge a 154 m gap**, so the mask never reconnects: it stays a scatter of isolated
+pixels, most regions fall below `min_sub_array_size`, and the area collapses.
+
+GRAND's element is 1 km — 32 px against the same 154 m gap — which is why the earlier
+control found striding clean and why this went unnoticed for so long. The rule is one
+line: **the closing element must outrun the stride gap.**
+
+| | element | stride-5 gap | |
+| --- | --- | --- | --- |
+| GRAND | 1000 m (32.5 px) | 154 m | bridges |
+| TAMBO | 100 m (3.3 px) | 154 m | **cannot bridge** |
+
+`warn_stride_outruns_closing()` now checks this at the top of every run, printing the
+comparison and naming the three ways out (raise `gap_close_km`, lower
+`candidate_stride`, or read the area as a lower bound and say so). It is checked against
+both experiments in the doctests, since it is exactly the sort of guard that is wrong in
+the direction of silence.
+
+**What this means for the published numbers.** The mechanism was already named correctly
+— §5.1 said in as many words that TAMBO's 100 m element "cannot bridge the gaps
+`candidate_stride: 5` leaves". What was missing was its size, and the 0.53× figure
+standing in for it understated the problem badly. 0.53 is the *ratio of the closed
+stride-5 mask to the stride-corrected accepted count*, which folds the closing and the
+fragmentation into one number and so measures neither. Separated: closing alone inflates
+by **1.17×**, mildly, as it does everywhere; fragmentation costs **4.75×**. A reader
+seeing 0.53 would reasonably infer the area was low by about half. It is low by nearly a
+factor of five.
+
+So: **TAMBO's Colca area of 83.6 km² should be read as ~397 km², and its capacity of
+9,717 as ~45,856** — nine times its 5,000 target rather than twice. The full-DEM figure
+of 111.9 km² is under-reported for the same reason *and* by downsampling on top, and
+cannot be corrected by simply applying 4.75× (the full run also uses
+`downsample_factor: 4`). Measuring it directly is not possible on this machine: TAMBO at
+stride 1 over the full DEM is 26.8M candidates, which the corrected estimator puts near
+10 GiB. GRAND is unaffected throughout, at either scale.
+
+The joint area is affected as well, and in the direction that matters: it is limited by
+TAMBO's mask, so 50.1 km² at Colca is also a floor rather than an estimate.
+
+### 6.35 One config→pipeline translation, and the silent bug the three copies hid
+
+§9.10 called the triplicated config→pipeline mapping "where a new parameter gets
+forgotten". It had already happened, and worse than forgetting.
+
+`main()` translated a configuration into pipeline keywords across sixty explicit lines.
+`sensitivity`'s child process splatted the payload straight in. `tools/run_arequipa_full.py`
+re-derived a third version. Only the first was complete.
+
+**The sweep child never resolved `rfi_zones`.** A preset name reached
+`find_grand_regions_interactive`, which does `for item in rfi_zones: if item[0] ==
+'circle'`. Given the string `"arequipa"` that iterates *characters*; `'a'[0]` is `'a'`,
+never `'circle'`, so every zone was skipped. No exception and no warning — and because
+the count is `len(rfi_zones)`, the run cheerfully printed **`RFI Zones: 8 active`**, one
+per letter, while excluding nothing. A sweep on a GRAND config would have searched
+straight through Arequipa city and reported that it had not.
+
+The recorded sweeps (§6.20–6.21) are **not** affected: they were run on
+`tambo_colca_config.json`, whose `rfi_zones` is `"none"`, and iterating `"none"` also
+yields nothing — which is the right answer there, by luck rather than by design. The
+child also never inverted `require_sky`, and never made the bands tuples.
+
+`config_to_pipeline_kwargs()` is now the single translation and `run_from_config()` the
+single entry point; `main()` is one call, the sweep child is one call, and the runner is
+one call. Verified behaviour-preserving by re-running GRAND over the Colca crop and
+diffing: funnel, results, aperture and every parameter identical. The sweep child now
+records five zones and a funnel identical to the direct run.
+
+Two things learned in the doing:
+
+- **Unknown keys are now dropped *and named*.** A misspelled `min_slop_deg` used to be
+  ignored in silence, because an explicit keyword-by-keyword mapping simply never reads
+  it. The translation warns, which is how a typo becomes visible.
+- **Bind the signature at import, not at call time.** The filter first read
+  `inspect.signature(find_grand_regions_interactive)` on every call, which meant it
+  followed whatever that name pointed at — so the existing CLI tests, which substitute a
+  recorder, presented a bare `(*args, **kwargs)` and the translation dropped every
+  parameter it was meant to pass. Eighteen tests failed at once and were right to.
+  `_PIPELINE_PARAMS` is bound once, to the real function.
+
+### 6.36 Configuration paths are relative to the configuration ✅ delivered
+
+§9.11: the search resolved `dem_path` against the working directory, so the bundled
+configurations ran only from `src/` and produced a `FileNotFoundError` anywhere else.
+
+A configuration that says `"dem_path": "../input/dem/colca.tif"` is describing where the
+DEM sits relative to *itself* — the only fixed point it can reason about. `load_config()`
+now resolves `dem_path`, `road_map_path` and `resume_dir` that way, and `main()` applies
+the same rule to the output base, since fixing the inputs alone would have left the
+*outputs* landing wherever the caller happened to stand (from the repository root, the
+default `../output/` writes a sibling of the repository).
+
+**No shipped configuration had to change**, which is what made this safe: `config/` and
+`src/` are both one level below the root, so `../input/dem/colca.tif` names the same file
+read from either. Verified by running the TAMBO stride-1 control from the repository
+root and getting the identical answer — 29 sites, 396.9 km², 45,856 detectors.
+
+A path that resolves only against the working directory is left alone with a warning.
+Silently breaking a setup that relied on the old behaviour would be a poor way to fix a
+convenience wart. A base typed on the command line is likewise left relative to the
+caller, because that is their own instruction rather than the configuration's.
+
+**Not covered: `oroscope-fetch-dem`.** It writes `../input/dem/` and `../config/`
+relative to the working directory and has no configuration file to be relative to, so it
+still wants running from `src/`. Documented rather than fixed.
+
+### 6.37 The benchmark baseline, and measuring the machine before trusting it
+
+§9.12 asked for `bench/baseline.json` to be refreshed "on a quiet machine". There is no
+quiet machine here, so the first job was to find out what this one can actually resolve.
+
+**Two consecutive passes over identical code**, nothing changed between them:
+
+| case/stage | pass 1 | pass 2 | spread |
+| --- | --- | --- | --- |
+| `arequipa_900/ray_tracing` | 1.228 s | 1.820 s | **48.2%** |
+| `synthetic_1800/ray_tracing` | 5.833 s | 8.036 s | **37.8%** |
+| `arequipa_2500/ray_tracing` | 17.553 s | 16.489 s | 6.5% |
+
+Both of the first two exceed the 30% regression gate. A single-pass baseline on this
+host does not record the cost of the code; it records one sample of the noise and then
+gates on it. Note the pattern, which is the useful part: the 17-second case is stable
+and the short ones are not. Scheduler placement — a thread landing on a 4.6 GHz P-core
+or a 3.4 GHz E-core — is a roughly fixed cost, so it dominates a one-second stage and
+averages out over a seventeen-second one.
+
+**Three changes, and then the refresh.**
+
+`--repeat N` runs each case N times and keeps the **minimum** per stage. The minimum
+rather than the mean, for a reason worth stating: timing noise is one-sided. Nothing
+makes a stage run faster than its true cost, while a great many things make it slower.
+The minimum therefore converges on the real cost as N rises, where the mean wanders with
+whatever else the machine was doing.
+
+`spread_pct` is recorded per stage, so the baseline carries **what the machine could
+resolve** alongside what it measured. This is the field that makes the rest honest.
+
+The gate is now **spread-aware**: a stage whose recorded spread is at least half the
+gate is reported with a `~` and never failed on. Verified on the refreshed baseline —
+`synthetic_900/ray_tracing` came in at 1.20 s → 3.07 s, a 156% "regression", and was
+correctly not gated, because its own baseline spread is 150%. Gating on it would fail
+builds at random while telling nobody anything.
+
+Refreshed with `--repeat 5` at a load average of 2.39 — *not* a quiet machine, and
+recorded as such. What it is worth is now legible from the file itself:
+
+| | resolvable (spread < 15%) | not resolvable |
+| --- | --- | --- |
+| `arequipa_2500` | ray_tracing 8.4%, capacity 5.1%, morphology 3.7%, outputs 1.7% | topographic_screen 18.3% |
+| everything else | a few stages | most stages, up to 149.6% |
+
+**So `arequipa_2500` is the case this host can gate on, and largely the only one.** A
+re-run against the fresh baseline reproduces it to 0.0% on total and −0.3% on ray
+tracing, which is the confirmation that the methodology works rather than that the
+machine got quieter.
+
+The expectation from §6.25 — that `capacity_analysis` would be the one stage
+legitimately slower, by 1.62× — is now absorbed into the baseline rather than
+outstanding. It sits at 0.340 s on `arequipa_2500` with a 5.1% spread, so it is
+measurable, and future changes to it can be gated properly.
+
+### 6.38 β is configurable, and does not affect a search — which the run had been claiming it did
+
+§9.5 asked for β, the tau energy-loss constant, to stop being a source literal.
+`physics.set_tau_energy_loss(reference=..., index=...)` adopts a value in one place for
+every function that uses it, `tau_energy_loss_settings()` reports what is in force, and
+`restore_tau_energy_loss()` puts the shipped estimate back. The `BETA_*` constants stay
+as the documented default, and an explicit argument still overrides the module setting
+for a single call.
+
+**The more useful finding is where β does not reach.** Tracing it before plumbing it:
+nothing in the search path uses β at all. It enters `tau_range_gcm2`, `tau_survival` and
+`tau_exit_probability` — tau production and escape *through rock* — and the search does
+not model those. What the search weights by is the decay length `L = (E/m_τ)·cτ`, which
+is kinematics and carries no β. `aperture.py` likewise uses only that length.
+
+So the run's own summary was wrong. `explain.py` listed β under **"WHICH OF THESE ARE
+ASSUMPTIONS — Choices, not measurements. Check them before quoting a result"**, with a
+hardcoded `0.6e-6 cm²/g`, for a quantity no reported number depends on. That is the
+worse direction for an error of this kind: it invites a reader to discount a result over
+a parameter that never touched it, and it pads a list whose whole value is that
+everything on it matters. β has moved to the "not modelled at all" sentence, alongside
+neutral-current regeneration and the trigger, and the text now says explicitly that the
+decay length carries no β.
+
+A test pins that, by asserting `tau_decay_length_m` is unchanged by a tenfold β. If β
+ever does enter the search, the claim in the explanation becomes false and that test
+fails — which is the only way a statement like this stays true.
+
+### 6.39 Column depth is truncated by the walk, measured at 6.4× — and the fix has a cliff
+
+§9.3: "column depth is bounded by the walk unless `max_range_km` is set". The parameter
+already existed and defaults to `max_dist_km`, so the profile walk stops at the target
+rather than continuing through the rock behind it. What was missing was the size of the
+effect. TAMBO over the Colca crop, three walk lengths against an unchanged 2–5 km
+distance window:
+
+| `max_range_km` | sites | area km² | capacity | mean column depth g/cm² | directions accepted |
+| --- | --- | --- | --- | --- | --- |
+| 5 (the default) | 15 | 83.6 | 9,717 | 747,016 | 17.49% |
+| 20 | 15 | 83.6 | 9,717 | **4,765,107** | 17.49% |
+| 60 | **2** | **5.3** | **605** | 5,522,952 | **5.98%** |
+
+**The reported depth is a 6.4× under-report at the default**, and correcting it costs
+nothing: at 20 km the selection is byte-for-byte the same — 83,343 accepted pixels in
+both, the same 15 sites, the same 83.6 km². The walk was simply stopping before it had
+measured the thing it reports.
+
+**But the knob is not monotone and must not be maximised.** At 60 km the same run keeps
+5.98% of directions against 17.49%, and the result collapses to two sites. The mechanism
+is not yet identified — the mean horizon barely moves (+13.6° → +14.0°), so it is not
+simple distant blocking — and it is recorded here as measured behaviour rather than
+explained. Anyone raising `max_range_km` should check the funnel, not assume.
+
+The configurations are unchanged, deliberately: this is a reporting defect rather than a
+selection one, and changing them would restate the published numbers for a reason
+unrelated to the physics they describe. The run's own assumptions block now carries the
+measured factor and the warning about the cliff, so the depth is read as the lower bound
+it is.
+
+### 6.40 Declination can follow the site — the model is a socket, not a shipped table
+
+§9.6 and §10.1: inclination follows the DEM's coordinates through a centred dipole,
+while declination falls back to Arequipa's −6.9° wherever the search happens to be,
+because the dipole is unusable for it (−0.2° against a measured −6.9°).
+
+`physics.set_declination_model(fn)` takes any callable `fn(lat, lon) -> degrees` and
+`default_field_for_site` consults it before falling back, so declination now follows the
+site exactly as inclination does. `declination_from_grid(lats, lons, values)` builds such
+a callable by bilinear interpolation, which is the practical route: export a grid from
+NOAA's geomagnetic calculator covering the DEM and hand it over.
+
+**No IGRF implementation is shipped, and that is a decision rather than an omission.**
+IGRF is a spherical-harmonic expansion with a couple of hundred coefficients per epoch.
+Writing them from memory would produce declinations that look entirely plausible and are
+wrong — which is the failure mode this project has now found half a dozen times, and the
+one that is hardest to notice. Either install `ppigrf`/`pyIGRF` and pass its function, or
+supply a grid. The socket is the part that was missing; the coefficients are somebody
+else's published work and should arrive as data.
+
+Nothing about a published number changes: with no model set the fallback is exactly as
+before, which the tests pin. The run's assumptions block now says the declination is
+constant *unless a model was supplied*, and names the two ways to supply one.
+
+### 6.41 Neutral-current regeneration, to leading order and clearly labelled as such
+
+§9.4: only charged-current attenuation was counted, so the Earth-chord suppression is
+overstated. A CC interaction removes a neutrino from the beam; an NC one only degrades
+its energy, and on a falling spectrum those degraded neutrinos scatter *down into* the
+band and partially refill it.
+
+`nc_regeneration_factor()` is the leading term, and it is derivable rather than
+asserted. For `Φ(E) ~ E^-γ`, a neutrino seen at `E` after one NC scatter of inelasticity
+`y` started at `E' = E/(1-y)`, where the flux is larger by `(1-y)^γ`; the Jacobian
+`dE'/dE = 1/(1-y)` supplies one more power, giving `(1-y)^(γ-1)` per scatter. With
+`τ_NC = (X_chord/X_CC)·(σ_NC/σ_CC)` scatters expected, the factor is
+`1 + τ_NC·(1-y)^(γ-1)`.
+
+Measured at 1 EeV, against the ±3° window that matters:
+
+| elevation | absorption only | with regeneration | lift |
+| --- | --- | --- | --- |
+| −0.5° | 0.836 | 0.883 | 1.06× |
+| −1.0° | 0.700 | 0.778 | 1.11× |
+| −3.0° | 0.342 | 0.458 | **1.34×** |
+| −5.0° | 0.168 | 0.262 | 1.56× |
+
+So the correction is small at the top of the window and grows with the chord, which is
+the expected shape: the deeper the crossing, the more NC scatters and the more refilling.
+
+**Off by default, and it is an approximation.** It is the first term of a series, not a
+solution of the cascade equations, and it omits the `ν_τ → τ → ν_τ` chain that makes the
+Earth genuinely translucent to tau neutrinos at high energy. It is clipped at 1 so it can
+offset absorption but never manufacture flux. A result that leans on it is a result that
+needs a real transport code.
+
+One thing to watch: `earth_absorption_cutoff_deg` — the prediction in §6 offered as the
+cheapest external check (§9.7) — does *not* apply this correction, so that prediction
+still describes absorption alone. Turning regeneration on would move its lower edge
+upward, and if it is ever compared against a collaboration simulation the two treatments
+must be matched.
+
+**A correction to a wrong statement made while writing this.** The first draft of the
+docstring said a steeper spectrum regenerates *more*. It is the opposite: the neutrinos
+scattering into the band come from `E/(1-y)`, above it, where a steeper spectrum has
+*less* flux. The formula was right and the prose was backwards — γ = 2.0 gives 1.315 and
+γ = 2.7 gives 1.258 — and two of the doctest values were wrong on top of that. Caught by
+running them, which is exactly what §8.2 exists for. A test now pins the direction.
+
+### 6.42 The decay weighting is selectable: flux, acceptance, or both
+
+§9.1: an event rate is `∫Φ(E)·A(E)·P(E)dE` and the weight used was the flux alone.
+`spectrum_weighted_decay_probability` now takes `weight_by`, with the config parameter
+`decay_weight_by` and the flag `--decay_weight_by`:
+
+| | weight | asks |
+| --- | --- | --- |
+| `flux` *(default)* | `E^-γ` | of the neutrinos that **arrive**, what fraction decays usefully? |
+| `acceptance` | `A(E)` | over the energies the **detector responds to**, what fraction decays usefully? No assumed spectrum — which is the point, since γ is an assumption. |
+| `flux_times_acceptance` | `E^-γ·A(E)` | the event-rate integrand itself. |
+
+`A(E)` arrives as `--decay_response_csv`, a two-column table; `aperture.infer_response()`
+recovers one from a published integral curve by dividing out the geometric model.
+
+The mechanism is pinned by a check worth stating: **`flux_times_acceptance` with a flat
+response reproduces `flux` to twelve decimal places.** A constant must cancel in the
+normalisation, and it does, so the acceptance factor is entering exactly where it should.
+`acceptance` is likewise independent of γ, also to twelve places.
+
+**Using it on TAMBO produced a warning, not a result.** Recovering `A(E)` from
+`data/tambo_aperture_fig3.csv` against our own Colca configuration and re-running:
+
+| `decay_weight_by` | sites | area km² | capacity | mean decay term |
+| --- | --- | --- | --- | --- |
+| `flux` | 15 | 83.6 | 9,717 | 0.9566 |
+| `flux_times_acceptance` | 15 | 78.1 | 9,093 | 0.9401 |
+| `acceptance` | **0** | **0.0** | **0** | — |
+
+The inferred `A(E)` rises monotonically to its maximum at the *top* of the published
+range, 8.8 EeV. Weighting by it alone puts all the weight where the tau decay length is
+hundreds of kilometres against a 2–5 km canyon, so the decay term collapses, every
+candidate falls below `min_score` and the search returns nothing.
+
+**That is a statement about the inferred response, not about TAMBO.** `A(E)` here is
+`published / (our geometric model)`, and our model's aperture peaks near 66 PeV while the
+published curve keeps climbing. The ratio therefore absorbs every high-energy effect our
+model does not reproduce — a different baseline distribution, a geometry the ±20° window
+does not capture — and attributes all of it to "response". `infer_response`'s own
+docstring says it is "a better weight than a flat response, not a substitute for a
+differential table"; this is what that caveat looks like when it bites.
+
+So: the selector is the deliverable, and it works. `flux` remains the default and every
+published number is unmoved. `flux_times_acceptance` is usable now and costs ~6% of
+capacity. **`acceptance` alone should not be used with an inferred response** — it wants
+a real differential acceptance table, which remains the outstanding ask of §10.
+
+### 6.43 `min_score` against `score_percentile`, measured — and left to the owner
+
+§9.2 called `min_score` the dominant assumption and noted `--score_percentile` as the
+scale-free alternative the configs do not use. Measured on TAMBO over the Colca crop:
+
+| cut | sites | area km² | capacity | kept, of strided |
+| --- | --- | --- | --- | --- |
+| `min_score` 0.35 *(current)* | 15 | 83.6 | 9,717 | 17.49% |
+| `score_percentile` 5 | 1 | 3.1 | 363 | 3.84% |
+| `score_percentile` 10 | 5 | 18.3 | 2,121 | 7.68% |
+| `score_percentile` 17.5 | 15 | 60.9 | 7,004 | 13.43% |
+| `score_percentile` 25 | 17 | 94.2 | 10,976 | 19.19% |
+| `score_percentile` 40 | 31 | 186.8 | 21,539 | 30.71% |
+
+**`min_score` 0.35 is `score_percentile` 22.8 on this terrain**, by interpolation. Note
+the percentile is taken over *viable* candidates rather than all strided ones, which is
+why 17.5 keeps 13.4% of the strided set rather than 17.5%.
+
+**There is no knee.** Area runs 3.1 → 18.3 → 60.9 → 94.2 → 186.8 km² across the range —
+smooth, monotone, and close to linear above 10%. Nothing in the data marks 0.35 or any
+other value as the natural cut. That is the strongest form of §5.1's claim that
+`min_score` is an assumption rather than a measurement: if the terrain had a natural
+threshold, a scan across the cut would show it, and it does not.
+
+The case for switching is that a percentile means the same thing when the composition
+changes, and an absolute cut on a product does not — add a component and every score
+falls, so 0.35 silently becomes a harsher cut. The case against is that every published
+number used 0.35, and switching restates all of them.
+
+**Not switched.** The configs are unchanged. This changes published science and is the
+owner's call, not a refactor to be slipped in; §10 already lists `min_score` among the
+TAMBO assumptions to check with the collaboration, and this is the table to check it
+against. If it is switched, `score_percentile: 22.8` reproduces the current selection
+most closely.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

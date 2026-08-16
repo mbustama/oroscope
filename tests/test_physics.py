@@ -821,3 +821,222 @@ class TestSpectralIndexPinnedOrMarginalised(unittest.TestCase):
         marginal = time.perf_counter() - t0
         self.assertLess(marginal, 5.0 * pinned + 1.0,
                         "marginalising should fold into the weights, not re-integrate")
+
+
+class TestBetaIsConfigurable(unittest.TestCase):
+    """
+    beta is the least certain number in the module, so adopting a collaboration value
+    must not mean editing the source of an installed package.
+    """
+
+    def tearDown(self):
+        physics.restore_tau_energy_loss()
+
+    def test_setting_beta_changes_what_every_caller_sees(self):
+        before = physics.tau_energy_loss_beta(100.0)
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        self.assertAlmostEqual(physics.tau_energy_loss_beta(100.0), 0.8e-6)
+        self.assertAlmostEqual(physics.tau_energy_loss_beta(10000.0), 0.8e-6,
+                               msg="index 0 means a constant beta")
+        self.assertNotAlmostEqual(physics.tau_energy_loss_beta(100.0), before)
+
+    def test_it_reaches_range_and_survival(self):
+        loose = physics.tau_range_gcm2(100.0)
+        physics.set_tau_energy_loss(reference=2.0e-6, index=0.0)
+        tighter = physics.tau_range_gcm2(100.0)
+        self.assertLess(tighter, loose, "a larger beta means a shorter range")
+
+    def test_restore_puts_the_shipped_estimate_back(self):
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        physics.restore_tau_energy_loss()
+        self.assertEqual(physics.tau_energy_loss_settings(),
+                         {"reference": physics.BETA_REFERENCE_CM2G,
+                          "reference_energy_pev": physics.BETA_REFERENCE_ENERGY_PEV,
+                          "index": physics.BETA_ENERGY_INDEX})
+
+    def test_an_explicit_argument_still_wins_over_the_module_setting(self):
+        physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+        self.assertAlmostEqual(
+            physics.tau_energy_loss_beta(100.0, reference=1.0e-6, index=0.0), 1.0e-6)
+
+    def test_a_nonsense_beta_is_refused(self):
+        for bad in (0.0, -1.0e-6):
+            with self.assertRaises(ValueError):
+                physics.set_tau_energy_loss(reference=bad)
+
+    def test_beta_does_not_enter_the_decay_length_the_search_uses(self):
+        # The search weights by the decay length E/m*c*tau, which is kinematics. If
+        # beta ever leaks into it, this catches it -- and the explanation's claim that
+        # beta does not affect a search result would become false.
+        before = physics.tau_decay_length_m(100.0)
+        physics.set_tau_energy_loss(reference=5.0e-6, index=0.0)
+        self.assertEqual(physics.tau_decay_length_m(100.0), before)
+
+
+class TestDeclinationCanFollowTheSite(unittest.TestCase):
+    """
+    Inclination follows the site through a dipole; declination could not, because the
+    dipole gives -0.2 deg at Arequipa against an IGRF -6.9. It fell back to one constant
+    wherever the DEM was. These cover the socket that lets a real model be supplied.
+    """
+
+    def tearDown(self):
+        physics.set_declination_model(None)
+
+    def test_without_a_model_the_constant_fallback_is_used_everywhere(self):
+        for lat, lon in ((-16.4, -71.5), (-12.0, -77.0), (60.0, 20.0)):
+            dec, _ = physics.default_field_for_site(lat, lon)
+            self.assertEqual(dec, physics.DEFAULT_GEOMAG_DECLINATION_DEG)
+
+    def test_a_model_makes_declination_follow_the_site(self):
+        physics.set_declination_model(lambda lat, lon: 0.5 * lon)
+        self.assertAlmostEqual(physics.default_field_for_site(-16.4, -70.0)[0], -35.0)
+        self.assertAlmostEqual(physics.default_field_for_site(-16.4, -74.0)[0], -37.0)
+
+    def test_an_explicit_declination_still_beats_the_model(self):
+        physics.set_declination_model(lambda lat, lon: -1.0)
+        dec, _ = physics.default_field_for_site(-16.4, -71.5, declination_deg=-6.9)
+        self.assertEqual(dec, -6.9)
+
+    def test_inclination_keeps_following_the_site_either_way(self):
+        _, lima = physics.default_field_for_site(-12.0, -77.0)
+        _, arequipa = physics.default_field_for_site(-16.4, -71.5)
+        self.assertLess(arequipa, lima, "inclination steepens southward across Peru")
+
+    def test_a_grid_interpolates_bilinearly(self):
+        lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+        dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+        model = physics.declination_from_grid(lats, lons, dec)
+        for (lat, lon), expected in (((-18.0, -74.0), -5.0), ((-14.0, -70.0), -8.0),
+                                     ((-16.0, -72.0), -6.5)):
+            self.assertAlmostEqual(model(lat, lon), expected)
+
+    def test_a_grid_query_outside_its_corners_clamps(self):
+        lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+        dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+        model = physics.declination_from_grid(lats, lons, dec)
+        self.assertAlmostEqual(model(-40.0, -100.0), -5.0)
+
+    def test_a_mis_shaped_grid_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.declination_from_grid(np.array([-18.0, -14.0]),
+                                          np.array([-74.0, -70.0]),
+                                          np.array([[-5.0, -7.0]]))
+
+
+class TestNeutralCurrentRegeneration(unittest.TestCase):
+    """
+    A CC interaction removes a neutrino; an NC one only degrades its energy. Counting
+    absorption alone therefore overstates the suppression, and the correction is off by
+    default because it is a leading-order approximation rather than a cascade solution.
+    """
+
+    def test_it_is_off_by_default_so_published_numbers_do_not_move(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        self.assertEqual(physics.neutrino_survival(-1.0, lam),
+                         math.exp(-physics.earth_chord_gcm2(-1.0) / lam))
+
+    def test_regeneration_can_only_help(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        for elev in (-0.5, -1.0, -3.0, -8.0):
+            plain = physics.neutrino_survival(elev, lam)
+            regen = physics.neutrino_survival(elev, lam, nc_regeneration=True)
+            self.assertGreaterEqual(regen, plain)
+
+    def test_it_never_manufactures_flux(self):
+        lam = physics.neutrino_interaction_length_gcm2(1000.0)
+        for elev in (-0.01, -0.1, -0.5, -1.0, -5.0, -20.0):
+            self.assertLessEqual(
+                physics.neutrino_survival(elev, lam, nc_regeneration=True), 1.0)
+
+    def test_a_steeper_spectrum_regenerates_less(self):
+        # The neutrinos scattering into the band come from E/(1-y), above it, where a
+        # steeper spectrum has less flux. Getting this backwards is easy.
+        soft = physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.0)
+        hard = physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.7)
+        self.assertGreater(soft, hard)
+
+    def test_no_chord_means_no_regeneration(self):
+        self.assertEqual(physics.nc_regeneration_factor(0.0, 1.0e8), 1.0)
+        self.assertEqual(physics.nc_regeneration_factor(1.0e8, 0.0), 1.0)
+
+    def test_it_grows_with_the_chord(self):
+        factors = [physics.nc_regeneration_factor(x, 1.0e8)
+                   for x in (1e7, 5e7, 1e8, 2e8)]
+        self.assertTrue(all(b > a for a, b in zip(factors, factors[1:])))
+
+
+class TestDecayWeightingIsSelectable(unittest.TestCase):
+    """
+    An event rate is the integral of flux * A(E) * P(E). Weighting by flux alone is one
+    of three defensible choices, and which one was used has to be a stated parameter
+    rather than an assumption buried in the code.
+    """
+
+    def setUp(self):
+        from oroscope import aperture
+        self.flat = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0], [1.0] * 5)
+        self.low = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0],
+                                              [1.0, 1.0, 0.5, 0.05, 0.001])
+        self.high = aperture.TabulatedResponse([1.0, 3.0, 10.0, 100.0, 1000.0],
+                                               [0.001, 0.05, 0.5, 1.0, 1.0])
+
+    def test_a_flat_response_reduces_exactly_to_the_flux_weighting(self):
+        # The check that the acceptance factor enters where it should: multiplying by a
+        # constant must cancel in the normalisation and leave the flux answer untouched.
+        flux = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
+        both = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="flux_times_acceptance", response=self.flat)
+        self.assertAlmostEqual(float(flux), float(both), places=12)
+
+    def test_a_low_energy_response_decays_more_readily_than_a_high_energy_one(self):
+        # The tau outruns a 3 km gap at high energy, so weighting toward low energies
+        # must raise the decay probability.
+        low = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="acceptance", response=self.low)
+        high = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="acceptance", response=self.high)
+        self.assertGreater(float(low), float(high))
+
+    def test_acceptance_weighting_ignores_the_spectral_index(self):
+        # The point of it: gamma is an assumption, and this weighting removes it.
+        a = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=1.5,
+            weight_by="acceptance", response=self.low)
+        b = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=2.7,
+            weight_by="acceptance", response=self.low)
+        self.assertAlmostEqual(float(a), float(b), places=12)
+
+    def test_flux_times_acceptance_still_depends_on_the_index(self):
+        a = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=1.5,
+            weight_by="flux_times_acceptance", response=self.low)
+        b = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, spectral_index=2.7,
+            weight_by="flux_times_acceptance", response=self.low)
+        self.assertNotAlmostEqual(float(a), float(b), places=6)
+
+    def test_an_acceptance_weighting_without_a_response_is_refused(self):
+        for mode in ("acceptance", "flux_times_acceptance"):
+            with self.assertRaises(ValueError):
+                physics.spectrum_weighted_decay_probability(
+                    3000.0, 3.0, 1000.0, weight_by=mode)
+
+    def test_an_unknown_weighting_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(
+                3000.0, 3.0, 1000.0, weight_by="vibes", response=self.flat)
+
+    def test_a_response_that_is_zero_everywhere_is_refused_rather_than_dividing_by_zero(self):
+        from oroscope import aperture
+        elsewhere = aperture.TabulatedResponse([1e6, 1e7], [1.0, 1.0])
+        with self.assertRaises(ValueError):
+            physics.spectrum_weighted_decay_probability(
+                3000.0, 3.0, 1000.0, weight_by="acceptance", response=elsewhere)
+
+    def test_the_default_is_flux_so_published_numbers_do_not_move(self):
+        explicit = physics.spectrum_weighted_decay_probability(
+            3000.0, 3.0, 1000.0, weight_by="flux")
+        default = physics.spectrum_weighted_decay_probability(3000.0, 3.0, 1000.0)
+        self.assertEqual(float(explicit), float(default))

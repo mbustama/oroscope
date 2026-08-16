@@ -28,11 +28,14 @@ __all__ = [
     "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
+    "nc_regeneration_factor", "NC_TO_CC_RATIO", "NC_INELASTICITY",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
+    "set_tau_energy_loss", "restore_tau_energy_loss", "tau_energy_loss_settings",
     "production_escape_optimum_gcm2", "depth_band_from_energy",
     "earth_absorption_cutoff_deg", "spectrum_weighted_decay_probability",
     "geomagnetic_latitude_deg",
     "centered_dipole_inclination", "default_field_for_site",
+    "set_declination_model", "declination_model", "declination_from_grid",
     "geomagnetic_unit_vector", "geomagnetic_sin_alpha", "refractivity",
     "cherenkov_angle_rad", "cherenkov_footprint_radius_m", "footprint_sampling",
 ]
@@ -427,9 +430,93 @@ def earth_chord_gcm2(elevation_deg: float, radius_m: float = EARTH_RADIUS_M,
     return earth_chord_m(elevation_deg, radius_m) * 100.0 * density_gcm3
 
 
+# Neutral-current cross-section as a fraction of charged-current, and the mean
+# inelasticity of an NC interaction. Both are slowly varying at these energies; these
+# are round numbers, and both are parameters of nc_regeneration_factor() so a better
+# value can be supplied without touching this.
+NC_TO_CC_RATIO = 0.42
+NC_INELASTICITY = 0.25
+
+
+def nc_regeneration_factor(chord_gcm2: float, cc_length_gcm2: float,
+                           spectral_index: float = 2.0,
+                           nc_to_cc: float = NC_TO_CC_RATIO,
+                           inelasticity: float = NC_INELASTICITY) -> float:
+    """
+    Leading-order enhancement from neutral-current regeneration. **An approximation.**
+
+    A charged-current interaction removes a neutrino from the beam. A neutral-current
+    one does not -- it degrades the energy and the neutrino continues. Counting only CC
+    absorption, as ``neutrino_survival`` does by default, therefore understates the flux
+    arriving at a given energy: neutrinos that started higher up the spectrum scatter
+    *down into* the band and partially refill it.
+
+    The size of that refilling follows from the spectrum. For a power law
+    ``Phi(E) ~ E**-gamma``, a neutrino observed at ``E`` after one NC interaction of
+    inelasticity ``y`` began at ``E' = E/(1-y)``. The flux there is larger by
+    ``(1-y)**gamma``, and the Jacobian ``dE'/dE = 1/(1-y)`` gives one more power, so each
+    NC scatter contributes ``(1-y)**(gamma-1)`` relative to the unscattered flux. With
+    ``tau_nc = (chord/X_cc) * (sigma_NC/sigma_CC)`` NC interactions expected along the
+    chord, the leading term is::
+
+        1 + tau_nc * (1 - y)**(gamma - 1)
+
+    **What this is not.** It is the first term of a series, not a solution of the
+    cascade equations, and it ignores the ``nu_tau -> tau -> nu_tau`` chain that makes
+    the Earth genuinely translucent to tau neutrinos at high energy. It is a correction
+    of the right sign and roughly the right size, and it is capped below (see
+    :func:`neutrino_survival`) so it cannot manufacture more flux than arrived. Treat a
+    result that depends strongly on it as a result that needs a real transport code.
+
+    Parameters
+    ----------
+    chord_gcm2 : float
+        Column depth along the chord, in g/cm^2.
+    cc_length_gcm2 : float
+        Charged-current interaction length, in g/cm^2.
+    spectral_index : float, optional
+        ``gamma`` of the assumed power-law flux. A steeper spectrum regenerates *less*:
+        the neutrinos scattering down into the band come from ``E/(1-y)``, above it, and
+        a steeper spectrum has less flux there.
+    nc_to_cc : float, optional
+        ``sigma_NC / sigma_CC``.
+    inelasticity : float, optional
+        Mean fraction of energy lost in one NC interaction.
+
+    Returns
+    -------
+    float
+        Multiplicative enhancement, at least 1.
+
+    Examples
+    --------
+    A chord one CC interaction length deep, on an E^-2 spectrum:
+
+    >>> from oroscope import physics
+    >>> round(physics.nc_regeneration_factor(1.0e8, 1.0e8), 3)
+    1.315
+
+    A steeper spectrum regenerates less, since less flux sits above the band:
+
+    >>> round(physics.nc_regeneration_factor(1.0e8, 1.0e8, spectral_index=2.7), 3)
+    1.258
+
+    A short chord regenerates nothing:
+
+    >>> round(physics.nc_regeneration_factor(0.0, 1.0e8), 3)
+    1.0
+    """
+    if cc_length_gcm2 <= 0 or chord_gcm2 <= 0:
+        return 1.0
+    tau_nc = (chord_gcm2 / cc_length_gcm2) * nc_to_cc
+    return 1.0 + tau_nc * (1.0 - inelasticity) ** (spectral_index - 1.0)
+
+
 def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
                       radius_m: float = EARTH_RADIUS_M,
-                      density_gcm3: float = CRUST_DENSITY_GCM3) -> float:
+                      density_gcm3: float = CRUST_DENSITY_GCM3,
+                      nc_regeneration: bool = False,
+                      spectral_index: float = 2.0) -> float:
     """
     Fraction of neutrinos surviving the Earth chord to reach the exit region.
 
@@ -437,6 +524,11 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
     on the cross-section at the energy of interest; around an EeV it is of order
     1e8 g/cm^2, which is the same order as the chord at -3 degrees, so the suppression
     across a +/-3 degree window is substantial rather than marginal.
+
+    With ``nc_regeneration=True`` the result is multiplied by
+    :func:`nc_regeneration_factor`, and clipped at 1 so that regeneration can offset
+    absorption but never invent flux. **Off by default**, because it is an
+    approximation and every published number here was computed without it.
 
     Parameters
     ----------
@@ -449,6 +541,10 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
         Earth radius, in metres.
     density_gcm3 : float, optional
         Crust density, in g/cm^3.
+    nc_regeneration : bool, optional
+        Apply the leading-order neutral-current regeneration correction.
+    spectral_index : float, optional
+        Power-law index used by that correction.
 
     Returns
     -------
@@ -461,11 +557,20 @@ def neutrino_survival(elevation_deg: float, interaction_length_gcm2: float,
     >>> lam = physics.neutrino_interaction_length_gcm2(1000.0)
     >>> round(physics.neutrino_survival(-1.0, lam), 3)
     0.7
+
+    Regeneration lifts it, because absorption alone was overstating the suppression:
+
+    >>> round(physics.neutrino_survival(-1.0, lam, nc_regeneration=True), 3)
+    0.778
     """
     if interaction_length_gcm2 <= 0:
         return 1.0
-    return math.exp(-earth_chord_gcm2(elevation_deg, radius_m, density_gcm3)
-                    / interaction_length_gcm2)
+    chord = earth_chord_gcm2(elevation_deg, radius_m, density_gcm3)
+    survival = math.exp(-chord / interaction_length_gcm2)
+    if nc_regeneration:
+        survival *= nc_regeneration_factor(chord, interaction_length_gcm2,
+                                           spectral_index=spectral_index)
+    return min(survival, 1.0)
 
 
 # ------------------------------------------------------- muon shielding
@@ -623,14 +728,129 @@ BETA_REFERENCE_CM2G = 0.6e-6
 BETA_REFERENCE_ENERGY_PEV = 1.0e3        # 1 EeV
 BETA_ENERGY_INDEX = 0.20
 
+# The live values, which set_tau_energy_loss() replaces. The BETA_* constants above
+# stay as the shipped estimate, so restore_tau_energy_loss() has something to restore
+# to and a reader can always see what the default was.
+_TAU_BETA = {"reference": BETA_REFERENCE_CM2G,
+             "reference_energy_pev": BETA_REFERENCE_ENERGY_PEV,
+             "index": BETA_ENERGY_INDEX}
+
+
+def tau_energy_loss_settings() -> dict:
+    """
+    The beta parameters currently in force.
+
+    Returns
+    -------
+    dict
+        ``{"reference", "reference_energy_pev", "index"}``, in cm^2/g and PeV.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.tau_energy_loss_settings()["reference"]
+    6e-07
+    """
+    return dict(_TAU_BETA)
+
+
+def set_tau_energy_loss(reference: float | None = None,
+                        reference_energy_pev: float | None = None,
+                        index: float | None = None) -> dict:
+    """
+    Adopts a different beta, in one place, for every function that uses it.
+
+    beta is the least certain number in this module -- an estimate from mass scaling,
+    in the range (0.4-1.0)e-6 cm^2/g -- and the collaboration's own value should replace
+    it when there is one. Until now that meant editing the source, which is not
+    something a user of an installed package can reasonably do, and which leaves no
+    record of what was used.
+
+    **This does not change any site-search result.** beta enters tau *range* and
+    *survival* -- production and escape through rock -- and the search does not model
+    those: it uses the decay length ``L = (E/m_tau) c*tau``, which is kinematics and
+    carries no beta. So this affects :func:`tau_range_gcm2`, :func:`tau_survival` and
+    :func:`tau_exit_probability`, which the notebooks and the physics page use, and
+    nothing in a search. See ROADMAP 6.38.
+
+    Parameters
+    ----------
+    reference : float, optional
+        beta at ``reference_energy_pev``, in cm^2/g. Left unchanged when None.
+    reference_energy_pev : float, optional
+        Energy at which ``reference`` applies, in PeV.
+    index : float, optional
+        Power-law index of the energy dependence. Zero gives a constant beta.
+
+    Returns
+    -------
+    dict
+        The settings now in force, as :func:`tau_energy_loss_settings` returns.
+
+    Examples
+    --------
+    A collaboration value, adopted once:
+
+    >>> from oroscope import physics
+    >>> _ = physics.set_tau_energy_loss(reference=0.8e-6, index=0.0)
+    >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
+    '8.00e-07'
+
+    A constant beta means the same value at every energy:
+
+    >>> f"{physics.tau_energy_loss_beta(10000.0):.2e}"
+    '8.00e-07'
+
+    And back to the shipped estimate, which does rise with energy:
+
+    >>> _ = physics.restore_tau_energy_loss()
+    >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
+    '3.79e-07'
+    """
+    if reference is not None:
+        if reference <= 0.0:
+            raise ValueError("beta reference must be positive")
+        _TAU_BETA["reference"] = float(reference)
+    if reference_energy_pev is not None:
+        if reference_energy_pev <= 0.0:
+            raise ValueError("beta reference energy must be positive")
+        _TAU_BETA["reference_energy_pev"] = float(reference_energy_pev)
+    if index is not None:
+        _TAU_BETA["index"] = float(index)
+    return tau_energy_loss_settings()
+
+
+def restore_tau_energy_loss() -> dict:
+    """
+    Restores the shipped estimate, undoing :func:`set_tau_energy_loss`.
+
+    Returns
+    -------
+    dict
+        The settings now in force.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.restore_tau_energy_loss() == {
+    ...     "reference": physics.BETA_REFERENCE_CM2G,
+    ...     "reference_energy_pev": physics.BETA_REFERENCE_ENERGY_PEV,
+    ...     "index": physics.BETA_ENERGY_INDEX}
+    True
+    """
+    _TAU_BETA.update(reference=BETA_REFERENCE_CM2G,
+                     reference_energy_pev=BETA_REFERENCE_ENERGY_PEV,
+                     index=BETA_ENERGY_INDEX)
+    return tau_energy_loss_settings()
+
 # Mean inelasticity of a charged-current interaction at these energies: the tau carries
 # away roughly (1 - y) of the neutrino energy, with <y> about 0.2.
 CC_INELASTICITY = 0.2
 
 
-def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM2G,
-                         reference_energy_pev: float = BETA_REFERENCE_ENERGY_PEV,
-                         index: float = BETA_ENERGY_INDEX) -> float:
+def tau_energy_loss_beta(energy_pev: float, reference: float | None = None,
+                         reference_energy_pev: float | None = None,
+                         index: float | None = None) -> float:
     """
     Energy-loss coefficient beta(E), rising with energy as photonuclear does.
 
@@ -643,7 +863,9 @@ def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM
     energy_pev : float
         Tau energy, in PeV.
     reference : float, optional
-        Value of beta at ``reference_energy_pev``, in cm^2/g.
+        Value of beta at ``reference_energy_pev``, in cm^2/g. Defaults to whatever
+        :func:`set_tau_energy_loss` last established, and to
+        :data:`BETA_REFERENCE_CM2G` if it has not been called.
     reference_energy_pev : float, optional
         Energy at which ``reference`` applies, in PeV.
     index : float, optional
@@ -659,7 +881,17 @@ def tau_energy_loss_beta(energy_pev: float, reference: float = BETA_REFERENCE_CM
     >>> from oroscope import physics
     >>> f"{physics.tau_energy_loss_beta(100.0):.2e}"
     '3.79e-07'
+
+    An argument overrides the module setting for that one call:
+
+    >>> f"{physics.tau_energy_loss_beta(100.0, reference=1.0e-6, index=0.0):.2e}"
+    '1.00e-06'
     """
+    live = _TAU_BETA
+    reference = live["reference"] if reference is None else reference
+    reference_energy_pev = (live["reference_energy_pev"]
+                            if reference_energy_pev is None else reference_energy_pev)
+    index = live["index"] if index is None else index
     if index == 0.0:
         return reference
     return reference * (energy_pev / reference_energy_pev) ** index
@@ -966,10 +1198,14 @@ def earth_absorption_cutoff_deg(energy_pev: float, fraction: float = 0.5,
 DEFAULT_SPECTRAL_INDEX = 2.0
 
 
+DECAY_WEIGHTINGS = ("flux", "acceptance", "flux_times_acceptance")
+
+
 def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_pev,
                                         spectral_index=DEFAULT_SPECTRAL_INDEX,
                                         shower_development_m=0.0, samples=96,
-                                        index_samples=129):
+                                        index_samples=129,
+                                        weight_by="flux", response=None):
     r"""
     Probability the tau decays inside the usable gap, folded over a power-law spectrum.
 
@@ -988,12 +1224,31 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
 
     integrated on a log-spaced grid, since the range spans decades.
 
-    Two things this deliberately is *not*. It is not an event rate: that needs the
-    detector's acceptance :math:`A(E)`, which no available table supplies, and the
-    weight here is the flux alone. And a steep spectrum weights low energies heavily,
-    where the tau decays readily -- so a soft spectrum drives :math:`P` toward 1 and the
-    term stops discriminating. That is the physics rather than a defect, but it means
-    the spectral index deserves the same scrutiny as any other assumption.
+    **What weights the average is selectable.** An event rate is
+    :math:`\int \Phi(E) A(E) P(E)\,{\rm d}E`, and weighting by the flux alone is only
+    one of three defensible choices:
+
+    ``"flux"``
+        :math:`w(E) = E^{-\gamma}`. The default, and what every published number here
+        was computed with. Says: *of the neutrinos that arrive, what fraction decays
+        usefully?*
+    ``"acceptance"``
+        :math:`w(E) = A(E)`. Says: *over the energies this detector actually responds
+        to, what fraction decays usefully?* -- a property of the instrument and the
+        terrain, with no assumed spectrum. Useful precisely because :math:`\gamma` is an
+        assumption and this removes it.
+    ``"flux_times_acceptance"``
+        :math:`w(E) = E^{-\gamma} A(E)`, the event-rate integrand itself, and the right
+        one when both the spectrum and a response table are trusted.
+
+    ``A(E)`` is not something this module can supply; pass a callable, most usefully one
+    recovered from a published curve by :func:`aperture.infer_response`, which divides
+    that curve by the geometric model and leaves everything else.
+
+    Note a steep spectrum weights low energies heavily, where the tau decays readily --
+    so a soft spectrum drives :math:`P` toward 1 and the term stops discriminating. That
+    is the physics rather than a defect, but it means the spectral index deserves the
+    same scrutiny as any other assumption, and it is the reason ``"acceptance"`` exists.
 
     Parameters
     ----------
@@ -1012,6 +1267,12 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
         Points across the spectral-index range, when one is given. Generous by default
         because the index integral is folded into a weight vector computed once, so a
         fine grid costs nothing per candidate. Ignored for a single index.
+    weight_by : {'flux', 'acceptance', 'flux_times_acceptance'}, optional
+        What weights the average. See the discussion above. ``'acceptance'`` ignores
+        ``spectral_index`` entirely, which is the point of it.
+    response : callable, optional
+        ``A(E)`` in PeV, required by the two acceptance weightings. A response that is
+        zero everywhere on the grid leaves nothing to average and raises.
 
     Returns
     -------
@@ -1053,6 +1314,16 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     """
     if energy_max_pev <= energy_min_pev:
         raise ValueError("energy_max_pev must exceed energy_min_pev")
+    if weight_by not in DECAY_WEIGHTINGS:
+        raise ValueError(f"weight_by must be one of {DECAY_WEIGHTINGS}, got {weight_by!r}")
+    if weight_by != "flux" and response is None:
+        raise ValueError(f"weight_by={weight_by!r} needs a response A(E); pass one, "
+                         f"e.g. from aperture.infer_response()")
+
+    # Weighting by acceptance alone is the flux weighting with no spectrum at all, so
+    # gamma drops out rather than being quietly retained.
+    if weight_by == "acceptance":
+        spectral_index = 0.0
 
     gammas = np.atleast_1d(np.asarray(spectral_index, dtype=np.float64))
     if gammas.size == 2:
@@ -1084,6 +1355,17 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     # Done the obvious way it was 45 times the work for a 45-point index grid, which on
     # a real search was 25 s against 1 s; this way a fine grid is free.
     weights = energies[None, :] ** (1.0 - gammas[:, None])
+    if response is not None and weight_by != "flux":
+        # A(E) multiplies the weight before normalisation, so the average is taken over
+        # the energies the detector actually responds to. Outside a tabulated range
+        # TabulatedResponse returns zero, which correctly removes those energies rather
+        # than extrapolating over them.
+        acceptance = np.asarray(response(energies), dtype=np.float64)
+        if not np.any(acceptance > 0):
+            raise ValueError("the response is zero across the whole energy range, so "
+                             "there is nothing to average; check its tabulated range "
+                             "against energy_min_pev/energy_max_pev")
+        weights = weights * acceptance[None, :]
     normalised = weights / _trapezoid(weights, ln_e, axis=-1)[:, None]
     if gammas.size == 1:
         effective = normalised[0]
@@ -1195,6 +1477,132 @@ def centered_dipole_inclination(latitude_deg: float, longitude_deg: float,
     return math.degrees(math.atan(2.0 * math.tan(mlat)))
 
 
+_DECLINATION_MODEL = None
+
+
+def set_declination_model(model):
+    """
+    Supplies a declination model, so declination can follow the site as inclination does.
+
+    Inclination is computed from the site's coordinates with a centred dipole and is
+    good enough. Declination is not: the dipole gives about -0.2 degrees at Arequipa
+    against an IGRF -6.9, because the non-dipole terms dominate it. So declination has
+    always fallen back to a single constant -- Arequipa's IGRF value -- wherever the DEM
+    happened to be, which is right for the prototype region and wrong anywhere else.
+
+    **No IGRF model is shipped, deliberately.** IGRF is a spherical-harmonic expansion
+    with a couple of hundred coefficients per epoch, and coefficients typed from memory
+    would produce declinations that look entirely plausible and are wrong -- the exact
+    failure this project keeps finding. What is provided instead is the socket: pass any
+    callable ``model(latitude_deg, longitude_deg) -> declination_deg``, from
+    ``ppigrf``/``pyIGRF``, from a NOAA grid via :func:`declination_from_grid`, or from
+    the collaboration's own numbers.
+
+    Parameters
+    ----------
+    model : callable or None
+        ``model(latitude_deg, longitude_deg)`` returning degrees east of north.
+        ``None`` restores the constant fallback.
+
+    Returns
+    -------
+    callable or None
+        The model now in force.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> _ = physics.set_declination_model(lambda lat, lon: -6.0 + 0.1 * (lon + 71.5))
+    >>> dec, inc = physics.default_field_for_site(-16.4, -71.5)
+    >>> f"{dec:.2f}"
+    '-6.00'
+
+    It follows the site, which the constant never did:
+
+    >>> dec_east, _ = physics.default_field_for_site(-16.4, -66.5)
+    >>> f"{dec_east:.2f}"
+    '-5.50'
+    >>> _ = physics.set_declination_model(None)
+    >>> physics.default_field_for_site(-16.4, -66.5)[0]
+    -6.9
+    """
+    global _DECLINATION_MODEL
+    _DECLINATION_MODEL = model
+    return _DECLINATION_MODEL
+
+
+def declination_model() -> object:
+    """
+    The declination model in force, or ``None`` when the constant fallback is in use.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.declination_model() is None
+    True
+    """
+    return _DECLINATION_MODEL
+
+
+def declination_from_grid(latitudes, longitudes, declinations):
+    """
+    Builds a declination model by bilinear interpolation over a supplied grid.
+
+    The practical way to get real IGRF values in without a spherical-harmonic
+    implementation: export a declination grid covering the DEM (NOAA's geomagnetic
+    calculator will produce one), and hand the three arrays here.
+
+    Parameters
+    ----------
+    latitudes : array_like
+        Grid latitudes, ascending, in degrees.
+    longitudes : array_like
+        Grid longitudes, ascending, in degrees.
+    declinations : array_like
+        ``(len(latitudes), len(longitudes))`` of declination in degrees east of north.
+
+    Returns
+    -------
+    callable
+        ``model(latitude_deg, longitude_deg) -> float``, suitable for
+        :func:`set_declination_model`. Queries outside the grid are clamped to its edge,
+        which is the right behaviour for a DEM that pokes slightly past its corners and
+        a poor one for a grid that does not cover the region at all -- so cover it.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import physics
+    >>> lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+    >>> dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+    >>> model = physics.declination_from_grid(lats, lons, dec)
+    >>> f"{model(-18.0, -74.0):.2f}"
+    '-5.00'
+
+    Halfway in both directions is the average of the four corners:
+
+    >>> f"{model(-16.0, -72.0):.2f}"
+    '-6.50'
+    """
+    lats = np.asarray(latitudes, dtype=float)
+    lons = np.asarray(longitudes, dtype=float)
+    grid = np.asarray(declinations, dtype=float)
+    if grid.shape != (lats.size, lons.size):
+        raise ValueError(f"declinations must be {(lats.size, lons.size)}, got {grid.shape}")
+
+    def model(latitude_deg, longitude_deg):
+        lat = min(max(float(latitude_deg), lats[0]), lats[-1])
+        lon = min(max(float(longitude_deg), lons[0]), lons[-1])
+        i = int(np.clip(np.searchsorted(lats, lat) - 1, 0, lats.size - 2))
+        j = int(np.clip(np.searchsorted(lons, lon) - 1, 0, lons.size - 2))
+        dy = (lat - lats[i]) / (lats[i + 1] - lats[i]) if lats[i + 1] != lats[i] else 0.0
+        dx = (lon - lons[j]) / (lons[j + 1] - lons[j]) if lons[j + 1] != lons[j] else 0.0
+        return float(grid[i, j] * (1 - dy) * (1 - dx) + grid[i + 1, j] * dy * (1 - dx)
+                     + grid[i, j + 1] * (1 - dy) * dx + grid[i + 1, j + 1] * dy * dx)
+
+    return model
+
+
 def default_field_for_site(latitude_deg: float, longitude_deg: float,
                            declination_deg: float | None = None,
                            inclination_deg: float | None = None
@@ -1235,6 +1643,8 @@ def default_field_for_site(latitude_deg: float, longitude_deg: float,
     >>> f"{dec:.1f} {inc:.1f}"
     '-6.9 -14.0'
     """
+    if declination_deg is None and _DECLINATION_MODEL is not None:
+        declination_deg = _DECLINATION_MODEL(latitude_deg, longitude_deg)
     if declination_deg is None:
         declination_deg = DEFAULT_GEOMAG_DECLINATION_DEG
     if inclination_deg is None:

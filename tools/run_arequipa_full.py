@@ -66,25 +66,19 @@ RUNS = {
 
 
 def run_one(label, config_path, out_root, max_memory_gb=None):
-    """Runs one configuration over the full DEM and returns its results dictionary."""
-    config = ss.load_config(config_path)
-    params = {k: v for k, v in config.items() if not k.startswith("_")}
+    """
+    Runs one configuration over the full DEM and returns its results dictionary.
 
-    # Config-file spellings the pipeline does not take under those names.
-    params.pop("output_directory_base_with_given_json", None)
-    params.pop("print_info", None)
-    params["require_terrain"] = not params.pop("require_sky", False)
-    params["rfi_zones"] = resolve_rfi(params.get("rfi_zones"))
-    params["dem_path"] = DEM
-    params["origin_lat"] = params.get("origin_lat")
-    params["origin_lon"] = params.get("origin_lon")
+    The configuration-to-pipeline translation used to be written out here as well, a
+    third copy alongside ``main()`` and the sensitivity child. It is
+    ``ss.run_from_config`` now, so a parameter added to the pipeline reaches this
+    runner without anyone having to remember that this file exists.
+
+    ``dem_path`` is overridden because the configs spell it relative to ``src/``.
+    """
+    overrides = {"dem_path": DEM}
     if max_memory_gb is not None:
-        params["max_memory_gb"] = max_memory_gb
-    if params.get("score_weights") is not None:
-        params["score_weights"] = ss.parse_score_weights(params["score_weights"])
-    for key in ("depth_band_gcm2", "grammage_band_gcm2", "distance_band_m"):
-        if params.get(key) is not None:
-            params[key] = tuple(params[key])
+        overrides["max_memory_gb"] = max_memory_gb
 
     out_dir = os.path.join(out_root, f"arequipa_full_{label}")
     print(f"\n=== {label.upper()} ===")
@@ -92,17 +86,9 @@ def run_one(label, config_path, out_root, max_memory_gb=None):
     print(f"output: {os.path.relpath(out_dir, REPO)}")
 
     started = time.time()
-    results = ss.find_grand_regions_interactive(run_output_dir=out_dir, **params)
+    results = ss.run_from_config(config_path, run_output_dir=out_dir, **overrides)
     print(f"\n{label}: finished in {(time.time() - started) / 60:.1f} minutes")
     return results, out_dir
-
-
-def resolve_rfi(value):
-    """The preset names the CLI understands, since a config may carry one."""
-    if isinstance(value, str):
-        return {"lima": ss.LIMA_RFI_ZONES,
-                "arequipa": ss.AREQUIPA_RFI_ZONES}.get(value.lower())
-    return value
 
 
 def store(label, out_dir):

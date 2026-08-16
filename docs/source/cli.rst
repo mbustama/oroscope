@@ -165,7 +165,44 @@ Fetches the bundled regions — Lima and Arequipa — into ``input/dem/`` and wr
 ready-to-run configuration for each. The key is free from
 `OpenTopography <https://portal.opentopography.org/myopentopo>`_.
 
-Run it from ``src/``: both paths are relative to it.
+Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/``, both relative
+to the working directory. Unlike the search, this one has not been made
+config-relative — there is no configuration file to be relative *to* — so it still
+needs a directory one level below the repository root.
+
+
+``tools/make_animations.py`` — animations of the mechanism
+------------------------------------------------------------
+
+.. code-block:: shell
+
+   python tools/make_animations.py                    # all four, MP4 and GIF
+   python tools/make_animations.py --only the_walk
+   python tools/make_animations.py --format gif --out docs/source/_static
+
+Four animations, each showing a *process* whose intermediate states are the point —
+anything that is a single state is already a figure in :mod:`oroscope.figures`.
+
+``the_walk``
+   One backward ray sweeping down through the elevation window: the first intersection
+   sliding along the profile and the column depth accumulating behind it. This is the
+   mechanism the whole search rests on.
+
+``the_funnel``
+   The map draining stage by stage. The funnel table says where the candidates went;
+   this shows *where on the ground* they went.
+
+``stride_and_closing``
+   Why a closing element smaller than the stride gap loses the mask. Shown on the
+   :doc:`assumptions` page.
+
+``energy_window``
+   The arrival window narrowing as Earth absorption bites, its lower edge climbing from
+   −4.4° at 100 PeV to −0.9° at 10 EeV.
+
+Everything is built from committed code and synthetic terrain, so these reproduce on
+any clone with no DEM present. MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs
+land in ``output/animations/``, which is gitignored.
 
 
 ``tools/run_arequipa_full.py`` — the full-DEM run
@@ -260,10 +297,15 @@ than ~100 m is reported rather than silently honoured.
 
 .. note::
 
-   The search resolves several paths relative to the working directory, so the bundled
-   configurations expect to be run from ``src/``. That is a known wart, not a design:
-   the console scripts are the first half of removing it, and making those paths
-   relative to the configuration file is the second.
+   **Paths in a configuration are relative to the configuration file**, not to the
+   working directory, so a search runs the same from anywhere. ``"dem_path":
+   "../input/dem/colca.tif"`` in ``config/`` means ``input/dem/colca.tif`` in the
+   repository whether you are standing in the root, in ``src/`` or elsewhere; the
+   outputs follow the same rule. Absolute paths are left alone, and a path that
+   resolves only against the working directory still works, with a warning — the old
+   behaviour, kept so this does not break a setup that relied on it.
+
+   This replaces the long-standing requirement to ``cd src`` first.
 
 
 Every option, in full
@@ -455,6 +497,14 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.
+   * - ``--decay_weight_by``
+     - str
+     - ``flux``
+     - What weights the spectrum-folded decay probability. ``flux`` (the default) asks what fraction of *arriving neutrinos* decay usefully, and is what every published number here was computed with. ``acceptance`` asks the same over the energies the *detector responds to*, with no assumed spectrum — useful precisely because the spectral index is an assumption. ``flux_times_acceptance`` is the event-rate integrand itself. The latter two require ``--decay_response_csv``.
+   * - ``--decay_response_csv``
+     - str
+     - ``—``
+     - Two-column CSV of energy in PeV against relative detector response A(E), for the acceptance weightings. ``data/`` holds the published integral curves; :func:`oroscope.aperture.infer_response` recovers A(E) from one by dividing out the geometric model.
    * - ``--score_percentile``
      - float
      - ``—``

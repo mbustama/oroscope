@@ -6,9 +6,9 @@ Written to be fed into a fresh session. It assumes no memory of the previous one
 with a `site_search` symlink beside it for anything still pointing at the old path —
 **delete it when convenient.**
 
-**Branch:** `dev`. **Head at handover: `8c108b1`.** `main` contains everything on `dev`
-(merged as PR #2), so the two are level apart from merge commits.
-**Tests:** 541, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
+**Branch:** `dev`. **Head at handover: `e7ced77`.** `main` was last level at PR #3;
+everything since is on `dev` awaiting a PR.
+**Tests:** 595, stdlib `unittest`, ~30 s. **CI:** 8 jobs, all green.
 **Documentation:** live at <https://mbustama.github.io/oroscope/>, deployed from `main`.
 
 `main` is protected by a repository ruleset: no direct push, no force-push, no deletion,
@@ -70,14 +70,15 @@ rather do them separately.
 `output/arequipa_full_{grand,tambo,combined}/`, which is gitignored. The small artefacts
 — results JSON, provenance, explanation, a few hundred KB — are copied into
 `results/arequipa_full/`, **which is committed**, along with a `manifest.json` recording
-when and from what. That store is currently **empty except for its README**.
+when and from what. That store is **populated** as of 2026-08-16.
 
 ### 1.2 Why the store exists
 
 [Notebook 8](../notebooks/08_the_full_dem.ipynb) *reads* those results rather than
-producing them. Three searches at half an hour each, against CI that executes every
-notebook on every push, is ninety minutes of compute per commit for something that
-changes only when a configuration does. This works only because
+producing them. GRAND alone is 25 minutes, against CI that executes every notebook on
+every push, for something that changes only when a configuration does. (TAMBO is ~1
+minute; the whole store rebuilds in 26, not the ninety once assumed.) This works only
+because
 `explain.explain_results()` is a pure function of the results dictionary — no DEM,
 nothing re-run.
 
@@ -103,7 +104,7 @@ measured on the downsampled mask while capacity is measured at full resolution, 
 feature a few pixels wide keeps its detectors and loses area. That matters more for
 TAMBO's canyon strips than for GRAND's blobs. **Read these areas as lower bounds.**
 
-### 1.4 What to look at when it finishes, in this order
+### 1.4 What was looked at, in this order — all four answered in roadmap §6.26
 
 1. **Is the binding constraint the same one the crops found?** This is the most
    consequential question in the whole run. If a full DEM is bound by a different funnel
@@ -137,22 +138,25 @@ machine.
 - **The sensitivity sweeps.** Both the single-energy and spectrum-folded sweeps are in
   `docs/ROADMAP.md` §6.20–6.21 with their tables. Re-running costs ~10 minutes and will
   reproduce them.
-- **The stride-1 control run** at GRAND settings. `config/grand_colca_stride1.json`
-  exists and its result is recorded: striding is unbiased, closing inflates 2.29×. **But
-  see §9.9 — that was never measured at TAMBO's element size, and should be.**
+- **The stride-1 control runs**, at both GRAND and TAMBO settings.
+  `config/grand_colca_stride1.json` and `config/tambo_colca_stride1.json` exist and their
+  results are recorded. Striding is unbiased in acceptance at both. At TAMBO's 100 m
+  element it costs **4.75× of the reported area** — roadmap §6.34.
 - **The notebooks.** All eight are committed *with their outputs* and were executed
   against the installed package at this head.
 - **DEM downloads.** `input/dem/` holds `arequipa_SRTMGL1.tif`, `lima_AW3D30.tif` and the
   derived `colca.tif` crop. **The Arequipa DEM already covers Colca Canyon** — verified,
   1673 m of incision against the published ~1.5 km.
 
-**The benchmark baseline is a special case.** `bench/baseline.json` has *not* been
-refreshed since `capacity_analysis` legitimately slowed by 1.62× (measured properly, A/B
-alternating in one process; +48 ms against a 19 s search). It was left alone
-deliberately, because this machine could not resolve the difference — two consecutive
-passes over *identical* code reported `synthetic_1800/ray_tracing` at +3.4% and then
-+72.1%. **Refresh it on a quiet machine**, and expect `capacity_analysis` to be the only
-stage that legitimately moved. See ROADMAP §6.25.
+**The benchmark baseline is refreshed** (2026-08-16), and the way it was done is the
+part to carry forward. This machine still cannot resolve a 30% change on a short stage —
+two identical passes gave `arequipa_900/ray_tracing` 1.228 s then 1.820 s, 48% apart — so
+rather than wait for a quiet machine the harness was taught to cope:
+`--repeat N` keeps the per-stage **minimum** (timing noise is one-sided: nothing runs
+faster than its true cost), `spread_pct` records what the machine could resolve, and the
+gate skips any stage whose spread exceeds half of it. **Re-measure with
+`python bench/benchmark.py --update --repeat 5`**, never `--update` alone. Only
+`arequipa_2500` is genuinely gateable here. ROADMAP §6.37; §6.25 for the history.
 
 **Do not re-derive:** everything in §6. **Do not retry:** everything in §7.
 
@@ -244,10 +248,11 @@ cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execut
 | `src/oroscope/sensitivity.py` | One-at-a-time parameter sweeps, each point in a subprocess. |
 | `src/oroscope/figures.py` | The publication figures. **States the label convention** (§8.9). |
 | `src/oroscope/fetch_dem.py` | Downloads DEMs. Was `setup.py`, whose name hijacked `pip install`. |
-| `tests/` | 541 tests across 14 files. `synthetic.py` builds terrain with closed-form answers. |
+| `tests/` | 595 tests across 14 files. `synthetic.py` builds terrain with closed-form answers. |
 | `tools/make_notebooks.py` | Generates the eight tutorials. **Edit here, not the `.ipynb`.** Only rewrites what changed. |
 | `tools/run_arequipa_full.py` | The full-DEM runner. §1. |
-| `results/arequipa_full/` | The committed store notebook 8 reads. Currently empty but for its README. |
+| `tools/make_animations.py` | Four animations of the mechanism, MP4 and GIF. |
+| `results/arequipa_full/` | The committed store notebook 8 reads. Populated 2026-08-16. |
 | `docs/source/cli.rst` | The command line, with the complete 82-option reference generated from the parser. |
 | `docs/source/assumptions.rst` | The blunt list of what the numbers rest on. |
 | `docs/ROADMAP.md` | ~2000 lines. The durable record. **Read §6.11, §6.12, §6.20–6.33.** |
@@ -282,8 +287,16 @@ obstacle: a pixel has one slope and both must accept it.
   **2.29×** at Colca, measured against a stride-1 control. Each run now reports the
   factor for itself: **2.19× for GRAND** — an independent check on that number, agreeing
   to 4% — but **0.53× for TAMBO**, whose 100 m element cannot bridge the gaps
-  `candidate_stride: 5` leaves. **TAMBO's area is therefore a lower bound, not an upper
-  one.** See §9.9.
+  `candidate_stride: 5` leaves.
+- **TAMBO's area is a lower bound by 4.75×, now measured** (roadmap §6.34). The stride-1
+  control at TAMBO settings separates the two effects the 0.53× conflated: acceptance is
+  unbiased (17.494% against 17.491%), closing alone inflates 1.17×, and the fragmentation
+  of a mask marked one pixel in five and closed with an element too small to reconnect it
+  costs **4.75×**. Read TAMBO's Colca area as **~397 km², not 83.6**, and its capacity as
+  **~45,856, not 9,717**. The full-DEM 111.9 km² is under-reported for the same reason
+  plus downsampling, and cannot be measured directly here (26.8M candidates, ~10 GiB).
+  GRAND is unaffected at either scale. Every run now warns when the element cannot outrun
+  the stride gap.
 - **`solid_angle` is the weakest score component at 15 of 15 TAMBO sites** and at GRAND's
   single site. The Colca result is set almost entirely by `solid_angle_half_sr`.
 - **TAMBO's capacity varies by 1.46× across a plausible spectral index**, having varied
@@ -297,7 +310,8 @@ obstacle: a pixel has one slope and both must accept it.
 | Slope depends on measurement baseline | median 17.8° at ~61 m, 10.8° at 1 km |
 | Morphological closing inflates area | **2.29×** at a 1 km element (stride-1 control) |
 | The same, from a run's own funnel | 2.19× GRAND, **0.53× TAMBO** (100 m element) |
-| Candidate striding | unbiased at a 1 km element; **untested at 100 m** |
+| Candidate striding, acceptance | unbiased at both elements: 60.1% vs 60.1% (GRAND), 17.491% vs 17.494% (TAMBO) |
+| Candidate striding, **area** | costs **4.75×** at a 100 m element, nothing at 1 km — the element must outrun the stride gap (154 m at stride 5) |
 | Capacity over-count, integer stamping | +7.4% at 1 km, **+58% at 100 m** — fixed |
 | Capacity over-count, bounding box vs region | **+38%** on a canyon network — fixed |
 | The ±3° window sits below the horizon almost everywhere | median horizon 7.3° |
@@ -350,17 +364,42 @@ obstacle: a pixel has one slope and both must accept it.
 ## 9. Remaining work, ranked
 
 **Physics**
-1. **The detector acceptance `A(E)` is not modelled.** An event rate is
-   ∫Φ(E)·A(E)·P(E)dE; the weight used is the flux alone. *Partially doable now*: both
-   published curves are in `data/` and `aperture.infer_response()` divides one by our
-   geometric model to recover everything else.
-2. **`min_score` is the dominant assumption.** `--score_percentile` exists as the
-   scale-free alternative; the configs still use the absolute cut. Consider switching.
-3. Column depth is bounded by the walk unless `max_range_km` is set.
-4. Neutral-current regeneration not modelled — Earth-chord suppression overstated.
-5. β, the tau energy-loss constant, is an estimate (0.4–1.0×10⁻⁶). Needs a collaboration
-   value.
-6. Geomagnetic **declination** does not follow the site (inclination does). Needs IGRF.
+1. ~~**The detector acceptance `A(E)` is not modelled.**~~ ✅ selectable, 2026-08-16.
+   `--decay_weight_by {flux,acceptance,flux_times_acceptance}` with
+   `--decay_response_csv`. `flux` stays the default so no published number moves;
+   `flux_times_acceptance` costs ~6% of TAMBO's capacity. **Do not use `acceptance`
+   alone with an inferred response** — `A(E)` from `infer_response` absorbs everything
+   our geometric model fails to reproduce at high energy, and weighting by it returns
+   zero sites. That wants a real differential table, still the ask of §10. §6.42.
+2. **`min_score` is the dominant assumption** — now measured, still not switched.
+   `min_score` 0.35 ≡ `score_percentile` **22.8** on Colca, and a scan across the cut
+   shows **no knee** (area 3.1 → 186.8 km² over percentiles 5 → 40, smooth and near
+   linear), which is the strongest evidence yet that 0.35 is a choice rather than a
+   discovery. Switching restates every published number, so it is left as the owner's
+   call. Table in roadmap §6.43.
+3. ~~Column depth is bounded by the walk unless `max_range_km` is set.~~ ✅ measured,
+   2026-08-16. It is a **6.4× under-report** at the default, and walking 4× the distance
+   window fixes it with an *identical* selection. But at 12× the same run keeps 6.0% of
+   directions against 17.5% and collapses — the knob is not monotone. Configs unchanged;
+   the run now reports the factor and the cliff. Roadmap §6.39.
+4. ~~Neutral-current regeneration not modelled.~~ ✅ leading order, 2026-08-16.
+   `physics.nc_regeneration_factor()`, and `neutrino_survival(nc_regeneration=True)`.
+   **Off by default** — it is the first term of a series, not a cascade solution, and
+   omits the ν_τ→τ→ν_τ chain. Lifts survival 1.06× at −0.5° to 1.56× at −5° at 1 EeV.
+   Note `earth_absorption_cutoff_deg` does *not* apply it, so the §6 prediction is still
+   absorption-only. Roadmap §6.41.
+5. ~~β, the tau energy-loss constant, is an estimate.~~ ✅ configurable, 2026-08-16 —
+   `physics.set_tau_energy_loss()`. Still wants a collaboration value, but adopting one
+   no longer means editing source. **Note it does not affect a search**: β enters tau
+   range and survival through rock, which the search does not model; the search uses
+   the decay length E/m·cτ, which carries no β. The run's summary had been listing it
+   as an assumption behind its numbers, and no longer does. Roadmap §6.38.
+6. ~~Geomagnetic **declination** does not follow the site.~~ ✅ socket added,
+   2026-08-16. `physics.set_declination_model(fn)` and `declination_from_grid()`; the
+   pipeline consults them before the constant fallback. **No IGRF table is shipped on
+   purpose** — its coefficients are somebody else's published work and typing them from
+   memory would give plausible wrong declinations. Install `ppigrf`/`pyIGRF` and pass
+   its function, or supply a NOAA grid. Roadmap §6.40.
 
 **Verification**
 7. **Nothing has been checked against an external simulation.** The Earth-absorption
@@ -368,25 +407,43 @@ obstacle: a pixel has one slope and both must accept it.
 8. ~~**The full Arequipa DEM.**~~ ✅ done, 2026-08-16. §1 and roadmap §6.26.
 
 **Software**
-9. **A stride-1 control at TAMBO settings.** Cheap, and it settles whether TAMBO's area is
-   a lower bound. §5.1.
-10. **The config→pipeline translation is duplicated three times** — `main()`,
-    `sensitivity.py`'s child process, and `tools/run_arequipa_full.py` each re-derive the
-    same mapping (drop `print_info`, invert `require_sky`, tuple-ify the bands, resolve
-    the RFI preset, parse `score_weights`). A single `run_from_config()` would collapse
-    it, and it is where a new parameter gets forgotten.
-11. **The pipeline resolves paths relative to the working directory**, so the bundled
-    configs need `cd src`. Making them relative to the configuration file is the fix.
-12. **Refresh `bench/baseline.json` on a quiet machine.** §2.
-13. **No release.** Nothing on PyPI. When publishing: PyPI does **not** render SVG, so the
-    project page needs a PNG of the logo even though GitHub and Sphinx are happy with the
-    vector.
+9. ~~**A stride-1 control at TAMBO settings.**~~ ✅ done, 2026-08-16. It is a lower bound
+   by **4.75×**. Roadmap §6.34; `config/tambo_colca_stride1.json`.
+10. ~~**The config→pipeline translation is duplicated three times.**~~ ✅ done,
+    2026-08-16. `config_to_pipeline_kwargs()` / `run_from_config()`; all three callers
+    use them. It had already cost a bug: the sweep child never resolved `rfi_zones`, so
+    a preset name was iterated character by character and a sweep on a GRAND config ran
+    with **no exclusion zones while printing `RFI Zones: 8 active`**. The recorded
+    sweeps are unaffected (they used TAMBO's `"none"`). Roadmap §6.35.
+11. ~~**The pipeline resolves paths relative to the working directory.**~~ ✅ done,
+    2026-08-16. `load_config()` resolves `dem_path`, `road_map_path` and `resume_dir`
+    against the configuration's own directory, and the output base follows the same
+    rule, so a search runs identically from anywhere. No shipped config changed:
+    `config/` and `src/` are both one level below the root, so `../input/...` names the
+    same file either way. A cwd-relative path still works, with a warning. **Note
+    `oroscope-fetch-dem` is not covered** — it writes `../input/dem/` and `../config/`
+    relative to the working directory and has no configuration file to be relative to,
+    so it still wants running from `src/`.
+12. ~~**Refresh `bench/baseline.json` on a quiet machine.**~~ ✅ done, 2026-08-16 —
+    without a quiet machine, by measuring what this one can resolve first. Two
+    identical passes disagreed by **48%** on a short stage, so `--repeat N` now keeps
+    the per-stage **minimum** (noise is one-sided), `spread_pct` records the resolution
+    alongside the measurement, and the gate ignores any stage whose spread exceeds half
+    of it. Refreshed with `--repeat 5`. **Only `arequipa_2500` is really gateable here**
+    (ray tracing 8.4% spread); `synthetic_900/ray_tracing` spreads 149.6% and is now
+    excluded rather than failing builds at random. Roadmap §6.37.
+13. **No release.** Nothing on PyPI. The logo question is settled: it is a **PNG
+    everywhere** (1024×1024 RGBA), because PyPI does not render SVG and a project
+    carrying both formats eventually ships two different logos.
 
 ## 10. Open questions for the owner
 
-1. **IGRF declination per site.** Inclination follows the DEM's coordinates via a dipole;
-   declination falls back to Arequipa's −6.9°. The dipole is unreliable for declination
-   (−0.2° against a measured −6.9°) and is deliberately not used for it.
+1. **IGRF declination per site.** The mechanism now exists (§6.40) and wants feeding:
+   either add `ppigrf` as a dependency and pass its function to
+   `physics.set_declination_model()`, or export a NOAA declination grid covering the
+   Arequipa DEM into `data/` and load it with `declination_from_grid()`. Which of those
+   the collaboration prefers is the open question. Until then the constant −6.9°
+   fallback stands, which is right for southern Peru.
 2. **β**, as above.
 3. **The TAMBO assumptions**, all flagged in `config/tambo_colca_config.json` and
    `docs/source/assumptions.rst`: the 20–60° near-wall band, the 25° far-wall floor, the

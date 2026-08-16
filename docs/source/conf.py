@@ -129,10 +129,12 @@ html_static_path = ['_static']
 html_title = 'Oroscope %s' % version
 
 # `logo_only = False` keeps html_title -- and so the version -- visible beneath the
-# image rather than letting it stand alone. The logo is an SVG, which sphinx-rtd-theme
-# serves as-is: it stays sharp at any sidebar width, and it is transparent outside its
-# disc, so it sits correctly on the theme's background without a matte.
-html_logo = '_static/oroscope_logo.svg'
+# image rather than letting it stand alone. One raster logo is used everywhere rather
+# than a vector here and a raster for PyPI: PyPI does not render SVG, and a project
+# with two logo files eventually ships two different logos. At 1024x1024 it downscales
+# cleanly to any sidebar width, and it is transparent outside its disc, so it sits on
+# the theme's background without a matte.
+html_logo = '_static/oroscope_logo.png'
 
 html_theme_options = {
     'logo_only': False,

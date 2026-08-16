@@ -317,6 +317,233 @@ simulated acceptance. If their window does not narrow that way, one of the two
 treatments has the absorption wrong.
 
 
+Two signals, two physics
+------------------------
+
+Everything above is common machinery: one profile walk, one geometric question. What
+makes GRAND and TAMBO different is not the terrain analysis but **what reaches the
+detector**, and almost every difference in their configurations follows from that one
+fact. It is worth separating them properly, because the criteria that look arbitrary
+side by side are each forced by the signal.
+
+GRAND: radio from the air shower
+````````````````````````````````
+
+The tau exits the rock, decays, and the resulting air shower radiates coherently at
+tens to hundreds of MHz. **The detector never sees a particle.** It sees an
+electromagnetic pulse, and that changes what the terrain has to provide.
+
+*The air must be transparent, and it is.* Radio at 50–200 MHz propagates essentially
+unattenuated through the atmosphere. Emission comes from the region around shower
+maximum and then simply travels. So the grammage criterion is a **threshold** — the
+shower must have reached maximum — and not a band. Being far past maximum costs
+nothing directly.
+
+*The signal path must be clear.* Because it is a wave, an obstruction inside the first
+Fresnel zone diffracts it. This is why GRAND alone carries a Fresnel clearance
+criterion, an antenna height, and a near-field exclusion, and why it needs the
+:math:`k = 4/3` radius: the radio ray bends and the particle trajectory does not.
+
+*The emission is anisotropic, and the anisotropy is geomagnetic.* The dominant
+mechanism is transverse current driven by the geomagnetic field, so the amplitude
+scales with :math:`\sin\alpha`, the angle between the shower axis and :math:`\vec{B}`.
+At Arequipa's field this is not a detail: **an east-facing target is worth 3.7× a
+north-facing one**. A criterion that ignored it would rank sites by geometry alone and
+get the ordering wrong.
+
+*The footprint sets the spacing.* The Cherenkov cone is about a degree, and its
+radius on the ground grows with distance and shrinks with altitude — thinner air means
+smaller :math:`n - 1`, a narrower cone, a smaller footprint, and so a denser array for
+the same trigger efficiency. Hence 1 km spacing, tens of thousands of antennas, and a
+deployable band of 3–25°: an antenna array is a compact blob on open ground, not a
+strip.
+
+*Which fixes the range.* 10–40 km: far enough that the shower has developed and the
+footprint is large, close enough that the signal survives and the geometry stays within
+a few degrees of the horizon.
+
+TAMBO: the particles themselves
+```````````````````````````````
+
+TAMBO puts water-Cherenkov tanks on a canyon wall and waits for the shower to arrive as
+**matter**. Every difference follows.
+
+*The shower must be alive when it arrives.* Charged-particle content peaks at shower
+maximum and then dies away, so grammage is a **band**, not a threshold — too little air
+and the shower has not developed, too much and there is nothing left to detect. This is
+the single most consequential difference from GRAND, and it is why
+``grammage_mode: "particle"`` exists as a separate mode rather than a tuned threshold.
+
+*Nothing propagates as a wave, so several criteria simply switch off.* No Fresnel
+clearance, no antenna height, no geomagnetic weighting — the particles do not care
+about :math:`\vec{B}`, and a criterion left switched on here would be weighting by a
+mechanism that is not operating.
+
+*The target is the opposite wall, not the horizon.* 2–5 km rim to rim, roughly 1.5 km
+deep. That short baseline is what makes the tau decay length so decisive: at 1 EeV the
+decay length is ~49 km against a ~3 km crossing, so only a few per cent of taus decay
+in time. **This is the criterion that most rewards folding over the spectrum rather
+than picking an energy** — the same search gave 10 878 detector positions at 3 PeV and
+zero at 100 PeV.
+
+*The geometry is two-sided.* One wall is where the array stands (20–60°) and the other
+is where the tau exits (≥25°, measured along the arrival azimuth at the point the ray
+strikes). Without the second, the scan only asks that rock is present at the right
+range, which is true almost everywhere in the Andes.
+
+*And the array is a strip.* 100 m spacing along a wall, so ``min_width_km`` must be 0 —
+the opening step that prunes tendrils would otherwise delete exactly the shape TAMBO
+is. Looking across a canyon also accepts far more sky than looking to the horizon: 0.2–
+1.5 sr against GRAND's ~0.05, which is why ``solid_angle_half_sr`` has to be
+experiment-specific or the term saturates and stops discriminating.
+
+Side by side
+````````````
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 39 39
+
+   * -
+     - GRAND (radio)
+     - TAMBO (particle)
+   * - What arrives
+     - a coherent radio pulse
+     - the charged particles
+   * - Grammage criterion
+     - threshold — the air is transparent
+     - **band** — the shower dies after maximum
+   * - Fresnel clearance
+     - required
+     - not applicable
+   * - Geomagnetic weighting
+     - dominant, 3.7× east over north
+     - off
+   * - Earth radius used
+     - :math:`k=4/3`, 8500 km, for the signal
+     - true, 6371 km
+   * - Target range
+     - 10–40 km, to the horizon
+     - 2–5 km, across a canyon
+   * - Deployable slope
+     - 3–25°
+     - 20–60° near wall, ≥25° far wall
+   * - Array shape
+     - compact blob, 1 km spacing
+     - strip, 100 m spacing
+   * - Accepted solid angle
+     - ~0.05 sr
+     - 0.2–1.5 sr
+
+
+Joint particle + radio arrays
+-----------------------------
+
+The interesting question is not whether either experiment can be sited, but whether
+**one patch of ground can host both**. That is a different question from either search,
+and it is easy to answer wrongly.
+
+What a joint site actually is
+`````````````````````````````
+
+A joint site is ground that satisfies both experiments' demands **on the ground
+itself**. The distinction that matters:
+
+*Properties of the ground are shared.* A pixel has one slope, one altitude, one aspect.
+If GRAND needs 3–25° and TAMBO needs 20–60°, both must accept that single number, and
+only the 20–25° sliver can. That sliver is **23% of the narrower band**, and it is what
+decides co-location at Colca.
+
+*Properties of the view are not shared.* What each experiment asks of the *sky* — the
+distance window, the arrival elevations, the far-wall slope — constrains a *direction*,
+not the ground. Two experiments can stand on the same hillside and look out at
+completely different ranges without conflicting: GRAND looking 10–40 km to the horizon
+and TAMBO looking 2–5 km across a canyon are not competing for anything.
+
+.. warning::
+
+   This distinction is not academic, and getting it backwards produces a confident
+   wrong answer. An early version of the combination summary reasoned about the viewing
+   windows as though they were shared constraints, concluded that GRAND and TAMBO
+   "cannot share ground at all", and printed that directly above the 50 km² they
+   demonstrably share. **A summary that reasons can be wrong in ways one that merely
+   restates cannot, and it will be wrong persuasively.**
+
+What was measured
+`````````````````
+
+Over the full Arequipa DEM — 128.6 Mpx, a 117,430 km² footprint:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 24 24 22
+
+   * -
+     - area km²
+     - of its own ground in the joint
+     - detectors
+   * - GRAND alone
+     - 88,527.5
+     - 0.1%
+     - 101,948
+   * - TAMBO alone
+     - 111.9
+     - 44.9%
+     - 9,024
+   * - **joint**
+     - **50.2**
+     -
+     -
+   * - union
+     - 88,589.2
+     -
+     -
+
+The asymmetry is the whole story: essentially **all** of the joint is TAMBO's ground,
+and a rounding error of GRAND's. GRAND has so much deployable terrain that co-location
+costs it nothing; TAMBO has so little that nearly half of what it has is shared.
+
+And the joint barely moved with scale. The Colca crop alone gave 50.1 km²; the whole
+DEM, twenty-one times the area, gives 50.2. **Searching twenty-one times more ground
+found essentially no additional co-locatable ground.** The opportunity is at Colca, and
+the rest of the region's canyons do not offer it.
+
+Why one would want it
+`````````````````````
+
+Three reasons, in increasing order of scientific interest.
+
+**Shared infrastructure.** One site, one road, one power feed, one permit. For an
+observatory in a canyon at 4000 m this is not a minor line item.
+
+**Complementary energy coverage.** TAMBO reaches roughly 3 PeV–1 EeV and GRAND above
+~100 PeV. A joint site spans both with one deployment, and the overlap region is where
+the two are directly comparable.
+
+**Cross-calibration, which is the real prize.** The same air shower seen simultaneously
+as a radio pulse and as particles on the ground is the cleanest possible handle on the
+energy scale of both techniques. Radio calorimetry and particle counting have almost
+entirely independent systematics; a shower measured by both constrains each in a way
+neither can constrain itself. That is an argument for co-location that survives even if
+the shared-infrastructure saving turns out to be small.
+
+How to read the joint number
+````````````````````````````
+
+Every caveat on the individual runs applies here and compounds.
+
+* Both masks have already been morphologically closed, so the joint is the intersection
+  of two inflated masks and is inflated twice over.
+* **TAMBO's area is a lower bound by 4.75×** — measured with a stride-1 control at its
+  own element size. Since the joint is almost entirely TAMBO's ground, the joint is a
+  floor too.
+* The overlay itself is exact: the masks are pixel-aligned and the alignment is checked
+  rather than assumed. What it overlays is only as good as each run.
+* Co-location is a question about **ground**, not detectors. Two experiments sharing a
+  hillside still need their own arrays, spacing and trigger. What they share is the
+  site.
+
+
 Scoring
 -------
 
@@ -344,6 +571,21 @@ deployable region rather than a scatter. It also inflates: measured with a strid
 control run at Colca, closing with a 1 km element more than doubles the accepted area
 (2.29×). The reported area is not the physics-accepted area, and the gap is now a
 parameter, ``gap_close_km``, rather than being tied to the detector spacing.
+
+.. warning::
+
+   **The closing element must outrun the gap that striding leaves.** ``candidate_stride``
+   marks one accepted pixel in :math:`N`; at Colca's 30.7 m pixels, stride 5 leaves gaps
+   of 154 m. GRAND's 1 km element bridges those easily. TAMBO's element is
+   ``antenna_spacing_km`` = 100 m, which does **not**, so its mask never reconnects: it
+   stays a scatter of isolated pixels, most regions fall below ``min_sub_array_size``,
+   and the area collapses.
+
+   Measured with a stride-1 control at TAMBO's own settings: acceptance is unbiased
+   (17.494% against 17.491%) while the reported area is **4.75× too small** — 83.6 km²
+   against 396.9. Striding is fair about which pixels it *tests* and destructive about
+   which survive to be *measured*. Every run now warns when the element cannot bridge
+   the gap.
 
 **Opening** prunes tendrils narrower than ``min_width_km``. This encodes a GRAND
 assumption — that an array is a compact blob — and it deletes exactly the long thin
