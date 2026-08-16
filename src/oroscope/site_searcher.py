@@ -835,6 +835,11 @@ cell_size_x : float
     from the equator, by the cosine of the latitude.
 center_lat : float
     Latitude at which ``cell_size_x`` was evaluated, in degrees.
+center_lon : float or None
+    Longitude of the DEM's middle, in degrees, or ``None`` when no origin longitude
+    was supplied. Paired with ``center_lat`` it is a point actually on the DEM, which
+    is what a field model should be asked about; the geomagnetic field used to be
+    resolved at this latitude and the *west edge* longitude.
 source : str
     Where the resolution came from -- detected from the GeoTIFF, supplied explicitly,
     or defaulted. Recorded so a run's provenance says which.
@@ -863,6 +868,10 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None,
         east-west scaling.
     cell_size_deg : float, optional
         Explicit pixel size in degrees, overriding whatever the file says.
+    origin_lon : float, optional
+        Longitude of the DEM's western edge, in degrees. Supplied only so the result
+        can carry ``center_lon``; nothing about the pixel sizes depends on it. Omitted,
+        ``center_lon`` is ``None``.
 
     Returns
     -------
