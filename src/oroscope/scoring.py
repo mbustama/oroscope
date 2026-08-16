@@ -20,6 +20,8 @@ absolute apertures would need (see the roadmap, section 4.10).
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 from oroscope import physics
@@ -28,9 +30,15 @@ from oroscope import physics
 # while 'mean' lets a strong component compensate. 'min' reports the weakest link.
 COMPOSITION_MODES = ("product", "mean", "min")
 
+# Every component name :func:`score_candidates` can produce. Weighting anything else is
+# a typo, and one that used to be swallowed in silence -- see :func:`compose`.
+SCORE_COMPONENTS = ("clearance", "decay", "depth", "distance", "footprint",
+                    "geomagnetic", "muon_shielding", "nu_survival", "shower",
+                    "solid_angle")
+
 __all__ = ["band_score", "saturating_score", "ramp_score", "compose",
            "score_candidates", "summarize_scores", "COMPOSITION_MODES",
-           "DEFAULT_SCORE_CONFIG"]
+           "SCORE_COMPONENTS", "DEFAULT_SCORE_CONFIG"]
 
 
 def band_score(x: float | np.ndarray, lo: float, hi: float,
@@ -173,7 +181,9 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
         weakest link.
     weights : dict, optional
         Per-component weights, used by ``product`` as exponents and by ``mean`` as
-        linear weights. Ignored by ``min``. A weight of 0 excludes a component.
+        linear weights. A weight of 0 excludes a component, in every mode. ``min`` has
+        no meaningful notion of a *relative* weight -- the smallest component is the
+        smallest however it is scaled -- so 0 is the only value it reads.
 
     Returns
     -------
@@ -183,8 +193,17 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     Raises
     ------
     ValueError
-        If no components are given, the mode is unknown, a weight is negative, or the
-        weights for ``mean`` do not sum to a positive value.
+        If no components are given, the mode is unknown, a weight is negative, the
+        weights for ``mean`` do not sum to a positive value, or every component has
+        been excluded by a zero weight.
+
+    Warns
+    -----
+    UserWarning
+        When a weight names a component this composition does not contain. The name is
+        a real one -- a typo is rejected earlier, by
+        :func:`~oroscope.site_searcher.parse_score_weights` -- so this means the
+        component is switched off in this run and the weight does nothing.
 
     Notes
     -----
@@ -192,6 +211,12 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     threshold on the result sits on a cliff. Measured on a real search, a score cut of
     0.0, 0.35 and 0.5 gave 45928, 2056 and 0 detector positions. Prefer ranking sites
     over thresholding a product.
+
+    A weight naming a component that is not here used to be dropped in silence, by an
+    ``if n in w`` filter with nothing behind it. Combined with an unvalidated spelling
+    at the command line, that made ``--score_weights geomag=0`` -- for ``geomagnetic``
+    -- a request the tool accepted, ignored, and never mentioned again: the component
+    the user had switched off ran at full weight and every number in the run moved.
 
     Examples
     --------
@@ -201,6 +226,11 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     >>> float(scoring.compose(parts, "product")[0])
     0.25
     >>> float(scoring.compose(parts, "mean")[0])
+    0.5
+
+    A zero weight excludes a component under ``min`` as it does under ``product``:
+
+    >>> float(scoring.compose(parts, "min", {"a": 0.0})[0])
     0.5
     """
     if not components:
@@ -212,10 +242,31 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     arrays = [np.clip(np.asarray(components[n], dtype=np.float64), 0.0, 1.0) for n in names]
     w = {n: 1.0 for n in names}
     if weights:
+        absent = sorted(set(weights) - set(w))
+        if absent:
+            warnings.warn(
+                f"score weight{'s' if len(absent) > 1 else ''} for "
+                f"{', '.join(repr(n) for n in absent)} had no effect: "
+                f"{'those components are' if len(absent) > 1 else 'that component is'} "
+                f"not part of this composition, which has "
+                f"{', '.join(repr(n) for n in names)}. A component appears only when "
+                f"the run supplies what it needs, so check it is switched on.",
+                UserWarning, stacklevel=2)
         w.update({n: float(v) for n, v in weights.items() if n in w})
 
+    for n in names:
+        if w[n] < 0:
+            raise ValueError(f"negative weight for component {n!r}")
+    kept = [n for n in names if w[n] > 0]
+    if not kept:
+        raise ValueError("every component was excluded by a zero weight; "
+                         "at least one must keep a positive weight")
+
     if mode == "min":
-        return np.min(np.stack(arrays), axis=0)
+        # Weight 0 excludes here too. It used to not: `min` ignored weights entirely,
+        # so a component switched off by weight could still be the minimum and so still
+        # decide the score -- the one thing switching it off was meant to prevent.
+        return np.min(np.stack([a for a, n in zip(arrays, names) if w[n] > 0]), axis=0)
     if mode == "mean":
         total = sum(w[n] for n in names)
         if total <= 0:
@@ -226,8 +277,6 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     # so nothing is clipped away from zero here.
     out = np.ones_like(arrays[0])
     for a, n in zip(arrays, names):
-        if w[n] < 0:
-            raise ValueError(f"negative weight for component {n!r}")
         if w[n] == 0:
             continue
         out = out * (a if w[n] == 1.0 else np.power(a, w[n]))

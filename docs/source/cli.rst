@@ -730,7 +730,7 @@ option below exists and that every option that exists appears below.
    * - ``--score_weights``
      - string
      - ``—``
-     - Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1.
+     - Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1; a weight of 0 excludes a component. Names are checked against the score components and a misspelling is refused, because a dropped weight changes every number in the run and leaves no trace in the output.
    * - ``--nu_interaction_length_gcm2``
      - float
      - ``—``

@@ -3188,6 +3188,50 @@ accepted`, and `results/*/manifest.json` records the commit that produced them.
 against new runs would mix the two meanings — that column compares geometry-and-score
 for TAMBO and geometry alone for GRAND, both before and after this change.
 
+### 6.54 A mistyped score weight was accepted, dropped, and never mentioned ✅ delivered
+
+Found by audit. `compose` merged the caller's weights with `if n in w` and nothing
+behind it, so a key naming no component was discarded in silence. `parse_score_weights`
+checked the *syntax* of `name=value` and never the name. Between them, a misspelling was
+a request the tool accepted and ignored:
+
+```
+--score_weights geomag=0        # one character short of `geomagnetic`
+```
+
+Measured on a two-component product with `geomagnetic` 0.2 and `depth` 0.9: **0.18 with
+the typo, 0.9 with the correct spelling.** The component the user had switched off ran
+at full weight through the entire search. Nothing in the results, the funnel, the
+explanation or the console recorded that the request had been dropped.
+
+This is the same shape as §6.31 — a component that appeared when it had been switched
+off — arriving by a different route, and it is the worst-behaved kind of input error in
+this tool: the run completes, every number moves, and the output looks exactly like a
+correct one. There is no downstream check that could catch it, because the score is not
+independently predictable.
+
+**Fixed at the choke point.** `parse_score_weights` handles both the CLI string and the
+config mapping, so the name check goes there and covers both; it raises `SystemExit`
+naming the offender and offering the nearest real component via `difflib`.
+`scoring.SCORE_COMPONENTS` is the canonical set of ten, and a test asserts it agrees
+with `explain.COMPONENT_MEANING` so the gate cannot drift into refusing legitimate
+weights.
+
+**And the quieter half.** A weight naming a *real* component that this run does not
+have — `muon_shielding` on a run with shielding off — is equally inert and was equally
+silent. `compose` now warns, because "that component is not in this composition" is a
+different message from "that is not a component" and the user needs to hear it.
+
+**A contradiction in the same docstring, resolved.** It claimed both "a weight of 0
+excludes a component" and "ignored by `min`", and `min` did ignore weights entirely: a
+component switched off by weight could still be the smallest, and so still decide the
+score — the one outcome switching it off was meant to prevent. Zero now excludes in
+every mode. `min` still ignores relative weights, which is correct rather than lazy: the
+smallest component is the smallest however it is scaled. Excluding every component is
+now an error rather than an empty `np.stack`.
+
+613 → 622 tests.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

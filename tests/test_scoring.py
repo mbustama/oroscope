@@ -8,10 +8,12 @@ but the invariants it must satisfy regardless of normalisation can be, and are.
 import math
 import os
 import unittest
+import warnings
 
 import numpy as np
 
 import _support  # noqa: F401  (path setup)
+from _support import ss
 from oroscope import aperture
 from oroscope import arrival_scan
 from oroscope import physics
@@ -106,6 +108,83 @@ class TestComposition(unittest.TestCase):
             v = scoring.compose(comps, mode)
             self.assertGreaterEqual(float(v.min()), 0.0)
             self.assertLessEqual(float(v.max()), 1.0)
+
+    def test_zero_weight_excludes_a_component_from_min_too(self):
+        """
+        ``min`` ignored weights entirely, so the component a user had switched off could
+        still be the smallest and so still decide the score -- the one outcome that
+        switching it off was meant to prevent.
+        """
+        v = scoring.compose(self.components, "min", {"a": 0.0})
+        np.testing.assert_allclose(v, [1.0, 1.0, 1.0])
+
+    def test_excluding_every_component_is_rejected(self):
+        with self.assertRaises(ValueError):
+            scoring.compose(self.components, "min", {"a": 0.0, "b": 0.0})
+
+    def test_a_weight_naming_an_absent_component_warns(self):
+        """
+        Silence here is how a switched-off component keeps running. The name is real --
+        a misspelling is refused by parse_score_weights -- so this says the run does not
+        have that component, and the weight did nothing.
+        """
+        with self.assertWarns(UserWarning) as caught:
+            scoring.compose(self.components, "product", {"muon_shielding": 0.0})
+        self.assertIn("muon_shielding", str(caught.warning))
+
+    def test_a_weight_naming_a_present_component_is_quiet(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            scoring.compose(self.components, "product", {"a": 2.0})
+
+
+class TestScoreWeightNamesAreChecked(unittest.TestCase):
+    """
+    A mistyped component name used to be accepted, dropped and never mentioned.
+
+    ``compose`` filtered unknown keys with ``if n in w`` and nothing behind it, so
+    ``--score_weights geomag=0`` -- one character short of ``geomagnetic`` -- ran the
+    component the user had switched off at full weight for the whole search. Every
+    number moved and nothing recorded that the request had been discarded. Weights are
+    the one input whose failure leaves no trace, which is why they are refused early.
+    """
+
+    def test_a_misspelling_is_refused_and_the_correction_offered(self):
+        with self.assertRaises(SystemExit) as caught:
+            ss.parse_score_weights("geomag=0")
+        self.assertIn("geomagnetic", str(caught.exception))
+
+    def test_the_measured_consequence_of_the_misspelling(self):
+        parts = {"geomagnetic": np.array([0.2]), "depth": np.array([0.9])}
+        # What the typo produced when it was silently dropped: the component at full
+        # weight, 0.18 where switching it off gives 0.9. compose() warns about it now;
+        # the point here is the number, so the warning is caught rather than asserted.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            dropped = float(scoring.compose(parts, "product", {"geomag": 0.0})[0])
+        self.assertAlmostEqual(dropped, 0.18, places=6)
+        self.assertAlmostEqual(
+            float(scoring.compose(parts, "product", {"geomagnetic": 0.0})[0]), 0.9,
+            places=6)
+
+    def test_every_real_component_name_is_accepted(self):
+        spec = ",".join(f"{name}=1" for name in scoring.SCORE_COMPONENTS)
+        got = ss.parse_score_weights(spec)
+        self.assertEqual(set(got), set(scoring.SCORE_COMPONENTS))
+
+    def test_the_config_spelling_is_checked_as_well(self):
+        """A config carries a mapping rather than a string, and used to skip the check."""
+        with self.assertRaises(SystemExit):
+            ss.parse_score_weights({"solid_angel": 2.0})
+        self.assertEqual(ss.parse_score_weights({"solid_angle": 2.0}), {"solid_angle": 2.0})
+
+    def test_the_component_list_matches_what_scoring_can_produce(self):
+        """
+        SCORE_COMPONENTS is the gate, so it drifting from reality would start refusing
+        legitimate weights. explain.COMPONENT_MEANING documents the same set.
+        """
+        from oroscope import explain
+        self.assertEqual(set(scoring.SCORE_COMPONENTS), set(explain.COMPONENT_MEANING))
 
 
 class TestScoreCandidates(unittest.TestCase):

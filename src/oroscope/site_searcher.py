@@ -33,6 +33,7 @@ re-read the file it was just handed the path to.
 from __future__ import annotations
 
 import argparse
+import difflib
 import inspect
 import sys
 import numpy as np
@@ -2397,7 +2398,19 @@ def parse_score_weights(value):
     Raises
     ------
     SystemExit
-        If a pair lacks ``=`` or its value is not a number.
+        If a pair lacks ``=``, its value is not a number, or it names something that is
+        not a score component.
+
+    Notes
+    -----
+    **The names are checked.** They were not, and :func:`~oroscope.scoring.compose`
+    then dropped anything it did not recognise with an ``if n in w`` filter, so a
+    misspelling was accepted, ignored and never reported. ``--score_weights geomag=0``
+    -- one character short of ``geomagnetic`` -- parsed cleanly, and the component the
+    user meant to switch off ran at full weight through the whole search: measured on a
+    two-component product, 0.18 where the correct spelling gives 0.9. Nothing anywhere
+    said so. Weights are the one input whose failure leaves no trace in the output, so
+    they are the one input worth rejecting outright.
 
     Examples
     --------
@@ -2410,7 +2423,9 @@ def parse_score_weights(value):
     if value is None or value == "":
         return None
     if isinstance(value, dict):
-        return {str(k): float(v) for k, v in value.items()}
+        weights = {str(k): float(v) for k, v in value.items()}
+        _reject_unknown_components(weights)
+        return weights
     weights = {}
     for pair in str(value).split(","):
         pair = pair.strip()
@@ -2423,7 +2438,34 @@ def parse_score_weights(value):
             weights[name.strip()] = float(raw)
         except ValueError:
             raise SystemExit(f"--score_weights value for {name.strip()!r} is not a number: {raw!r}")
+    _reject_unknown_components(weights)
     return weights or None
+
+
+def _reject_unknown_components(weights):
+    """
+    Refuses a weight naming something that is not a score component.
+
+    A weight is unusual among the inputs in that getting it wrong is invisible: the run
+    completes, every number moves, and nothing in the results, the funnel or the
+    explanation records that the request was dropped. So it fails here instead, where
+    the mistake is one character from its correction.
+    """
+    unknown = sorted(set(weights) - set(scoring.SCORE_COMPONENTS))
+    if not unknown:
+        return
+    lines = []
+    for name in unknown:
+        near = difflib.get_close_matches(name, scoring.SCORE_COMPONENTS, n=1, cutoff=0.6)
+        lines.append(f"  {name!r}" + (f" -- did you mean {near[0]!r}?" if near else ""))
+    raise SystemExit(
+        "--score_weights names {} that {} not score component{}:\n{}\n"
+        "The components are: {}.\nA weight naming something else would be dropped in "
+        "silence and the run would look normal, so it is refused here instead.".format(
+            "something" if len(unknown) == 1 else "things",
+            "is" if len(unknown) == 1 else "are",
+            "" if len(unknown) == 1 else "s",
+            "\n".join(lines), ", ".join(scoring.SCORE_COMPONENTS)))
 
 
 def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
@@ -4888,7 +4930,7 @@ def main():
     parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.")
     parser.add_argument("--distance_band_m", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Exit-point distance band scoring 1, in metres. Defaults to the configured decay-baseline window.")
     parser.add_argument("--clearance_full_at", type=float, default=None, help="Fresnel clearance ratio, in first-Fresnel radii, that scores 1 (default: 1.0).")
-    parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1.")
+    parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1; a weight of 0 excludes a component. Names are checked against the score components and a misspelling is refused, because a dropped weight changes every number in the run and leaves no trace in the output.")
     parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
     parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")
