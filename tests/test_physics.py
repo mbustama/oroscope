@@ -871,3 +871,54 @@ class TestBetaIsConfigurable(unittest.TestCase):
         before = physics.tau_decay_length_m(100.0)
         physics.set_tau_energy_loss(reference=5.0e-6, index=0.0)
         self.assertEqual(physics.tau_decay_length_m(100.0), before)
+
+
+class TestDeclinationCanFollowTheSite(unittest.TestCase):
+    """
+    Inclination follows the site through a dipole; declination could not, because the
+    dipole gives -0.2 deg at Arequipa against an IGRF -6.9. It fell back to one constant
+    wherever the DEM was. These cover the socket that lets a real model be supplied.
+    """
+
+    def tearDown(self):
+        physics.set_declination_model(None)
+
+    def test_without_a_model_the_constant_fallback_is_used_everywhere(self):
+        for lat, lon in ((-16.4, -71.5), (-12.0, -77.0), (60.0, 20.0)):
+            dec, _ = physics.default_field_for_site(lat, lon)
+            self.assertEqual(dec, physics.DEFAULT_GEOMAG_DECLINATION_DEG)
+
+    def test_a_model_makes_declination_follow_the_site(self):
+        physics.set_declination_model(lambda lat, lon: 0.5 * lon)
+        self.assertAlmostEqual(physics.default_field_for_site(-16.4, -70.0)[0], -35.0)
+        self.assertAlmostEqual(physics.default_field_for_site(-16.4, -74.0)[0], -37.0)
+
+    def test_an_explicit_declination_still_beats_the_model(self):
+        physics.set_declination_model(lambda lat, lon: -1.0)
+        dec, _ = physics.default_field_for_site(-16.4, -71.5, declination_deg=-6.9)
+        self.assertEqual(dec, -6.9)
+
+    def test_inclination_keeps_following_the_site_either_way(self):
+        _, lima = physics.default_field_for_site(-12.0, -77.0)
+        _, arequipa = physics.default_field_for_site(-16.4, -71.5)
+        self.assertLess(arequipa, lima, "inclination steepens southward across Peru")
+
+    def test_a_grid_interpolates_bilinearly(self):
+        lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+        dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+        model = physics.declination_from_grid(lats, lons, dec)
+        for (lat, lon), expected in (((-18.0, -74.0), -5.0), ((-14.0, -70.0), -8.0),
+                                     ((-16.0, -72.0), -6.5)):
+            self.assertAlmostEqual(model(lat, lon), expected)
+
+    def test_a_grid_query_outside_its_corners_clamps(self):
+        lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+        dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+        model = physics.declination_from_grid(lats, lons, dec)
+        self.assertAlmostEqual(model(-40.0, -100.0), -5.0)
+
+    def test_a_mis_shaped_grid_is_refused(self):
+        with self.assertRaises(ValueError):
+            physics.declination_from_grid(np.array([-18.0, -14.0]),
+                                          np.array([-74.0, -70.0]),
+                                          np.array([[-5.0, -7.0]]))

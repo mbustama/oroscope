@@ -1000,9 +1000,13 @@ def _section_assumptions(results):
     decl = params.get("geomag_declination_deg")
     if decl is not None and _get(params, "use_geomagnetic", default=True):
         items.append(("geomag_declination_deg", f"{decl:g}°",
-                      "Does NOT follow the site — it falls back to Arequipa's IGRF "
-                      "value wherever the DEM is. Inclination does follow, through a "
-                      "centred dipole. Supply the IGRF declination per site."))
+                      "Constant across the DEM unless a declination model was supplied "
+                      "— the centred dipole that gives inclination is unreliable for "
+                      "declination (-0.2° against a measured -6.9° at Arequipa), so it "
+                      "falls back to Arequipa's IGRF value. Right for southern Peru, "
+                      "wrong elsewhere. physics.set_declination_model() takes any "
+                      "callable, and declination_from_grid() builds one from a NOAA "
+                      "export."))
 
     if not _get(params, "max_range_km"):
         items.append(("max_range_km", "unset",

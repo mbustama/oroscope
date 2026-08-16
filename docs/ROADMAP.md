@@ -2332,6 +2332,30 @@ unrelated to the physics they describe. The run's own assumptions block now carr
 measured factor and the warning about the cliff, so the depth is read as the lower bound
 it is.
 
+### 6.40 Declination can follow the site — the model is a socket, not a shipped table
+
+§9.6 and §10.1: inclination follows the DEM's coordinates through a centred dipole,
+while declination falls back to Arequipa's −6.9° wherever the search happens to be,
+because the dipole is unusable for it (−0.2° against a measured −6.9°).
+
+`physics.set_declination_model(fn)` takes any callable `fn(lat, lon) -> degrees` and
+`default_field_for_site` consults it before falling back, so declination now follows the
+site exactly as inclination does. `declination_from_grid(lats, lons, values)` builds such
+a callable by bilinear interpolation, which is the practical route: export a grid from
+NOAA's geomagnetic calculator covering the DEM and hand it over.
+
+**No IGRF implementation is shipped, and that is a decision rather than an omission.**
+IGRF is a spherical-harmonic expansion with a couple of hundred coefficients per epoch.
+Writing them from memory would produce declinations that look entirely plausible and are
+wrong — which is the failure mode this project has now found half a dozen times, and the
+one that is hardest to notice. Either install `ppigrf`/`pyIGRF` and pass its function, or
+supply a grid. The socket is the part that was missing; the coefficients are somebody
+else's published work and should arrive as data.
+
+Nothing about a published number changes: with no model set the fallback is exactly as
+before, which the tests pin. The run's assumptions block now says the declination is
+constant *unless a model was supplied*, and names the two ways to supply one.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

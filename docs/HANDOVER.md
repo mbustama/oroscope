@@ -381,7 +381,12 @@ obstacle: a pixel has one slope and both must accept it.
    range and survival through rock, which the search does not model; the search uses
    the decay length E/m·cτ, which carries no β. The run's summary had been listing it
    as an assumption behind its numbers, and no longer does. Roadmap §6.38.
-6. Geomagnetic **declination** does not follow the site (inclination does). Needs IGRF.
+6. ~~Geomagnetic **declination** does not follow the site.~~ ✅ socket added,
+   2026-08-16. `physics.set_declination_model(fn)` and `declination_from_grid()`; the
+   pipeline consults them before the constant fallback. **No IGRF table is shipped on
+   purpose** — its coefficients are somebody else's published work and typing them from
+   memory would give plausible wrong declinations. Install `ppigrf`/`pyIGRF` and pass
+   its function, or supply a NOAA grid. Roadmap §6.40.
 
 **Verification**
 7. **Nothing has been checked against an external simulation.** The Earth-absorption
@@ -420,9 +425,12 @@ obstacle: a pixel has one slope and both must accept it.
 
 ## 10. Open questions for the owner
 
-1. **IGRF declination per site.** Inclination follows the DEM's coordinates via a dipole;
-   declination falls back to Arequipa's −6.9°. The dipole is unreliable for declination
-   (−0.2° against a measured −6.9°) and is deliberately not used for it.
+1. **IGRF declination per site.** The mechanism now exists (§6.40) and wants feeding:
+   either add `ppigrf` as a dependency and pass its function to
+   `physics.set_declination_model()`, or export a NOAA declination grid covering the
+   Arequipa DEM into `data/` and load it with `declination_from_grid()`. Which of those
+   the collaboration prefers is the open question. Until then the constant −6.9°
+   fallback stands, which is right for southern Peru.
 2. **β**, as above.
 3. **The TAMBO assumptions**, all flagged in `config/tambo_colca_config.json` and
    `docs/source/assumptions.rst`: the 20–60° near-wall band, the 25° far-wall floor, the

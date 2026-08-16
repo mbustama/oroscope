@@ -34,6 +34,7 @@ __all__ = [
     "earth_absorption_cutoff_deg", "spectrum_weighted_decay_probability",
     "geomagnetic_latitude_deg",
     "centered_dipole_inclination", "default_field_for_site",
+    "set_declination_model", "declination_model", "declination_from_grid",
     "geomagnetic_unit_vector", "geomagnetic_sin_alpha", "refractivity",
     "cherenkov_angle_rad", "cherenkov_footprint_radius_m", "footprint_sampling",
 ]
@@ -1323,6 +1324,132 @@ def centered_dipole_inclination(latitude_deg: float, longitude_deg: float,
     return math.degrees(math.atan(2.0 * math.tan(mlat)))
 
 
+_DECLINATION_MODEL = None
+
+
+def set_declination_model(model):
+    """
+    Supplies a declination model, so declination can follow the site as inclination does.
+
+    Inclination is computed from the site's coordinates with a centred dipole and is
+    good enough. Declination is not: the dipole gives about -0.2 degrees at Arequipa
+    against an IGRF -6.9, because the non-dipole terms dominate it. So declination has
+    always fallen back to a single constant -- Arequipa's IGRF value -- wherever the DEM
+    happened to be, which is right for the prototype region and wrong anywhere else.
+
+    **No IGRF model is shipped, deliberately.** IGRF is a spherical-harmonic expansion
+    with a couple of hundred coefficients per epoch, and coefficients typed from memory
+    would produce declinations that look entirely plausible and are wrong -- the exact
+    failure this project keeps finding. What is provided instead is the socket: pass any
+    callable ``model(latitude_deg, longitude_deg) -> declination_deg``, from
+    ``ppigrf``/``pyIGRF``, from a NOAA grid via :func:`declination_from_grid`, or from
+    the collaboration's own numbers.
+
+    Parameters
+    ----------
+    model : callable or None
+        ``model(latitude_deg, longitude_deg)`` returning degrees east of north.
+        ``None`` restores the constant fallback.
+
+    Returns
+    -------
+    callable or None
+        The model now in force.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> _ = physics.set_declination_model(lambda lat, lon: -6.0 + 0.1 * (lon + 71.5))
+    >>> dec, inc = physics.default_field_for_site(-16.4, -71.5)
+    >>> f"{dec:.2f}"
+    '-6.00'
+
+    It follows the site, which the constant never did:
+
+    >>> dec_east, _ = physics.default_field_for_site(-16.4, -66.5)
+    >>> f"{dec_east:.2f}"
+    '-5.50'
+    >>> _ = physics.set_declination_model(None)
+    >>> physics.default_field_for_site(-16.4, -66.5)[0]
+    -6.9
+    """
+    global _DECLINATION_MODEL
+    _DECLINATION_MODEL = model
+    return _DECLINATION_MODEL
+
+
+def declination_model() -> object:
+    """
+    The declination model in force, or ``None`` when the constant fallback is in use.
+
+    Examples
+    --------
+    >>> from oroscope import physics
+    >>> physics.declination_model() is None
+    True
+    """
+    return _DECLINATION_MODEL
+
+
+def declination_from_grid(latitudes, longitudes, declinations):
+    """
+    Builds a declination model by bilinear interpolation over a supplied grid.
+
+    The practical way to get real IGRF values in without a spherical-harmonic
+    implementation: export a declination grid covering the DEM (NOAA's geomagnetic
+    calculator will produce one), and hand the three arrays here.
+
+    Parameters
+    ----------
+    latitudes : array_like
+        Grid latitudes, ascending, in degrees.
+    longitudes : array_like
+        Grid longitudes, ascending, in degrees.
+    declinations : array_like
+        ``(len(latitudes), len(longitudes))`` of declination in degrees east of north.
+
+    Returns
+    -------
+    callable
+        ``model(latitude_deg, longitude_deg) -> float``, suitable for
+        :func:`set_declination_model`. Queries outside the grid are clamped to its edge,
+        which is the right behaviour for a DEM that pokes slightly past its corners and
+        a poor one for a grid that does not cover the region at all -- so cover it.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import physics
+    >>> lats, lons = np.array([-18.0, -14.0]), np.array([-74.0, -70.0])
+    >>> dec = np.array([[-5.0, -7.0], [-6.0, -8.0]])
+    >>> model = physics.declination_from_grid(lats, lons, dec)
+    >>> f"{model(-18.0, -74.0):.2f}"
+    '-5.00'
+
+    Halfway in both directions is the average of the four corners:
+
+    >>> f"{model(-16.0, -72.0):.2f}"
+    '-6.50'
+    """
+    lats = np.asarray(latitudes, dtype=float)
+    lons = np.asarray(longitudes, dtype=float)
+    grid = np.asarray(declinations, dtype=float)
+    if grid.shape != (lats.size, lons.size):
+        raise ValueError(f"declinations must be {(lats.size, lons.size)}, got {grid.shape}")
+
+    def model(latitude_deg, longitude_deg):
+        lat = min(max(float(latitude_deg), lats[0]), lats[-1])
+        lon = min(max(float(longitude_deg), lons[0]), lons[-1])
+        i = int(np.clip(np.searchsorted(lats, lat) - 1, 0, lats.size - 2))
+        j = int(np.clip(np.searchsorted(lons, lon) - 1, 0, lons.size - 2))
+        dy = (lat - lats[i]) / (lats[i + 1] - lats[i]) if lats[i + 1] != lats[i] else 0.0
+        dx = (lon - lons[j]) / (lons[j + 1] - lons[j]) if lons[j + 1] != lons[j] else 0.0
+        return float(grid[i, j] * (1 - dy) * (1 - dx) + grid[i + 1, j] * dy * (1 - dx)
+                     + grid[i, j + 1] * (1 - dy) * dx + grid[i + 1, j + 1] * dy * dx)
+
+    return model
+
+
 def default_field_for_site(latitude_deg: float, longitude_deg: float,
                            declination_deg: float | None = None,
                            inclination_deg: float | None = None
@@ -1363,6 +1490,8 @@ def default_field_for_site(latitude_deg: float, longitude_deg: float,
     >>> f"{dec:.1f} {inc:.1f}"
     '-6.9 -14.0'
     """
+    if declination_deg is None and _DECLINATION_MODEL is not None:
+        declination_deg = _DECLINATION_MODEL(latitude_deg, longitude_deg)
     if declination_deg is None:
         declination_deg = DEFAULT_GEOMAG_DECLINATION_DEG
     if inclination_deg is None:

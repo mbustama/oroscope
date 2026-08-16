@@ -111,6 +111,7 @@ from oroscope.physics import (  # noqa: F401
     depth_band_from_energy, earth_absorption_cutoff_deg,
     spectrum_weighted_decay_probability, geomagnetic_latitude_deg,
     centered_dipole_inclination, default_field_for_site, geomagnetic_unit_vector,
+    set_declination_model, declination_model, declination_from_grid,
     geomagnetic_sin_alpha, refractivity, cherenkov_angle_rad,
     cherenkov_footprint_radius_m, footprint_sampling,
 )
