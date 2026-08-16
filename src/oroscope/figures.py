@@ -25,6 +25,7 @@ import contextlib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Rectangle
 
 __all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower"]
 
@@ -365,4 +366,228 @@ def decay_and_shower(energies_pev=(3.0, 10.0, 55.0, 100.0, 1000.0),
         _tidy(ax)
         fig.tight_layout()
 
+    return fig
+
+
+def pipeline_stages(figsize=(9.2, 5.4)):
+    r"""
+    How a DEM becomes a list of sites: the seven stages, and what each one removes.
+
+    The vocabulary this project uses --- *screening*, *striding*, *the arrival scan*,
+    *scoring*, *closing*, *pruning* --- is introduced nowhere in one place, and the
+    terms are not guessable. This is that place, drawn.
+
+    The widths are proportional to the survivors at each stage, on a logarithmic scale
+    because the range is six orders of magnitude and a linear funnel would show one
+    visible bar and six slivers. The numbers are a real run: TAMBO over the full Ancash
+    DEM, 68.6 Mpx.
+
+    Read it as two halves. Everything above ``directions accepted`` **removes**
+    candidates; everything below **rebuilds a map from them**, which is why the count
+    rises again at closing. Confusing those two halves is the single commonest way to
+    misread a funnel table.
+
+    Parameters
+    ----------
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.pipeline_stages()
+    >>> len(fig.axes)
+    1
+    """
+    stages = [
+        ("DEM pixels", 68_571_090, "Every pixel of the elevation model."),
+        ("Slope screen", 33_943_993, "Ground steep enough to stand the array on,\n"
+                                     "and not so steep it cannot be built."),
+        ("Striding", 6_788_807, "One surviving pixel in N is kept as a candidate.\n"
+                                "Cost control, not a criterion."),
+        ("Arrival scan", 1_022_530, "For each candidate, walk outward along several\n"
+                                    "bearings: is there a target at the right range?"),
+        ("Scoring", 1_022_530, "Named components in [0, 1], multiplied, cut at\n"
+                               "min_score."),
+        ("Closing", 2_543_406, "Morphology fills the holes striding left.\n"
+                               "The count RISES here."),
+        ("Pruning + selection", 186_704, "Regions too small or too poor in detectors\n"
+                                         "are dropped."),
+    ]
+    colours = [MUTED, ROCK_EDGE, ROCK_EDGE, WINDOW, WINDOW, DETECTOR, DETECTOR]
+
+    with _styled():
+        fig, ax = plt.subplots(figsize=figsize)
+        top = np.log10(stages[0][1])
+        centre, span = 1.30, 0.62          # bars live here; labels sit either side
+        for i, ((name, n, note), colour) in enumerate(zip(stages, colours)):
+            half = np.log10(max(n, 10)) / top * span
+            y = -i
+            ax.add_patch(Rectangle((centre - half, y - 0.30), 2 * half, 0.60,
+                                   facecolor=colour, alpha=0.9, lw=0))
+            ax.text(centre - span - 0.06, y, f"{name}\n{n:,}", ha="right",
+                    va="center", fontsize=9, color=INK, linespacing=1.35)
+            ax.text(centre + span + 0.06, y, note, ha="left", va="center",
+                    fontsize=8.5, color=MUTED, linespacing=1.35)
+            if i:
+                ax.annotate("", xy=(centre, y + 0.30), xytext=(centre, y + 0.70),
+                            arrowprops=dict(arrowstyle="-|>", color=RULE, lw=1.2))
+
+        # Which half of the pipeline each stage belongs to.
+        bracket = centre - span - 0.78
+        ax.plot([bracket, bracket], [-0.35, -4.35], color=ROCK_EDGE, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -2.35, "Removes\ncandidates", ha="right", va="center",
+                fontsize=9, color=ROCK_EDGE, weight="bold", linespacing=1.35)
+        ax.plot([bracket, bracket], [-4.65, -6.35], color=DETECTOR, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -5.5, "Rebuilds\na map", ha="right", va="center",
+                fontsize=9, color=DETECTOR, weight="bold", linespacing=1.35)
+
+        ax.set_xlim(bracket - 0.95, centre + span + 2.05)
+        ax.set_ylim(-7.0, 0.55)
+        ax.axis("off")
+        ax.text(centre, -6.85, "TAMBO over the full Ancash DEM. Bar widths are "
+                               "logarithmic in the survivor count.",
+                ha="center", va="center", fontsize=8.5, color=MUTED)
+        fig.tight_layout()
+    return fig
+
+
+def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
+    r"""
+    Why the closing element has to outrun the gap that striding leaves.
+
+    Striding keeps one surviving pixel in ``stride``, so the accepted set becomes a
+    lattice of isolated marks. Morphological *closing* is what turns that back into a
+    region --- but only if its structuring element is larger than the gap. Below the
+    gap the marks never touch and the mask stays a scatter; above it the region
+    reappears almost intact.
+
+    The transition is **at** the gap and it is abrupt, not gradual. That is the whole
+    content of the figure, and it is the mechanism behind a real 4.75x under-report of
+    TAMBO's area --- and a 291x one on steeper ground, where the accepted strips are
+    narrower still.
+
+    Parameters
+    ----------
+    stride : int, optional
+        Keeps every Nth surviving pixel; also the gap it leaves, in pixels.
+    element_px : tuple of int, optional
+        Closing element sizes to draw, in pixels. One below the gap, one at it, one
+        above.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.striding_and_closing()
+    >>> len(fig.axes)
+    5
+    """
+    from scipy.ndimage import binary_closing
+
+    n = 120
+    rng = np.random.default_rng(1)
+    rr, cc = np.mgrid[0:n, 0:n]
+    truth = np.abs(cc - 55 - 16 * np.sin(rr / 20.0)) < 11
+    truth &= rng.random((n, n)) < 0.97
+
+    strided = np.zeros_like(truth)
+    strided[::stride, ::stride] = truth[::stride, ::stride]
+
+    panels = [("Accepted, every pixel", truth, None),
+              (f"Marked one pixel in {stride}", strided, None)]
+    for k in element_px:
+        panels.append((f"Closed, element {k} px",
+                       binary_closing(strided, np.ones((k, k))), k))
+
+    base = int(truth.sum())
+    with _styled():
+        fig, axes = plt.subplots(1, len(panels), figsize=figsize)
+        for ax, (name, mask, element) in zip(axes, panels):
+            ax.imshow(mask, cmap="Greens", vmin=0, vmax=1.45,
+                      interpolation="nearest")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for side in ax.spines.values():
+                side.set_color(RULE)
+            verdict = ("" if element is None
+                       else "  ✗" if element < stride else "  ✓")
+            ax.set_xlabel(f"{name}{verdict}\n{mask.sum() / base:.2f}× the accepted set",
+                          fontsize=8.5)
+        fig.tight_layout()
+    return fig
+
+
+def score_composition(cut=0.35, figsize=(7.8, 3.4)):
+    r"""
+    Why a threshold on a product of components sits on a cliff.
+
+    Each component scores a candidate in [0, 1] against one named criterion --- depth,
+    accepted solid angle, exit distance, and so on. They are combined by
+    **multiplication**, so a candidate has to be good at everything, and the composed
+    score of several components piles up near zero however good the terrain is.
+
+    A cut placed in the middle of that pile is therefore not a mild preference: it is a
+    cliff, and where it lands depends on how many components happen to be enabled.
+    Adding a component moves every score down and so silently tightens the cut.
+
+    Parameters
+    ----------
+    cut : float, optional
+        Where ``min_score`` is placed, for illustration.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.score_composition()
+    >>> len(fig.axes)
+    2
+    """
+    rng = np.random.default_rng(0)
+    n = 40_000
+    parts = [rng.beta(5.0, 2.0, n) for _ in range(6)]
+
+    with _styled():
+        fig, (ax, bx) = plt.subplots(1, 2, figsize=figsize)
+
+        running = np.ones(n)
+        for i, part in enumerate(parts, start=1):
+            running = running * part
+            ax.hist(running, bins=60, range=(0, 1), histtype="step",
+                    color=SEQUENCE[min(i - 1, len(SEQUENCE) - 1)], lw=1.3,
+                    density=True)
+        ax.axvline(cut, color="#B02A25", lw=1.6)
+        ax.text(cut + 0.02, ax.get_ylim()[1] * 0.92, f"min_score = {cut}",
+                color="#B02A25", fontsize=9, va="top")
+        ax.set_xlabel("Composed score, as components are multiplied in")
+        ax.set_ylabel("Density")
+        ax.set_xlim(0, 1)
+        _tidy(ax)
+
+        kept = []
+        running = np.ones(n)
+        for part in parts:
+            running = running * part
+            kept.append(100.0 * (running >= cut).mean())
+        bx.plot(range(1, len(parts) + 1), kept, marker="o", color="#B02A25", lw=1.8)
+        bx.set_xlabel("Components multiplied in")
+        bx.set_ylabel("Above the cut (%)")
+        bx.set_ylim(0, 105)
+        _tidy(bx)
+        fig.tight_layout()
     return fig

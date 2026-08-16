@@ -118,10 +118,14 @@ See :doc:`installation` and :doc:`quickstart` for the longer version, and
 
    installation
    quickstart
+   howitworks
    cli
+   data
    notebooks
    physics
    assumptions
+   glossary
+   implementation
    functions
    references
 

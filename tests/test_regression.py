@@ -58,7 +58,7 @@ class TestSyntheticRegression(GoldenCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp(prefix="sitesearch_golden_")
+        cls.tmp = tempfile.mkdtemp(prefix="oroscope_golden_")
         grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
         z = synthetic.ridge_and_slope(900, grid_x)
         cls.dem = synthetic.write_geotiff(os.path.join(cls.tmp, "ridge.tif"), z,
@@ -113,7 +113,7 @@ class TestScanModePipeline(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp(prefix="sitesearch_scan_")
+        cls.tmp = tempfile.mkdtemp(prefix="oroscope_scan_")
         grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
         z = synthetic.ridge_and_slope(700, grid_x)
         cls.dem = synthetic.write_geotiff(os.path.join(cls.tmp, "ridge.tif"), z,
@@ -160,7 +160,7 @@ class TestEnergyDerivedWindow(unittest.TestCase):
     """An energy range replaces the hand-set distance window."""
 
     def test_energy_range_sets_the_distance_window(self):
-        tmp = tempfile.mkdtemp(prefix="sitesearch_energy_")
+        tmp = tempfile.mkdtemp(prefix="oroscope_energy_")
         try:
             grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
             z = synthetic.ridge_and_slope(500, grid_x)
@@ -191,7 +191,7 @@ class TestRealDemRegression(GoldenCase):
             import tifffile as tiff
         except ImportError as exc:                      # pragma: no cover
             raise unittest.SkipTest(f"tifffile unavailable: {exc}")
-        cls.tmp = tempfile.mkdtemp(prefix="sitesearch_golden_real_")
+        cls.tmp = tempfile.mkdtemp(prefix="oroscope_golden_real_")
         r0, c0, n = cls.CROP
         try:
             cls._load(tiff, r0, c0, n)

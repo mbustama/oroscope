@@ -264,7 +264,7 @@ def main():
 
     load_at_start = check_machine_is_quiet()
 
-    tmp = tempfile.mkdtemp(prefix="sitesearch_bench_")
+    tmp = tempfile.mkdtemp(prefix="oroscope_bench_")
     current = {}
     try:
         print("warming up JIT ...", flush=True)
