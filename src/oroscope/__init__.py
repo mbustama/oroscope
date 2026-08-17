@@ -47,7 +47,7 @@ Where to start:
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.5.0"
 
 # Submodules, so `from oroscope import physics` and `oroscope.physics.x` both work.
 # figures, fetch_dem and generate_env are deliberately not imported here: the first

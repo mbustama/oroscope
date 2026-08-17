@@ -50,6 +50,40 @@ def read(*parts):
         return f.read()
 
 
+class TestTheVersionIsOneNumber(unittest.TestCase):
+    """
+    The version is written twice, and nothing checked that the two agreed.
+
+    ``pyproject.toml`` is what ``python -m build`` packages and what
+    ``docs/source/conf.py`` reads for the page title; ``oroscope.__version__`` is what
+    the runtime reports and what every ``provenance.json`` records. Drift between them
+    would publish one number, install a second and stamp a third onto stored results --
+    and each of the three looks authoritative on its own.
+
+    The same shape as the ``2.29`` literal that sat beside
+    ``AREA_INFLATION_AT_COLCA``: a value kept in two places with nothing tying them.
+    """
+
+    def _pyproject_version(self):
+        import re
+        found = re.search(r'^version = "([^"]+)"', read("pyproject.toml"), re.M)
+        self.assertIsNotNone(found, "no version in pyproject.toml")
+        return found.group(1)
+
+    def test_pyproject_and_dunder_version_agree(self):
+        import oroscope
+        self.assertEqual(oroscope.__version__, self._pyproject_version())
+
+    def test_the_changelog_has_a_section_for_it(self):
+        """
+        A release whose number appears nowhere in the changelog is a release with no
+        notes. Unreleased work is allowed; a *published* version with no heading is not.
+        """
+        version = self._pyproject_version()
+        self.assertIn(f"## {version}", read("CHANGELOG.md"),
+                      f"CHANGELOG.md has no '## {version}' heading")
+
+
 class TestTheCliPageDocumentsTheCli(unittest.TestCase):
     """
     ``docs/source/cli.rst`` is the canonical option reference; drift in either
