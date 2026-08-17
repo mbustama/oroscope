@@ -1348,7 +1348,7 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     #
     # The default score is a *product* of several components each in [0, 1], so its
     # distribution piles up near zero and an absolute threshold sits on a cliff:
-    # measured on one search, min_score 0.0, 0.35 and 0.5 gave 45928, 2056 and zero
+    # measured on one search, min_score 0.0, 0.35 and 0.5 gave 65268, 10437 and zero
     # detector positions. A percentile asks the question that was meant all along --
     # keep the best fraction of what this terrain offers -- and is scale-free, so it
     # does not move when the composition or the number of components changes.
@@ -3131,18 +3131,24 @@ def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
     """
     Warns when the closing element is too small to bridge the gaps striding leaves.
 
-    Striding is unbiased in *acceptance* -- measured at both scales, 60.1% against
-    60.1% for GRAND and 17.491% against 17.494% for TAMBO -- so it is tempting to treat
-    it as free. It is not. Accepted pixels are marked one in ``candidate_stride``, and
-    the mask is then closed morphologically before areas are measured. If the closing
-    element is smaller than the gap the stride leaves, the mask never reconnects: it
-    stays a scatter of isolated pixels, small regions fall below the size and capacity
-    thresholds, and the reported area collapses.
+    Striding is unbiased in *acceptance* -- measured at both scales, 58.414% against
+    58.415% for GRAND and 75.750% against 75.736% for TAMBO -- so it is tempting to
+    treat it as free. It is not. Accepted pixels are marked one in ``candidate_stride``,
+    and the mask is then closed morphologically before areas are measured. If the
+    closing element is smaller than the gap the stride leaves, the mask never
+    reconnects: it stays a scatter of isolated pixels, small regions fall below the size
+    and capacity thresholds, and the reported area collapses.
 
-    Measured at Colca with a 100 m element against a 154 m stride-5 gap: **83.6 km²
-    reported against 396.9 km² at stride 1, a 4.75x under-report**, with acceptance
-    identical to three decimal places. The same run at GRAND's 1 km element -- 32 px,
-    against the same 154 m gap -- is unaffected, which is why this went unnoticed.
+    Measured at Colca against a 154 m stride-5 gap: at TAMBO's published 150 m element,
+    **203.0 km² reported against 307.2 km² at stride 1, a 1.51x under-report**. At the
+    100 m element this warning was written for -- three pixels against a five-pixel gap
+    -- the same comparison was 83.6 against 396.9 km², **4.75x**. Acceptance is
+    identical to three decimal places either way. The same run at GRAND's 1 km element,
+    32 px against the same gap, is unaffected, which is why this went unnoticed.
+
+    The 150 m figure is the one to quote, and the drop from 4.75x to 1.51x is the whole
+    argument for heeding this warning: two pixels of element is the difference between
+    the two sides of a cliff.
 
     The rule is simply that the element must outrun the gap. Raise ``gap_close_km``,
     lower ``candidate_stride``, or accept the area as a lower bound and say so.
@@ -3202,7 +3208,8 @@ def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
               f"than the gap candidate_stride {int(candidate_stride)} leaves "
               f"({gap:.0f} m). Accepted pixels will not reconnect, so the reported "
               f"AREA will be an under-report while acceptance stays unbiased -- "
-              f"measured 4.75x at Colca on TAMBO's settings. Raise gap_close_km, "
+              f"measured 1.51x at Colca on TAMBO's settings, and 4.75x when the "
+              f"element was 100 m. Raise gap_close_km, "
               f"lower candidate_stride, or read the area as a lower bound.{C.RESET}")
     return {"gap_m": gap, "element_m": element, "ratio": gap / element}
 

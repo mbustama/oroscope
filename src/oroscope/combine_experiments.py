@@ -85,7 +85,11 @@ def geographic_extent(world: tuple[float, ...], shape: tuple[int, int]) -> tuple
     >>> round(left, 3), round(right, 3)
     (-72.005, -70.005)
     >>> round(bottom, 3), round(top, 3)
-    (-16.005, -14.995)
+    (-15.995, -14.995)
+
+    The extent spans exactly ``rows * cell`` degrees: 100 rows of 0.01 is 1.0, from
+    -14.995 to -15.995. This example read ``-16.005`` until it was first executed,
+    which would have made the raster 1.01 degrees tall.
     """
     cell_x, _, _, cell_y, x0, y0 = world
     rows, cols = shape
@@ -277,7 +281,9 @@ def load_run(run_dir: str) -> dict:
     # legacy name sorts first -- so taking tifs[0] silently overlaid an old mask
     # against a current one. Measured: it reported TAMBO at Colca as 44.5 km2 from a
     # superseded 48,663-pixel mask, against 83.6 km2 for the run it claimed to
-    # describe. Nothing failed; the number was simply wrong.
+    # describe. Nothing failed; the number was simply wrong. (Both figures are the
+    # sizes measured when the bug was found, at TAMBO's old 100 m spacing -- Colca's
+    # TAMBO area is 203.0 km2 now. They record the defect, not the terrain.)
     tif = None
     for prefix in (ss.RESULTS_PREFIX, ss.LEGACY_RESULTS_PREFIX):
         found = sorted(glob.glob(os.path.join(run_dir, prefix + "*.tif")))

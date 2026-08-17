@@ -1,5 +1,5 @@
 {
-    "generated": "2026-08-17T04:18:24",
+    "generated": "2026-08-17T11:14:17",
     "generated_by": "tools/run_full_dem.py",
     "region": "huaylas",
     "dem": "input/dem/huaylas.tif",
@@ -10,6 +10,19 @@
     "files": [
         "combination_explanation.txt",
         "combined_report.json",
+        "grand_control_ds4_stride5.json",
+        "grand_explanation.txt",
+        "grand_provenance.json",
+        "grand_results.json",
+        "tambo_control_ds4_stride5.json",
+        "tambo_control_explanation.txt",
+        "tambo_explanation.txt",
+        "tambo_provenance.json",
+        "tambo_results.json"
+    ],
+    "written_by_this_run": [
+        "combination_explanation.txt",
+        "combined_report.json",
         "grand_explanation.txt",
         "grand_provenance.json",
         "grand_results.json",
@@ -17,5 +30,10 @@
         "tambo_provenance.json",
         "tambo_results.json"
     ],
-    "note": "Regenerate when a configuration changes. Notebook 8 reads these and does not run the searches itself: grand takes about 25 minutes, tambo about 1 (its targets are 2-5 km away against grand's 10-40, so the profile walks are far shorter)."
+    "also_present": {
+        "grand_control_ds4_stride5.json": "2026-08-17T09:54:39",
+        "tambo_control_ds4_stride5.json": "2026-08-17T09:54:39",
+        "tambo_control_explanation.txt": "2026-08-17T09:54:39"
+    },
+    "note": "Regenerate when a configuration changes. Notebook 8 reads these and does not run the searches itself: grand takes about 25 minutes, tambo about 1 (its targets are 2-5 km away against grand's 10-40, so the profile walks are far shorter). `also_present` is what this run did not write: check its dates before quoting it."
 }

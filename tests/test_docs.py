@@ -50,6 +50,47 @@ def read(*parts):
         return f.read()
 
 
+class TestAConfigCanBeHandedToTheSearch(unittest.TestCase):
+    """
+    A configuration is not a call signature, and the gap is where documented examples rot.
+
+    Two README examples were broken by it at once. The headline splatted
+    ``load_config(...)`` straight into :func:`find_grand_regions_interactive`, which has
+    no ``**kwargs`` and does not take ``_comment``. The other hand-rolled the filter --
+    dropping ``_``-prefixed keys, ``print_info`` and
+    ``output_directory_base_with_given_json`` -- and was one key out of date, so it died
+    on ``require_sky``. Both raised ``TypeError`` on the first line a reader would run.
+
+    The translation belongs to :func:`config_to_pipeline_kwargs`, and this asserts it
+    really does produce something the search accepts. Add a config key that steers the
+    tool rather than the physics and this fails here, which is where it should, instead
+    of in the README.
+    """
+
+    def _presets(self):
+        return sorted(getattr(ss, "CONFIG_PRESETS", {"default": None}))
+
+    def test_every_preset_translates_into_a_callable_signature(self):
+        import inspect
+        sig = inspect.signature(ss.find_grand_regions_interactive)
+        for preset in self._presets():
+            with self.subTest(preset=preset):
+                kwargs = ss.config_to_pipeline_kwargs(ss.default_config(preset),
+                                                      quiet=True)
+                sig.bind(run_output_dir="out", **kwargs)
+
+    def test_the_translation_is_needed(self):
+        """
+        Guards the claim above rather than the code: if a raw config ever *did* bind,
+        the warning in the README would be telling readers to avoid a problem that no
+        longer exists, and this test would be asserting nothing.
+        """
+        import inspect
+        sig = inspect.signature(ss.find_grand_regions_interactive)
+        with self.assertRaises(TypeError):
+            sig.bind(run_output_dir="out", **ss.default_config("arequipa"))
+
+
 class TestTheOptionCountIsNotQuotedFromMemory(unittest.TestCase):
     """
     Three places stated how many options there are, and all three disagreed.

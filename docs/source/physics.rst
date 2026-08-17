@@ -543,8 +543,9 @@ and TAMBO looking 2–5 km across a canyon are not competing for anything.
    This distinction is not academic, and getting it backwards produces a confident
    wrong answer. An early version of the combination summary reasoned about the viewing
    windows as though they were shared constraints, concluded that GRAND and TAMBO
-   "cannot share ground at all", and printed that directly above the 50 km² they
-   demonstrably share. **A summary that reasons can be wrong in ways one that merely
+   "cannot share ground at all", and printed that directly above the ground they
+   demonstrably share — 50 km² as measured then, 619.1 km² as measured now.
+   **A summary that reasons can be wrong in ways one that merely
    restates cannot, and it will be wrong persuasively.**
 
 What was measured

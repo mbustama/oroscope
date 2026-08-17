@@ -167,11 +167,24 @@ Co-locating two arrays
 The search answers *where each experiment could go*. Deployment asks something else:
 **given a site chosen for one, is there enough ground nearby for the other?**
 
-The tempting way to ask is "how much of the joint region can host the partner", and it
-gives the wrong answer. On the unbiased Cajatambo crop the GRAND-viable ground *inside*
-the joint mask is 22,577 fragments, of which exactly **one** is large enough for a single
-1 km lattice cell — while 976 km² of perfectly good GRAND ground lies within 20 km. An
-optimiser pointed at the intersection would call that site impossible.
+The tempting way to ask is "how much of the joint region can host the partner", and it is
+the wrong question even when it happens to give a workable answer.
+
+At TAMBO's old 100 m spacing it gave a spectacularly wrong one. The joint mask on the
+unbiased Cajatambo crop came to 22,577 fragments, of which exactly **one** was large
+enough for a single 1 km lattice cell, while roughly a thousand square kilometres of
+perfectly good GRAND ground lay within 20 km. An optimiser pointed at the intersection
+would have called that site impossible.
+
+**At the published 150 m the trap is much milder, and it is worth saying so rather than
+keeping the better story.** The same crop now gives **91** fragments, of which 52 are
+large enough for that lattice cell, against **1,012.5 km²** of GRAND ground within 20 km.
+A larger closing element stops shattering TAMBO's mask, and the joint stops being
+confetti. The fragment count is the unambiguous part; how many fragments are "large
+enough" depends on what you demand of one, and 52 assumes a single hex cell at 1 km
+spacing.
+
+The question is still the wrong one, though, and for a reason no spacing changes.
 
 **A partner array does not have to stand on the joint mask.** What couples two arrays is
 a shared line of sight to the same massif, not a shared footprint, and GRAND's own targets
@@ -197,7 +210,7 @@ Measured from each region's best TAMBO site, the answer is consistent:
    * - Arequipa
      - 10 km
      - 20 km
-     - 40 km
+     - 60 km
    * - Ancash
      - 10 km
      - 30 km

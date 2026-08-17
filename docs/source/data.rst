@@ -116,7 +116,7 @@ so that runs over them are comparable.
 .. note::
 
    **Regions are bounding boxes and departments are not rectangles.** Boxes overlap —
-   ``ancash`` and ``lima`` share 9,198 km² — and ground found in one may lie
+   ``ancash`` and ``lima`` share 9,139 km² — and ground found in one may lie
    administratively in another. The largest joint patch of the Ancash run reverse-geocodes
    to Cajatambo, **Lima**. File results by box; read them by geography.
 

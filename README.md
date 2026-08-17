@@ -146,12 +146,15 @@ ss.generate_config("arequipa.json", "arequipa")   # write it out
 config = ss.load_config("arequipa.json")          # read one back
 
 config["min_slope_deg"] = 5.0
-results = ss.find_grand_regions_interactive(
-    run_output_dir="output/arequipa",
-    **{k: v for k, v in config.items()
-       if not k.startswith("_")
-       and k not in ("print_info", "output_directory_base_with_given_json")})
+results = ss.run_from_config(config, run_output_dir="output/arequipa")
 ```
+
+A configuration is not quite a call signature — it carries comments, and a few keys that
+steer the tool rather than the physics. `run_from_config` does that translation, and
+`ss.config_to_pipeline_kwargs(config)` does it without running anything if you want to
+see the arguments first. **Do not hand-roll the filter.** This README used to, dropping
+`_`-prefixed keys, `print_info` and `output_directory_base_with_given_json` — and it was
+one key out of date, so the example it recommended raised `TypeError` on `require_sky`.
 
 > **The three sources of defaults agree.** A parameter's default is the same whether you
 > read it off the function signature, off `oroscope --help`, or out of
@@ -242,20 +245,33 @@ oroscope-sensitivity config/tambo_colca_config.json --sweep min_score 0.0 0.2 0.
 they are omitted, and a supplied value that disagrees with it is reported rather than
 silently honoured.
 
-### Output Products
+### What a run writes
 
-By default, all generated output files are saved into a unified run folder located under `../output/`. If you use a JSON config file, the folder is named after the config file. If not, a timestamped folder (e.g., `../output/YYYYMMDD_HHMMSS/`) is automatically generated.
+Everything from one run lands in one directory under `../output/`, named after the
+configuration when there is one and timestamped when there is not. Nothing is scattered,
+because a result is only reproducible if the numbers and what produced them stay
+together.
 
-A complete run will produce the following files inside that directory:
+| file | what it holds |
+| --- | --- |
+| `log.txt` | The whole terminal transcript: resolved settings, memory, per-stage timings. |
+| `explanation.txt` | The run in plain language — what was found, which funnel stage set the size of the answer, what held each site back, and which numbers are assumptions. Written unless `--no_explain`. |
+| `provenance.json` | What produced the numbers: git commit and whether the tree was dirty, the DEM's sha256 and geometry, package versions, the exact command. |
+| `*.json` | The results. Every resolved parameter, the selection funnel, region accounting, per-stage timings, and a record per site. |
+| `*.png` | The annotated map: terrain, RFI exclusion zones, the accepted sites, roads and towns where they were fetched. `--output_image_format` takes `pdf` or `svg` instead. |
+| `*.tif` + `*.tfw` | The mask as a binary raster, `1` deployable, with the world file that georeferences it — drag both into QGIS or ArcGIS. |
+| `*.kml` | Site polygons for Google Earth. Off by default; `--generate_kml` turns it on. |
 
-* **`log.txt`**: A full transcript of the terminal execution, including settings used, memory usage, and runtime.
-* **`explanation.txt`**: The run explained in plain language — what was found, which constraint set the size of the answer, what held each site back, and which numbers are assumptions. Written unless `--no_explain` is given.
-* **`provenance.json`**: What produced the numbers — git commit and working-tree state, the DEM's sha256 and geometry, package versions, and the exact command.
-* **`*.json`**: The results. Every resolved parameter, the **selection funnel** (survivors after each filter), the region accounting, per-stage timings, and a record for each site: area, capacity, facing direction, whether it was `selected`, and 34 aggregated scan observables plus each named score component. Note that `sites` lists everything clearing the thresholds while `total_sites` counts the selection — filter on `selected` before totalling.
-* **`*.png`**: A high-resolution, annotated visualization map displaying the target terrain, overlaid RFI exclusion zones, and color-coded valid array sites. *(Format can be changed to PDF/SVG via parameters).*
-* **`*.tif`**: A binary raster mask where `1` represents valid antenna deployment pixels and `0` is excluded terrain.
-* **`*.tfw`**: An ESRI World File ensuring the `.tif` mask is properly georeferenced when loaded into GIS software (like QGIS or ArcGIS).
-* **`*.kml`**: *(If `--generate_kml` is flagged)* A Google Earth compatible file containing the bounding polygons of all valid sites.
+Each site record carries its area, capacity, facing direction, centre coordinates and
+bounding box, whether it was `selected`, **34 aggregated scan observables** — eleven
+measurements as mean, median and 90th percentile, plus the pixel count they were taken
+over — and each named score component the same way.
+
+> **`sites` is not the answer; the selection is.** `sites` lists everything that cleared
+> the thresholds, while `total_sites` counts what was actually chosen. Summing the list
+> over-reports, which it did: 2 sites and 243.9 km² against a mask holding 1 and 215.7.
+> **Filter on `selected` before totalling**, or call `explain.selected_sites`, which
+> returns the two separately so the distinction is hard to miss.
 
 ---
 
@@ -315,27 +331,52 @@ The four worth knowing before the first run:
 | `--downsample_factor` | The resolution area and sites are measured at. Costs a thin feature more than a blocky one. |
 | `--max_memory_gb` | An address-space cap, and **not the same quantity the estimate reports.** The estimate is anonymous memory; this bounds virtual address space, which on the full Arequipa DEM is 7.80 GiB against a 6.59 GiB resident peak. Sizing the cap from the estimate is how a run dies 25 minutes in. The default is 80% of what is free, which is below what that run needs. |
 
-## 5. Internal Workings: The 6-Step Pipeline
+## 5. How the pipeline works
 
-The script processes terrain logically through six distinct architectural phases.
+Six stages. The vocabulary is introduced properly on
+**[how the search works](https://mbustama.github.io/oroscope/howitworks.html)**; this is
+the implementation.
 
-### Step 1: Disk Setup & Memory Management
+### Step 1: The DEM never fully enters memory
 
-To handle massive DEM files (which can easily exceed 20GB of RAM if loaded natively), the script instantly converts the input `.tif` into a Numpy `.npy` file. It then uses `np.lib.format.open_memmap` to establish "Ping-Pong" buffers (`buffer_A.npy`, `buffer_B.npy`) on the hard drive. All subsequent operations read and write to the disk in chunks, allowing the script to run seamlessly on standard laptops.
+A department-sized DEM would want tens of gigabytes if it were loaded whole, so it is
+not. The `.tif` is converted once to a `.npy` and thereafter reached through
+`np.lib.format.open_memmap`, with two disk-backed buffers — `buffer_A.npy` and
+`buffer_B.npy` — that each stage reads from and writes to in tiles. **The DEM is
+file-backed, so the kernel can evict it under pressure**, which is why the memory
+estimate excludes it: counting it would make every large search look impossible when the
+streaming design exists precisely so that it is not.
 
-The map resolution is read from the DEM's `ModelPixelScaleTag` at this stage and reported in the run banner. Every downstream conversion — slope gradients, ray-tracing step lengths, RFI radii, morphology kernels, grid packing, and the georeferencing of the `.tif`/`.tfw`/`.kml` products — derives from it, so DEMs at resolutions other than 1 arc-second are handled correctly. Pass `--cell_size_deg` to override a DEM whose metadata is missing or wrong.
+Resolution is read from the DEM's `ModelPixelScaleTag` and reported in the run banner.
+Everything downstream derives from it — slope gradients, ray step lengths, RFI radii,
+morphology kernels, grid packing, and the georeferencing of the `.tif`, `.tfw` and `.kml`
+— so a DEM at some other resolution is handled correctly rather than silently
+misinterpreted. `--cell_size_deg` overrides a file whose metadata is missing or wrong.
 
-A geographic (EPSG:4326) DEM has pixels that are square in **degrees**, not in metres: a degree of longitude shrinks as `cos(latitude)`, so a 1 arc-second pixel spans about 30.7 m north-south but only ~29.5 m east-west in southern Peru. The pipeline therefore carries two metric pixel sizes and applies each on its own axis; angular quantities (the world file, KML coordinates, map axes) use the single degree value. The longitude scale is evaluated once at the DEM's centre latitude, which spreads the residual error of ignoring its north-south variation evenly across the map — about ±0.7% over a 3° tall DEM.
+**A geographic DEM has pixels that are square in degrees, not in metres.** A degree of
+longitude shrinks as `cos(latitude)`, so a 1 arc-second pixel is 30.72 m north-south
+everywhere but between 30.51 m and 29.73 m east-west across the bundled regions —
+Arequipa, the most southerly, is the narrowest. The pipeline therefore carries two metric
+pixel sizes and applies each on its own axis, while angular quantities — the world file,
+KML coordinates, map axes — use the single degree value. The longitude scale is evaluated
+once at the DEM's centre latitude, which spreads the residual error of ignoring its
+north-south variation evenly rather than piling it at one edge: about ±0.7% over a DEM
+3° tall.
 
-### Step 2: Topographic Screening
+### Step 2: Screening, the cheap test that runs on every pixel
 
-The code steps through the DEM in defined RAM chunks (configured by `--tile_size`).
+The DEM is walked in tiles sized by `--tile_size`. Per tile: `np.gradient` gives `dy` and
+`dx`, those become slope and aspect, and the terrain is cut by the configured bands —
+slope, altitude, aspect, distance to a road.
 
-1. Uses `np.gradient` to establish raw `dy` and `dx` vectors.
-2. Derives physical `slope` and `aspect` angles using trig arrays.
-3. Filters the terrain by the bounds (`min_slope`, `altitude`, `aspect`, etc.).
-4. Evaluates geographic spatial logic. RFI exclusion zones are tested by real ground distance in metres, using the separate north-south and east-west pixel sizes, so a zone stays a true circle on the ground rather than becoming an ellipse.
-5. Surviving pixels are thinned by `--candidate_stride` (default 5x) and passed forward as raw candidate coordinates.
+**RFI exclusion zones are tested in metres of real ground**, using the two pixel sizes
+separately, so a zone stays a circle on the ground instead of being drawn as an ellipse
+by a pipeline that assumed square pixels.
+
+What survives is thinned by `--candidate_stride`, five by default. That is **cost
+control, not a criterion**: the arrival scan's cost is linear in the candidate count, and
+striding is unbiased in acceptance — measured at 58.414% against 58.415% between strides
+1 and 5. It is not free at the far end, though; see `--candidate_stride` above.
 
 ### Step 3: The arrival scan
 
@@ -363,17 +404,30 @@ point, column depth, horizon, atmospheric depth, Earth chord, far-wall slope —
 then scored. See [the physics](https://mbustama.github.io/oroscope/physics.html) for the
 derivation of each criterion.
 
-### Step 4: Spatial Pruning
+### Step 4: Rebuilding a map from what survived
 
-A single pixel that sees a mountain is useless if a truck cannot deploy an antenna there. The script uses SciPy's morphological kernels (`binary_closing`, `binary_opening`) on the massive memory maps.
+A pixel that sees a mountain is no use if a truck cannot get an antenna onto it, so the
+accepted set is turned back into ground an array could occupy. Two SciPy morphological
+passes run over the memory maps: **closing** fills the holes striding left, and
+**opening** erases tendrils narrower than `min_width_km`.
 
-* **Closing:** Fills in small, unviable gaps (potholes) in otherwise good slopes.
-* **Opening:** Erases narrow, thin ridge lines (tendrils) that do not meet the `min_width_km` requirement.
+**This is where the count rises**, and it is the half of the pipeline most often misread
+as another filter. It is also where the largest correction in the project lives: closing
+inflates the reported area by **2.35×** at Colca, measured against a stride-1 control, so
+a reported area is an upper bound on what the physics accepted. `gap_close_km` sets the
+element, and **it must outrun the gap striding leaves** — at TAMBO's old 100 m spacing it
+did not, and the area came out 4.75× low; at the published 150 m the same penalty is
+1.51×.
 
-### Step 5: Capacity Analysis
+### Step 5: Capacity, counted rather than estimated
 
-The script isolates disconnected sub-arrays using `scipy.ndimage.label`.
-Instead of estimating area, it invokes `count_grid_capacity` which physically simulates dropping bounding boxes in either a staggered `hex` pattern or a strict `square` grid. Sites that cannot fit the `min_sub_array_size` are discarded. Capacity is counted **within each region**, not over its bounding box — which also contains other sites, and inflated the count by 38% on a canyon network.
+Disconnected regions are isolated with `scipy.ndimage.label`, then `count_grid_capacity`
+packs each one for real — dropping detector positions in a staggered `hex` or strict
+`square` grid — rather than dividing an area by a spacing. Regions that cannot hold
+`min_sub_array_size` are dropped.
+
+**Capacity is counted inside each region, not over its bounding box.** A bounding box on
+a canyon network also contains neighbouring sites, which inflated the count by 38%.
 
 Surviving sites are ranked by capacity and selected in that order. With
 `--stop_at_target` selection stops once `target_antennas` is met, so the run reports the
@@ -381,12 +435,15 @@ best sites for the array actually wanted rather than every patch of qualifying g
 Sites that qualified but were not selected stay in the results file, flagged
 `selected: false`.
 
-### Step 6: Output Generation
+### Step 6: Writing it down
 
-Everything is exported into a unified, dynamically generated run directory.
+Everything from the run goes into one directory, listed in full under
+[what a run writes](#what-a-run-writes). The mask leaves as a GeoTIFF with its world
+file, the sites as KML polygons contoured for Google Earth, and the numbers as JSON.
 
-* **GeoTiff:** The final binary mask is saved alongside a `.tfw` (World File), allowing direct drag-and-drop into QGIS/ArcGIS.
-* **KML:** Bounding polygons are extracted using Matplotlib's contour tool and formatted as yellow overlays for Google Earth.
-* **JSON:** Every resolved parameter, the selection funnel, region accounting, per-stage timings, and a full record for each site.
-* **Provenance:** Git commit, DEM checksum, package versions and the command, in their own file so they stay readable beside the science outputs.
-* **Explanation:** The run in plain language, printed and saved. See §2's output list.
+Two of those files exist so that a result can be argued with rather than merely read.
+`provenance.json` records the commit, whether the working tree was dirty, the DEM's
+checksum and the package versions, so a number can be traced to the code that produced
+it. `explanation.txt` says in plain language which funnel stage set the size of the
+answer and which figures are assumptions — because the failure mode for a tool like this
+is not a wrong number, it is a right number read as though it meant more than it does.

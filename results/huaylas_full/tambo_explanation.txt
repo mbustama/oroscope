@@ -8,10 +8,10 @@ THE RUN
   Origin           -8.799861, -78.000139  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 30.5 m E-W
   Layout           distributed search, hex grid, 0.15 km spacing
-  Finished         2026-08-17 04:17:56
-  Code             commit 8c73445 on dev (dirty tree)
+  Finished         2026-08-17 11:13:50
+  Code             commit d03eb6b on dev (dirty tree)
   DEM checksum     sha256 32be99fb9353584e…
-  Command          tools/run_full_dem.py --region huaylas
+  Command          tools/run_full_dem.py --region huaylas --max-memory-gb 7.0
 
 THE HEADLINE
 ------------
@@ -228,14 +228,14 @@ WHICH OF THESE ARE ASSUMPTIONS
   • min_score = 0.35
       A cut on a product of components, whose distribution piles up near
       zero, so any threshold in the middle sits on a cliff. Measured on one
-      search: 0.0, 0.35 and 0.5 gave 45928, 2056 and zero detectors. This is
+      search: 0.0, 0.35 and 0.5 gave 65268, 10437 and zero detectors. This is
       the dominant assumption — prefer --score_percentile.
   • decay_spectral_index = 2, pinned
       The flux slope the decay term is folded against. Capacity varies by
       1.46× across a plausible range.
   • min_target_slope_deg = 25°
       The floor separating a canyon wall from a hillside. Strongly selective:
-      0°, 25° and 35° gave 7442, 2056 and zero detectors.
+      0°, 25° and 35° gave 18622, 10437 and 2814 detectors.
   • max_range_km = unset
       Column depth accumulates over the whole profile walk, which then stops
       at max_dist_km — so the reported depth is a property of where the walk

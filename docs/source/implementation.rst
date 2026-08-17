@@ -98,17 +98,21 @@ Two calibration points, both measured rather than assumed:
      - **7.80 GiB**
    * - Huaylas crop, 11.4 Mpx, ``1 / 1``
      - 3.27 GiB
-     - **5.31 GiB**
-     - **6.51 GiB**
+     - **4.66 GiB**
+     - **5.86 GiB**
 
-Arequipa's pair was re-measured on the post-audit code, sampling ``VmHWM`` and ``VmPeak``
-from ``/proc`` once a second across the process tree. It had read 5.68 GiB RSS with the
-virtual column blank, and a blank there is the dangerous kind of gap: a cap sized from
-the RSS figure is sized from the wrong quantity. Three attempts settled it — a 6.5 GiB
-cap died in the final analysis refusing 69 MiB, a 7.5 GiB cap carried GRAND but lost
-TAMBO's map to ``std::bad_alloc`` in the AGG backend, and 8.0 GiB completed. **The gap
-between the two columns is 1.2 GiB, and that gap is the whole reason the estimate must
-not be used to set the cap.**
+Both pairs were re-measured on the post-audit code, sampling ``VmHWM`` and ``VmPeak``
+from ``/proc`` once a second across the process tree, so the table is one vintage.
+Arequipa had read 5.68 GiB RSS with the virtual column blank, and a blank there is the
+dangerous kind of gap: a cap sized from the RSS figure is sized from the wrong quantity.
+Three attempts settled it — a 6.5 GiB cap died in the final analysis refusing 69 MiB, a
+7.5 GiB cap carried GRAND but lost TAMBO's map to ``std::bad_alloc`` in the AGG backend,
+and 8.0 GiB completed. **The gap between the two columns is 1.2 GiB, and that gap is the
+whole reason the estimate must not be used to set the cap.**
+
+Huaylas moved the other way, 5.31 → 4.66 GiB resident, which is the combination's
+modelled memory getting 0.65 GiB cheaper. Measurements age in both directions, and
+neither direction is safe to assume.
 
 The estimator is calibrated on a *strided* run and is roughly **2× optimistic at
 candidate_stride 1**. Treat it as a lower bound and size a cap from measurement when the

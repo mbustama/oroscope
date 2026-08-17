@@ -14,8 +14,8 @@ link to where it is explained and where it bites.
       least one direction. Where a score cut is in force a second row follows it
       (``score >= 0.35``, or ``score in top 25%``), and *that* is the count the reported
       sites, area and capacity were built from. Quoting the geometric row beside them
-      overstates acceptance badly: at TAMBO Arequipa it reads 63% where the run kept
-      9.7%.
+      overstates acceptance badly: at TAMBO Arequipa it reads 62.0% where the run kept
+      7.3%.
 
       **Read it by stage name, never by position** — a run with :term:`RFI zones`
       carries an extra funnel row, so the same index means different things in two
@@ -59,7 +59,7 @@ link to where it is explained and where it bites.
       experiments accept, because what couples them is a shared line of sight to the same
       massif rather than a shared footprint. Measured across three regions, a GRAND array
       of 100 antennas fits within ~10 km of the best TAMBO site, 1,000 within 20–30 km and
-      5,000 within 40–60 km. :func:`~oroscope.combine_experiments.colocation_capacity`
+      5,000 within 60 km. :func:`~oroscope.combine_experiments.colocation_capacity`
       and :func:`~oroscope.combine_experiments.smallest_radius_for`.
 
    column depth
@@ -89,9 +89,11 @@ link to where it is explained and where it bites.
 
    joint region
       Ground accepted by two experiments at once, so a single site could host both. Its
-      size relative to the smaller experiment's mask is near-constant across regions —
-      about 73% at unbiased sampling, about 44% at ``4 / 5``, and **the two must never be
-      mixed**. See :doc:`notebooks` (notebook 11).
+      size relative to the smaller experiment's mask holds a narrow range across terrain
+      that could hardly differ more — **76–79% at unbiased sampling and 56–60% at**
+      ``4 / 5`` — and **the two must never be mixed**: the strided figure is an artefact
+      of a fragmented mask, not a property of the ground. It is a range set by array
+      design rather than a constant. See :doc:`notebooks` (notebook 11).
 
    min score
       ``min_score``. The cut applied to the composed score. The dominant assumption in

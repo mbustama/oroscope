@@ -30,8 +30,21 @@ import _support  # noqa: F401  (path setup)
 # and under the repository root when run by hand -- passing locally and failing in CI,
 # which is exactly what happened. Build the path from the module's own __file__, as the
 # aperture examples do, or write an example that needs no file at all.
+# combine_experiments, figures and fetch_roads were added after 41 of their examples
+# turned out never to have been executed, and two of them were wrong: geographic_extent
+# documented a bottom edge of -16.005 where the code returns -15.995, which would make
+# a 100-row raster of 0.01 degree pixels 1.01 degrees tall, and canyon_geometry expected
+# `7.6` from a value NumPy 2 reprs as `np.float64(7.6)`. Both are published in the API
+# reference, and both had been read many times without being run.
+#
+# figures is here despite building plots: its examples assert on figure *structure* --
+# axis counts, figure widths -- which needs no display, and `_support` has already
+# forced MPLBACKEND to Agg by the time these import. Only the modules whose examples
+# genuinely cannot run headless stay out.
 DOCTESTED = ("oroscope.physics", "oroscope.scoring", "oroscope.arrival_scan",
-             "oroscope.aperture", "oroscope.explain", "oroscope.site_searcher")
+             "oroscope.aperture", "oroscope.explain", "oroscope.site_searcher",
+             "oroscope.combine_experiments", "oroscope.figures",
+             "oroscope.fetch_roads")
 
 OPTIONS = doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
 

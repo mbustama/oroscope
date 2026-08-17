@@ -1,5 +1,5 @@
 {
-    "timestamp": "2026-08-17T04:17:56.874400",
+    "timestamp": "2026-08-17T11:13:50.233181",
     "mode": "distributed",
     "parameters": {
         "dem": "/home/mbustamante/Research/GRAND/oroscope/input/dem/huaylas.tif",
@@ -2403,11 +2403,11 @@
         "capacity_threshold_antennas": 250
     },
     "timings_sec": {
-        "load_dem": 0.00031495094299316406,
-        "topographic_screen": 0.4792823791503906,
-        "ray_tracing": 75.95298051834106,
-        "morphology": 0.5988905429840088,
-        "capacity_analysis": 1.427375316619873
+        "load_dem": 0.0004668235778808594,
+        "topographic_screen": 0.544273853302002,
+        "ray_tracing": 94.98012566566467,
+        "morphology": 0.3776428699493408,
+        "capacity_analysis": 1.7753417491912842
     },
     "aperture": {
         "energies_pev": [
