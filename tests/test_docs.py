@@ -402,6 +402,30 @@ class TestTheDocumentedPublicSurfaceIsReal(unittest.TestCase):
                 with self.subTest(module=mod, name=name):
                     self.assertTrue(hasattr(m, name))
 
+    def test_the_package_re_exports_all_of_physics(self):
+        """
+        ``physics`` is re-exported whole, and it had a hole in it.
+
+        The front door is *curated*, not exhaustive -- ``site_searcher`` keeps
+        ``WATER_COLOUR`` and ``AREQUIPA_SETTLEMENTS`` to itself, and rightly. But
+        ``physics`` is offered entire, and the hand-maintained import list had picked up
+        every function while missing every constant: ``NC_TO_CC_RATIO``,
+        ``NC_INELASTICITY`` and ``DEFAULT_MUON_SHIELDING_KM``. So ``import oroscope``
+        could compute a muon shielding depth and not offer the thickness to compute it
+        at.
+
+        Asserted for physics alone, because that is where "all of it" is the actual
+        rule. Claiming it for every module would fail on sixteen names that are kept
+        back deliberately, and a test that has to be argued with is one that gets
+        deleted.
+        """
+        from oroscope import physics
+
+        import oroscope
+        missing = [n for n in physics.__all__ if not hasattr(oroscope, n)]
+        self.assertEqual(missing, [],
+                         f"physics.__all__ offers names the package does not: {missing}")
+
     def test_every_figure_builder_is_exported(self):
         """
         The other direction, which is the one that actually broke.

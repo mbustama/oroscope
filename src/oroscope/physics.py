@@ -27,6 +27,9 @@ __all__ = [
     "air_density_kgm3", "slant_grammage_gcm2", "shower_maturity",
     "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
+    # Exported beside the function that consumes it. It was reachable only by reading
+    # the source, which for a sourced physical value is the wrong place to keep it.
+    "DEFAULT_MUON_SHIELDING_KM",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
     "nc_regeneration_factor", "NC_TO_CC_RATIO", "NC_INELASTICITY",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
@@ -53,10 +56,11 @@ X_MAX_GCM2 = 700.0
 EARTH_RADIUS_M = 6.371e6
 CRUST_DENSITY_GCM3 = 2.65
 
-# Tau energy loss in rock: dE/dX = -(a + bE), with b the term that matters at these
-# energies. Values in the literature span roughly 0.4-1.0e-6 cm^2/g and are themselves
-# energy-dependent, so this is the least certain number here.
-TAU_ENERGY_LOSS_B_CM2G = 0.5e-6
+# Tau energy loss in rock, dE/dX = -(a + bE), lives further down as BETA_REFERENCE_CM2G
+# and the _TAU_BETA settings around it. A second constant sat here holding 0.5e-6 for the
+# same quantity, used by nothing and contradicting the 0.6e-6 that is actually in force
+# and documented -- a stale duplicate at the top of the file, where a reader looks first.
+# Removed before the first release, while removing it was still free.
 
 KGM2_TO_GCM2 = 0.1
 
@@ -610,8 +614,11 @@ def muon_shielding_gcm2(thickness_km: float,
     Examples
     --------
     >>> from oroscope import physics
-    >>> f"{physics.muon_shielding_gcm2(4.0):.2e}"
+    >>> f"{physics.muon_shielding_gcm2(physics.DEFAULT_MUON_SHIELDING_KM):.2e}"
     '1.06e+06'
+
+    Through the constant rather than a literal ``4.0``: the thickness is a sourced
+    number, and this function was exported while the answer to "how thick?" was not.
     """
     return thickness_km * 1000.0 * 100.0 * density_gcm3
 

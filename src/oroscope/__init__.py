@@ -118,6 +118,12 @@ from oroscope.physics import (  # noqa: F401
     set_declination_model, declination_model, declination_from_grid,
     geomagnetic_sin_alpha, refractivity, cherenkov_angle_rad,
     cherenkov_footprint_radius_m, footprint_sampling,
+    # The constants, which this hand-maintained list had simply never picked up: every
+    # physics *function* was here and none of the values they are asked about were, so
+    # `import oroscope` could compute a muon shielding depth without offering the
+    # thickness to compute it at. A test now holds the front door to every submodule's
+    # __all__, so the next name added to one cannot be missed here.
+    NC_TO_CC_RATIO, NC_INELASTICITY, DEFAULT_MUON_SHIELDING_KM,
 )
 
 # --- the scan kernel
@@ -181,6 +187,7 @@ __all__ = [
     "shower_maximum_gcm2", "shower_size_fraction", "grammage_band_from_energy",
     "earth_chord_m", "earth_chord_gcm2", "neutrino_survival", "muon_shielding_gcm2",
     "nc_regeneration_factor",
+    "NC_TO_CC_RATIO", "NC_INELASTICITY", "DEFAULT_MUON_SHIELDING_KM",
     "tau_decay_length_m", "cc_cross_section_cm2", "neutrino_interaction_length_gcm2",
     "tau_energy_loss_beta", "tau_range_gcm2", "tau_survival", "tau_exit_probability",
     "set_tau_energy_loss", "restore_tau_energy_loss", "tau_energy_loss_settings",
