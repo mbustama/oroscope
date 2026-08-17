@@ -3799,7 +3799,16 @@ def default_config(preset="default"):
         config['origin_lon'] = ORIGIN_LON_LIMA
         config['rfi_zones'] = 'lima'
         config['region_name'] = 'Lima, Peru'
-        config['dem_path'] = 'lima_AW3D30.tif'
+        # SRTMGL1, matching what `oroscope-fetch-dem --region lima` actually downloads.
+        # This line said `lima_AW3D30.tif` long after the switch: Lima was re-fetched as
+        # SRTMGL1 so that the three department runs share a dataset -- otherwise a
+        # difference between regions could be the instrument rather than the ground --
+        # and REGIONS, the shipped configs and the CLI page were all updated while this
+        # one was missed. It survived because `lima_AW3D30.tif` is still on the machine
+        # the switch was made on, so nothing here failed; a user following
+        # `--generate_config --config_preset lima` got a path to a file this tool will
+        # never fetch for them.
+        config['dem_path'] = 'lima_SRTMGL1.tif'
     elif preset == 'arequipa':
         config['origin_lat'] = ORIGIN_LAT_AREQUIPA
         config['origin_lon'] = ORIGIN_LON_AREQUIPA

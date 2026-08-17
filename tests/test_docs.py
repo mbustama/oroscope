@@ -50,6 +50,30 @@ def read(*parts):
         return f.read()
 
 
+class TestAPresetNamesTheDemTheFetcherActuallyGets(unittest.TestCase):
+    """
+    A preset that names a DEM the downloader will never produce is a dangling path.
+
+    ``--generate_config --config_preset lima`` wrote ``lima_AW3D30.tif`` long after Lima
+    was re-fetched as SRTMGL1 so the three departments would share a dataset. REGIONS,
+    the shipped configs and the CLI page were all updated; this one line was not, and it
+    went unnoticed because the old file is still present on the machine where the switch
+    was made. Following the documented flow on a clean machine gave a config pointing at
+    a file ``oroscope-fetch-dem`` does not fetch.
+    """
+
+    def test_each_region_preset_matches_its_fetch_filename(self):
+        import os
+
+        from oroscope.fetch_dem import REGIONS
+        for preset in ss.CONFIG_PRESETS:
+            if preset not in REGIONS:
+                continue                      # "default" names no region
+            with self.subTest(preset=preset):
+                named = os.path.basename(ss.default_config(preset)["dem_path"])
+                self.assertEqual(named, REGIONS[preset]["filename"])
+
+
 class TestAConfigCanBeHandedToTheSearch(unittest.TestCase):
     """
     A configuration is not a call signature, and the gap is where documented examples rot.

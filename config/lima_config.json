@@ -1,5 +1,5 @@
 {
-    "dem_path": "../input/dem/lima_AW3D30.tif",
+    "dem_path": "../input/dem/lima_SRTMGL1.tif",
     "origin_lat": -10.228479499469358,
     "origin_lon": -78.07665824890137,
     "target_antennas": 10000,
