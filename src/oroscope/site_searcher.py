@@ -3164,11 +3164,16 @@ def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
     >>> ss.warn_stride_outruns_closing(5, 30.72, None, 1.0, quiet=True) is None
     True
 
-    TAMBO's 100 m element does not, and that is the 4.75x:
+    TAMBO's element does not -- not at the old 100 m and not at the published 150 m
+    either, which is why striding costs it so much area:
+
+    >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.15, quiet=True)
+    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
+    (154, 150, 1.02)
 
     >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.1, quiet=True)
-    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
-    (154, 100, 1.54)
+    >>> round(r["ratio"], 2)
+    1.54
 
     Closing disabled entirely is not this failure, so it does not warn:
 

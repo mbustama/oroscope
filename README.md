@@ -102,14 +102,14 @@ That installs the dependencies and five console scripts: `oroscope`,
 
 ### Automated Conda Environment Generation:
 
-Instead of installing packages manually, you can use the included `generate_env.py` script. This tool parses the main script using Python's Abstract Syntax Tree (AST) to securely identify all required third-party dependencies, checks what is missing from your active environment, and generates a clean, `conda-forge` prioritized `environment.yml` file.
+Instead of installing packages manually, you can use the included `oroscope.generate_env` module. It parses the package's sources with Python's Abstract Syntax Tree (AST) to securely identify all required third-party dependencies, checks what is missing from your active environment, and generates a clean, `conda-forge` prioritized `environment.yml` file.
 
 **Usage:**
 
 ```bash
 # Generate environment.yml from what the code actually imports.
-# Run from src/: it reads site_searcher.py in the working directory.
-cd src && python generate_env.py
+# Run from the repository root; it walks the package with `ast`.
+python -m oroscope.generate_env
 
 # Create the new Conda environment from the generated file
 conda env create -f environment.yml

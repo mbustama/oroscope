@@ -118,9 +118,12 @@ def saturating_score(x: float | np.ndarray, half_value: float) -> np.ndarray:
         Value or values to score. Negative values are clipped to zero.
     half_value : float
         Value scoring 0.5. Choosing it far below the range actually observed saturates
-        the term so that it stops discriminating, which is a real failure mode: the
-        0.05 sr default suits GRAND and flattens completely against a canyon's
-        0.2-1.5 sr.
+        the term so that it stops discriminating, which is a real failure mode: a
+        GRAND-scale value flattens completely against a canyon, which sees several times
+        the sky. Note this function takes a bare number and does not care what it
+        measures -- :func:`score_candidates` feeds it the *fraction* of available sky
+        for exactly that reason, since an absolute in steradians silently encodes the
+        azimuth fan and the arrival window.
 
     Returns
     -------

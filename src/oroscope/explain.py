@@ -312,7 +312,7 @@ def site_strengths(arrival_scan, statistic="p50", threshold=0.75):
 
     The mirror of :func:`weakest_component`, and the more useful half when a site has
     been *selected*. "Site 3555 scored 0.55" says nothing a reader can act on; "it sees
-    1.08 sr of usable sky across a 3.1 km gap with 780,000 g/cm² of rock behind it, and
+    0.36 sr of usable sky across a 3.1 km gap with 780,000 g/cm² of rock behind it, and
     every criterion but the accepted solid angle is satisfied outright" says what the
     ground is actually like.
 

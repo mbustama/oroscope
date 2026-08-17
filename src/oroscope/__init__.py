@@ -77,6 +77,7 @@ from oroscope.site_searcher import (  # noqa: F401
     # the stride/closing interaction, which decides whether an area is a lower bound
     stride_gap_m, closing_element_m, warn_stride_outruns_closing, add_scale_bar,
     add_roads, ROAD_WIDTHS, ROAD_COLOUR,
+    add_settlements, resolve_settlements, attach_colorbar,
     altitude_limits, add_north_arrow,
     # geometry and the DEM
     resolve_grid_geometry, read_dem_geometry, read_dem_origin, resolve_origin,
@@ -160,6 +161,7 @@ __all__ = [
     "altitude_limits", "add_north_arrow",
     "resolve_grid_geometry", "read_dem_geometry", "read_dem_origin", "resolve_origin",
     "add_roads", "ROAD_WIDTHS", "ROAD_COLOUR",
+    "add_settlements", "resolve_settlements", "attach_colorbar",
     "build_elevation_cache", "load_dem_and_init_buffers", "MapGrid",
     "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
     "slope_baseline_pixels", "get_candidates_chunked",
