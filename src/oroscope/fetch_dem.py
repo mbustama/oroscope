@@ -80,7 +80,13 @@ class Icon:
 # ==========================================
 #             TARGET REGIONS
 # ==========================================
-# Defined as (West, East, South, North)
+#: The regions ``oroscope-fetch-dem --region`` knows, each mapping to its dataset and
+#: its bounding box in degrees. A ``#:`` comment rather than a plain one so that autodoc
+#: picks it up: :doc:`data` cross-references this name, and module-level data with only
+#: an ordinary comment above it is documented nowhere, leaving the reference to render
+#: as unlinked text.
+#:
+#: Bounds are given as (West, East, South, North).
 REGIONS = {
     # SRTMGL1, not the AW3D30 this used to fetch. The department runs are compared
     # against one another and a dataset difference would sit inside every comparison as
@@ -153,7 +159,27 @@ class TqdmUpTo(tqdm):
         self.update(b * bsize - self.n)
 
 def download_dem(region_name, bounds, api_key, output_dir):
-    """Constructs the API request and downloads the GTiff file."""
+    """
+    Fetches one region's GeoTIFF from OpenTopography.
+
+    Parameters
+    ----------
+    region_name : str
+        A key of :data:`REGIONS`, naming the box and dataset to fetch.
+    bounds : dict
+        That region's entry: ``demtype`` and the ``south``/``north``/``west``/``east``
+        bounds in degrees, plus the ``filename`` to write.
+    api_key : str
+        An OpenTopography key. Free, from
+        https://portal.opentopography.org/myopentopo.
+    output_dir : str
+        Directory to write the ``.tif`` into. Created if absent.
+
+    Returns
+    -------
+    str or None
+        The path written, or ``None`` if the request failed.
+    """
     url = (f"https://portal.opentopography.org/API/globaldem"
            f"?demtype={bounds['demtype']}"
            f"&south={bounds['south']}"

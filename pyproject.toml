@@ -50,7 +50,14 @@ classifiers = [
 #              codec to imagecodecs. Without it a real DEM fails to decode, which is
 #              exactly the kind of dependency that is easy to omit and hard to debug.
 #   scipy      morphology and connected-component labelling
-#   matplotlib the overview maps, and the KML contours are extracted from its paths
+#   matplotlib the overview maps, and the KML contours are extracted from its paths;
+#              mpl_toolkits, used for the map insets, ships inside it rather than
+#              separately, so it needs no entry of its own
+#   numpy      every array in the pipeline
+#   tqdm       the progress bars on the topographic scan and the DEM download
+#
+# psutil is deliberately NOT here: it only prints RAM diagnostics, site_searcher guards
+# its import, and it lives in the `diagnostics` extra instead.
 dependencies = [
     "numpy",
     "scipy",
@@ -66,9 +73,11 @@ dependencies = [
 # genuinely optional rather than a dependency someone forgot to declare.
 diagnostics = ["psutil"]
 test = ["pytest", "coverage", "pytest-cov"]
-# Must stay in step with docs/requirements.txt, which is what the documentation build
-# actually installs. jupyter-sphinx executes the narrative blocks at build time, so the
-# kernel and everything those blocks import belong here too, not only Sphinx itself.
+# This is the single list: docs/requirements.txt is one line, `-e .[docs]`, so the two
+# cannot drift apart and there is nothing to keep in step. (It used to be a duplicate
+# list, which is what the instruction to keep them in step was for.) jupyter-sphinx
+# executes the narrative blocks at build time, so the kernel and everything those blocks
+# import belong here too, not only Sphinx itself.
 docs = ["sphinx", "sphinx-rtd-theme", "sphinx-copybutton",
         "sphinxcontrib-bibtex", "numpydoc", "myst-parser",
         "jupyter-sphinx", "ipykernel", "matplotlib", "scipy"]

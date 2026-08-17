@@ -88,3 +88,17 @@ be restyled and reused.
 
 .. automodule:: oroscope.figures
    :members:
+
+
+Fetching data
+-------------
+
+The one-shot tools that bring a region's inputs onto disk are setup rather than library,
+which is why ``import oroscope`` does not re-export them and why their command-line side
+is documented on :doc:`cli` instead. Only the names other pages link into are listed
+here: :data:`oroscope.fetch_dem.REGIONS` is cross-referenced from :doc:`data`, and a
+cross-reference with no target renders as plain text rather than failing the build, so it
+sat there unresolved and unnoticed.
+
+.. automodule:: oroscope.fetch_dem
+   :members: REGIONS, download_dem, generate_and_patch_config

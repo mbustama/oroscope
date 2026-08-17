@@ -2255,6 +2255,28 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
 
     except Exception as e:
         print(f"      {C.FAIL}{Icon.CROSS}Viz Error: {e}{C.RESET}")
+        # Swallowing this is right -- a map that will not render is not a reason to
+        # throw away a search that already succeeded -- but it produces the one failure
+        # mode that looks like success. The run exits 0 with correct numbers, and if an
+        # earlier run left an image at the same path it stays there, dated whenever it
+        # was written, beside results dated now. That is exactly what happened to the
+        # full Arequipa TAMBO map under too small an address-space cap: the numbers were
+        # current, the PNG was the previous day's, and the notebook that displays it
+        # would have published the pair as though they matched.
+        #
+        # Nothing is deleted here: removing a file because an unrelated step failed is
+        # worse than leaving it. But it is named, so the mismatch is reported by the run
+        # that caused it rather than found later by comparing timestamps.
+        try:
+            stale = os.path.join(run_output_dir,
+                                 base_filename + "." + output_image_format.strip('.'))
+            if os.path.exists(stale):
+                when = datetime.fromtimestamp(os.path.getmtime(stale))
+                print(f"      {C.WARN}{Icon.WARN}{os.path.basename(stale)} is still "
+                      f"present from {when:%Y-%m-%d %H:%M} and was NOT written by this "
+                      f"run. Do not read it as this run's map.{C.RESET}")
+        except Exception:                                # pragma: no cover - defensive
+            pass
     finally:
         # pyplot holds a global reference to every figure it creates, so one that is
         # never closed can never be collected. A single search does not notice; a
