@@ -50,6 +50,30 @@ def read(*parts):
         return f.read()
 
 
+class TestTheOptionCountIsNotQuotedFromMemory(unittest.TestCase):
+    """
+    Three places stated how many options there are, and all three disagreed.
+
+    The README said 93, ``cli.rst`` said 82 and the parser had 87. The existing tests
+    compare the *names* in ``cli.rst`` against the parser, which is the check that
+    matters and which passed throughout -- a count is a separate claim, and nothing
+    read it. So the page could document every flag correctly while announcing the wrong
+    total, and the README could be six behind with no test noticing either.
+    """
+
+    def test_the_cli_page_states_the_real_count(self):
+        n = len(cli_flags())
+        page = read("docs", "source", "cli.rst")
+        self.assertIn(f"accepts {n} options", page,
+                      f"cli.rst does not say it accepts {n} options")
+        self.assertIn(f"Every option ({n} of them)", page)
+
+    def test_the_readme_states_the_real_count(self):
+        n = len(cli_flags())
+        self.assertIn(f"There are {n} of them", read("README.md"),
+                      f"README.md does not say there are {n} options")
+
+
 class TestTheVersionIsOneNumber(unittest.TestCase):
     """
     The version is written twice, and nothing checked that the two agreed.

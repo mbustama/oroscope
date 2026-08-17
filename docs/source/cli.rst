@@ -461,7 +461,7 @@ than ~100 m is reported rather than silently honoured.
 Every option, in full
 ---------------------
 
-The search accepts 82 options. Every one is also a parameter of
+The search accepts 87 options. Every one is also a parameter of
 ``oroscope.find_grand_regions_interactive`` under the same name, except the five
 negative-form flags — ``--require_sky``, ``--nearest_sampling``, ``--no_geomagnetic``,
 ``--include_near_field``, ``--no_print_info``, ``--no_explain`` — whose positive forms
@@ -471,7 +471,7 @@ negative-form flags — ``--require_sky``, ``--nearest_sampling``, ``--no_geomag
 Generated from the parser, so it cannot drift from the code: a test asserts that every
 option below exists and that every option that exists appears below.
 
-.. list-table:: Every option (82 of them)
+.. list-table:: Every option (87 of them)
    :header-rows: 1
    :widths: 26 14 14 46
 

@@ -20,9 +20,7 @@
 **Terrain site search for particle-astrophysics observatories.** Greek *oros*, mountain,
 and *skopein*, to look at.
 
-> Several of these badges are not live yet: coverage is not uploaded, the package is not
-> on PyPI, and the documentation is not deployed to Pages. They are in place so that
-> turning each of those on needs no edit here.
+> Coverage is not uploaded yet, so that badge stays grey until it is. The rest are live.
 
 Oroscope searches digital elevation models for ground that can host an observatory. It
 answers one structural question — *from this patch of ground, is there a target surface
@@ -41,11 +39,10 @@ pip install oroscope
 ```
 
 ```python
-from oroscope import site_searcher as ss, explain
+from oroscope import site_searcher as ss
 
-results = ss.find_grand_regions_interactive(
-    dem_path="input/dem/colca.tif", run_output_dir="output/colca",
-    **ss.load_config("config/grand_colca_config.json"))
+results = ss.run_from_config("config/grand_colca_config.json",
+                             run_output_dir="output/colca")
 
 print(results["explanation"])       # what was found, and why
 ```
@@ -107,7 +104,7 @@ what each bundled DEM covers.
 
 ---
 
-## 3. Quick-Start Guide
+## 2. Quick-Start Guide
 
 **Everything below can be done from Python, and that is the recommended way in.** The
 command line is a thin wrapper over the same functions — argument parsing and file
@@ -214,7 +211,9 @@ print(report["estimate_gb"], report["available_gb"])
 ```
 
 The estimate is what decides `downsample_factor` and `candidate_stride`: the full
-Arequipa DEM needs 7.2 GiB at 1 and 5.1 GiB at 4. Downsampling helps less than it looks —
+Arequipa DEM is estimated at 7.2 GiB at 1 and 5.1 GiB at 4, against a measured **6.59 GiB
+resident and 7.80 GiB of address space** at 4 — so read the estimate as a floor, and see
+`--max_memory_gb` below before sizing a cap from it. Downsampling helps less than it looks —
 it scales the labelling arrays as its inverse square but not the candidates, which are
 taken on the native grid and dominate at this scale, so `candidate_stride` is the lever
 on the larger term. Passing
@@ -260,7 +259,7 @@ A complete run will produce the following files inside that directory:
 
 ---
 
-## 3b. Development
+## 3. Development
 
 The suite is standard-library `unittest` only, so it runs anywhere the tool does.
 Terrain fixtures are synthetic with analytically known slope, aspect, target distance
@@ -275,7 +274,7 @@ results, regenerate the golden files with `UPDATE_GOLDEN=1`.
 
 **[Implementation notes →](https://mbustama.github.io/oroscope/implementation.html)**
 for the benchmark harness, coverage of the Numba kernels, and the failure modes worth
-knowing about. [docs/ROADMAP.md](docs/ROADMAP.md) carries the development plan and every
+knowing about. [docs/ROADMAP.md](https://github.com/mbustama/oroscope/blob/main/docs/ROADMAP.md) carries the development plan and every
 measurement behind the current criteria.
 
 ---
@@ -301,7 +300,7 @@ more than ~100 m is reported rather than silently honoured.
 
 ### The options
 
-There are 93 of them, and the complete reference — every flag with its type, default and
+There are 87 of them, and the complete reference — every flag with its type, default and
 what it does — lives on the **[CLI page](https://mbustama.github.io/oroscope/cli.html)**.
 It is generated against the parser and a test fails if the two drift, which a copy here
 could not promise: this README carried its own table until it had quietly fallen ten
@@ -314,7 +313,7 @@ The four worth knowing before the first run:
 | `--config_path` | The configuration to run. Everything else has a default; an explicitly typed option beats the file. |
 | `--candidate_stride` | The memory and time lever. Unbiased in acceptance, but it costs area unless the closing element outruns the gap it leaves. |
 | `--downsample_factor` | The resolution area and sites are measured at. Costs a thin feature more than a blocky one. |
-| `--max_memory_gb` | An address-space cap. Leave it unset for 80% of what is free; a search that reaches the OOM killer takes the session with it. |
+| `--max_memory_gb` | An address-space cap, and **not the same quantity the estimate reports.** The estimate is anonymous memory; this bounds virtual address space, which on the full Arequipa DEM is 7.80 GiB against a 6.59 GiB resident peak. Sizing the cap from the estimate is how a run dies 25 minutes in. The default is 80% of what is free, which is below what that run needs. |
 
 ## 5. Internal Workings: The 6-Step Pipeline
 
@@ -390,4 +389,4 @@ Everything is exported into a unified, dynamically generated run directory.
 * **KML:** Bounding polygons are extracted using Matplotlib's contour tool and formatted as yellow overlays for Google Earth.
 * **JSON:** Every resolved parameter, the selection funnel, region accounting, per-stage timings, and a full record for each site.
 * **Provenance:** Git commit, DEM checksum, package versions and the command, in their own file so they stay readable beside the science outputs.
-* **Explanation:** The run in plain language, printed and saved. See §3's output list.
+* **Explanation:** The run in plain language, printed and saved. See §2's output list.
