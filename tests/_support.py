@@ -1,10 +1,12 @@
 """
 Shared test scaffolding.
 
-The searcher is still a standalone script rather than an installed package
-(packaging is phase 4), so tests put ``src/`` on the path themselves. Matplotlib is
-forced to a headless backend before the import, since importing the searcher pulls in
-pyplot.
+Tests put ``src/`` on the path themselves rather than relying on an install, so the
+suite runs against the working tree in a bare clone — which is also what makes
+``pip install -e .`` optional for running it. Matplotlib is forced to a headless
+backend before the import, since importing the searcher pulls in pyplot; CI separately
+asserts that importing ``oroscope`` does not change a caller's backend, which is the
+package's side of the same rule.
 """
 
 import contextlib

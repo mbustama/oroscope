@@ -8,10 +8,10 @@ THE RUN
   Origin           -8.799861, -78.000139  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 30.5 m E-W
   Layout           distributed search, hex grid, 1.0 km spacing
-  Finished         2026-08-17 04:16:28
-  Code             commit 8c73445 on dev (dirty tree)
+  Finished         2026-08-17 11:12:05
+  Code             commit d03eb6b on dev (dirty tree)
   DEM checksum     sha256 32be99fb9353584e…
-  Command          tools/run_full_dem.py --region huaylas
+  Command          tools/run_full_dem.py --region huaylas --max-memory-gb 7.0
 
 THE HEADLINE
 ------------

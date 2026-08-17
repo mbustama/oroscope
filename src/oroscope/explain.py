@@ -1003,7 +1003,7 @@ def _section_assumptions(results):
         items.append(("min_score", f"{min_score:g}",
                       "A cut on a product of components, whose distribution piles up "
                       "near zero, so any threshold in the middle sits on a cliff. "
-                      "Measured on one search: 0.0, 0.35 and 0.5 gave 45928, 2056 and "
+                      "Measured on one search: 0.0, 0.35 and 0.5 gave 65268, 10437 and "
                       "zero detectors. This is the dominant assumption — prefer "
                       "--score_percentile."))
 
@@ -1026,7 +1026,8 @@ def _section_assumptions(results):
     if slope is not None:
         items.append(("min_target_slope_deg", f"{slope:g}°",
                       "The floor separating a canyon wall from a hillside. Strongly "
-                      "selective: 0°, 25° and 35° gave 7442, 2056 and zero detectors."))
+                      "selective: 0°, 25° and 35° gave 18622, 10437 and 2814 "
+                      "detectors."))
 
     frac = params.get("grammage_band_fraction")
     if frac is not None:

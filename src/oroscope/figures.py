@@ -27,7 +27,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
 
-__all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower"]
+# Every figure builder belongs here, because `automodule :members:` publishes from
+# `__all__`: a builder left out is drawn on the documentation and then absent from the
+# API reference that is supposed to describe it. The last three were added by a docs
+# commit that did not think to touch this list, and were missing from the reference for
+# exactly that reason.
+__all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower",
+           "pipeline_stages", "striding_and_closing", "score_composition"]
 
 # House style for anything a reader sees on a figure: **the first word of every axis
 # label, title, legend entry and annotation is capitalised.** Applies to the notebooks
@@ -239,7 +245,7 @@ def canyon_geometry(depth_m=1500.0, floor_width_m=1000.0, wall_slope_deg=40.6,
     --------
     >>> from oroscope import figures
     >>> fig = figures.canyon_geometry()
-    >>> round(fig.get_figwidth(), 1)
+    >>> round(float(fig.get_figwidth()), 1)
     7.6
     """
     run = depth_m / np.tan(np.radians(wall_slope_deg))
@@ -481,9 +487,11 @@ def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
     reappears almost intact.
 
     The transition is **at** the gap and it is abrupt, not gradual. That is the whole
-    content of the figure, and it is the mechanism behind a real 4.75x under-report of
-    TAMBO's area --- and a 291x one on steeper ground, where the accepted strips are
-    narrower still.
+    content of the figure, and it is the mechanism behind a real 1.51x under-report of
+    TAMBO's area at Colca --- and a 23.0x one on the steeper ground of the Callejon de
+    Huaylas, where the accepted strips are narrower still. Both were far larger at
+    TAMBO's old 100 m element, 4.75x and 291x, which is the cliff drawn here: 100 m is
+    three pixels against a five-pixel gap and 150 m is five.
 
     Parameters
     ----------

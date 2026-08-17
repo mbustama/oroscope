@@ -217,7 +217,7 @@ def compose(components: dict[str, np.ndarray], mode: str = "product",
     -----
     A product of several components each in [0, 1] concentrates near zero, so a
     threshold on the result sits on a cliff. Measured on a real search, a score cut of
-    0.0, 0.35 and 0.5 gave 45928, 2056 and 0 detector positions. Prefer ranking sites
+    0.0, 0.35 and 0.5 gave 65268, 10437 and 0 detector positions. Prefer ranking sites
     over thresholding a product.
 
     A weight naming a component that is not here used to be dropped in silence, by an

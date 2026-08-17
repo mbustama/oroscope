@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-08-17T04:16:28.797770",
+    "timestamp": "2026-08-17T11:12:06.007411",
     "git": {
-        "commit": "8c73445718d1dc3b2432822ed9a34e33b62b96e8",
+        "commit": "d03eb6be90ee96bb20fe2549349dbc00cbe29986",
         "branch": "dev",
         "dirty": true
     },
@@ -29,7 +29,7 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_full_dem.py --region huaylas",
+    "command": "tools/run_full_dem.py --region huaylas --max-memory-gb 7.0",
     "physics_state": {
         "tau_energy_loss": {
             "reference": 6e-07,

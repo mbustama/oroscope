@@ -97,7 +97,13 @@ than running the searches itself.
    the same resolution and with every transferable criterion unchanged — so a
    difference in the answer is a difference in the ground rather than in the question.
 
-*11. Lima* — not written yet; the number is reserved.
+`11. Lima <https://github.com/mbustama/oroscope/blob/main/notebooks/11_lima_dem.ipynb>`_
+   The third department, and the one that closes the set: desert shelf rising to the
+   western Andean flank, against Arequipa's plateau and Ancash's Cordillera Blanca. It
+   is mostly about the **three-way** comparison, because a difference between two
+   regions can be a coincidence and a trend across three is harder to dismiss. Also the
+   Cajatambo crop, cut from this DEM and run unbiased, and the table of how far a GRAND
+   array of a given size sits from the best TAMBO site.
 
 `12. Peru, all of it <https://github.com/mbustama/oroscope/blob/main/notebooks/12_peru_dem.ipynb>`_
    The search run over a whole country — 339 million pixels at 3 arc-seconds, in four

@@ -235,6 +235,37 @@ def report(current, baseline):
         print("\nSLOWER, BUT BELOW THIS MACHINE'S RESOLUTION (~ marks these stages):")
         for line in unresolvable:
             print(f"   {line}")
+
+    # The baseline has always stored the funnel, the site count and the capacity, and
+    # has never compared them -- so the *results* could drift while the timing table
+    # went on looking healthy. They did: the fan-tiling change moved arequipa_2500 from
+    # 6301 detector positions to 6294, and nothing here said so. A timing baseline whose
+    # answers no longer match is measuring two different programs against each other,
+    # which is worse than having no baseline, because it looks like one.
+    #
+    # Reported, never gated. This is a benchmark, and a changed answer is usually an
+    # intended change of code rather than a fault -- it just has to be *seen*, and the
+    # baseline refreshed deliberately with --update on a quiet machine.
+    drifted = []
+    for case, data in current.items():
+        base_case = (baseline or {}).get(case)
+        if not base_case:
+            continue
+        for key in ("total_sites", "total_capacity"):
+            was, now = base_case.get(key), data.get(key)
+            if was is not None and now is not None and was != now:
+                drifted.append(f"{case}/{key}: {was:,} -> {now:,}")
+        was_f, now_f = base_case.get("funnel") or {}, data.get("funnel") or {}
+        for stage in sorted(set(was_f) | set(now_f)):
+            if was_f.get(stage) != now_f.get(stage):
+                drifted.append(f"{case}/funnel[{stage}]: "
+                               f"{was_f.get(stage, '-')} -> {now_f.get(stage, '-')}")
+    if drifted:
+        print("\nRESULTS DIFFER FROM THE BASELINE (not a timing matter):")
+        for line in drifted:
+            print(f"   {line}")
+        print("   The baseline was measured against different behaviour. Refresh it with"
+              "\n   `--update --repeat 5` on an idle machine once the change is intended.")
     return regressed
 
 

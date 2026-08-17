@@ -108,6 +108,72 @@ class TestSyntheticRegression(GoldenCase):
         self.assertFalse(os.path.exists(os.path.join(out, "buffer_B.npy")))
 
 
+class TestCanyonRegressionWithAScoreCut(GoldenCase):
+    """
+    A canyon at TAMBO's settings, and the only golden that exercises **scoring**.
+
+    Both existing goldens run GRAND-shaped configurations at ``min_score`` 0.0, so
+    neither funnel carries a ``score >= x`` row and neither pins anything downstream of
+    the geometry. That gap is not theoretical: the audit's largest changes were the
+    funnel separating geometry from the score cut, the solid-angle term becoming
+    scale-free, and ``compose`` learning to reject an all-zero weighting -- and not one
+    of them could have moved either golden. They are covered by unit tests on the
+    scoring functions, but nothing joined those to the pipeline end to end.
+
+    Here the cut does real work: it takes 25,924 accepted candidates to 6,977, so a
+    change in composition, weighting or the solid-angle scale moves this file. The
+    canyon fixture is used rather than the ridge because a score cut only bites where
+    acceptance is partial, which is the canyon case.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="oroscope_golden_canyon_")
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.canyon(900, grid_x)
+        cls.dem = synthetic.write_geotiff(os.path.join(cls.tmp, "canyon.tif"), z,
+                                          ORIGIN_LAT, ORIGIN_LON)
+        cls.results = run_pipeline(
+            cls.dem, os.path.join(cls.tmp, "out"), ORIGIN_LAT, ORIGIN_LON,
+            # TAMBO's shape: a near wall looking across at a far one, close range, a
+            # wide arrival window, and detectors at the published 150 m spacing.
+            min_slope_deg=20.0, max_slope_deg=60.0,
+            min_dist_km=1.0, max_dist_km=5.0,
+            elev_min_deg=-20.0, elev_max_deg=20.0,
+            antenna_spacing_km=0.15, min_target_slope_deg=25.0,
+            min_score=0.35, min_width_km=0.0, min_sub_array_size=20,
+            target_antennas=1000)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_matches_golden(self):
+        self.assert_matches_golden("synthetic_canyon_scored", summarize(self.results))
+
+    def test_the_funnel_separates_geometry_from_the_score_cut(self):
+        """
+        The two must be different rows. Recording the post-cut count under
+        ``directions accepted`` is the defect that made every acceptance figure in the
+        project mean geometry-times-scoring while reading as geometry alone.
+        """
+        funnel = self.results["funnel"]
+        self.assertIn("directions accepted", funnel)
+        cut = [k for k in funnel if k.startswith("score >=")]
+        self.assertEqual(len(cut), 1, f"expected one score-cut row, got {cut}")
+        self.assertLess(funnel[cut[0]], funnel["directions accepted"],
+                        "the score cut removed nothing, so this golden pins no scoring")
+
+    def test_the_cut_is_doing_enough_work_to_be_worth_pinning(self):
+        """Guards the fixture rather than the code: a cut that barely bites is a
+        golden that would not notice a scoring change."""
+        funnel = self.results["funnel"]
+        cut = next(k for k in funnel if k.startswith("score >="))
+        survival = funnel[cut] / funnel["directions accepted"]
+        self.assertLess(survival, 0.5)
+        self.assertGreater(survival, 0.02)
+
+
 class TestScanModePipeline(unittest.TestCase):
     """The arrival-scan physics mode, driven through the real entry point."""
 

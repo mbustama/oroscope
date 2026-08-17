@@ -54,14 +54,21 @@ jobs:
           coverage report
           coverage xml -o coverage.xml
 
-      - name: Upload coverage
+      - name: Keep the coverage report as an artifact
+        # Uploaded to codecov by the separate `coverage` job below rather than from
+        # inside the matrix. `if:` does not help here: a job downloads every action it
+        # references during "Set up job", *before* any condition is evaluated, so
+        # gating the step still made all five matrix legs fetch the codecov action for
+        # a step four of them skip. That is what failed this workflow -- codeload
+        # answered 429 to the fifth request and the 3.9 leg died in setup, having run
+        # no tests at all. `fail_ci_if_error: false` could not save it either, because
+        # the failure was the download, not the upload.
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v4
+        uses: actions/upload-artifact@v4
         with:
-          files: ./coverage.xml
-          # Not fatal: a coverage upload failing is not a reason to call the code
-          # broken, and codecov is a third party that occasionally is.
-          fail_ci_if_error: false
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 1
 
       - name: Confirm the package imports outside the source tree
         # Guards the packaging rather than the physics: an install that only works from
@@ -85,3 +92,26 @@ jobs:
           oroscope-combine --help > /dev/null
           oroscope-sensitivity --help > /dev/null
           oroscope-fetch-dem --help > /dev/null
+
+  # Split out of the matrix on purpose. Every action a job names is downloaded during
+  # "Set up job", whatever its `if:` says, so keeping this inside the matrix made all
+  # five interpreter legs fetch the codecov action to run it once -- and a 429 from
+  # codeload then failed a leg that had not executed a single test. Here exactly one job
+  # references it, and if codecov is having a bad day the interpreter matrix is untouched.
+  coverage:
+    name: Upload coverage
+    needs: test
+    runs-on: ubuntu-latest
+    # Never a reason to call the code broken. The matrix above has already decided that.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

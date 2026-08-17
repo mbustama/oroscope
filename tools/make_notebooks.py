@@ -492,8 +492,8 @@ plt.show()
 total = scoring.compose(parts, "product")
 for cut in (0.0, 0.1, 0.2, 0.35, 0.5):
     print(f"min_score {cut:.2f}  keeps {100 * (total >= cut).mean():5.1f}% of candidates")"""),
-("md", """Measured on a real search, that cliff took the reported capacity from 45 928 detector
-positions at `min_score` 0.0, to 2056 at 0.35, to **zero** at 0.5. A result that swings
+("md", """Measured on a real search, that cliff took the reported capacity from 65 268 detector
+positions at `min_score` 0.0, to 10 437 at 0.35, to **zero** at 0.5. A result that swings
 by that much across a plausible range of a threshold is a result about the threshold.
 
 **Prefer ranking sites and taking the best $N$** over thresholding a product. A weighted
@@ -681,9 +681,9 @@ On the Colca crop, with both experiments run over identical terrain:
 
 | | area | sites | capacity | of its own area in the joint |
 |---|---|---|---|---|
-| GRAND | 4580.2 km² | 1 | 5317 | 1.1% |
-| TAMBO | 83.6 km² | 15 | 9717 | 59.9% |
-| **joint** | 50.1 km² | | | Jaccard 0.011 |
+| GRAND | 4569.4 km² | 1 | 5315 | 2.7% |
+| TAMBO | 203.0 km² | 16 | 10 437 | 60.7% |
+| **joint** | 123.3 km² | | | Jaccard 0.027 |
 
 The interesting part is *why* the joint is small. Three fifths of TAMBO-viable ground is
 also GRAND-viable, but the two deployable **slope bands barely overlap** — GRAND's 3–25°
@@ -710,19 +710,25 @@ much each moves the answer. Run against a real TAMBO baseline, the verdict was b
 
 | parameter | | | | |
 |---|---|---|---|---|
-| `decay_energy_pev` | 3 → **10 878** | 55 → **2056** | 100 → **0** | 1000 → **0** |
-| `min_score` | 0.0 → **45 928** | 0.2 → **15 481** | 0.35 → **2056** | 0.5 → **0** |
-| `min_target_slope_deg` | 0° → **7442** | 15° → **5309** | 25° → **2056** | 35° → **0** |
+| `min_score` | 0.0 → **65 268** | 0.2 → **25 635** | 0.35 → **10 437** | 0.5 → **0** |
+| `min_target_slope_deg` | 0° → **18 622** | 15° → **14 720** | 25° → **10 437** | 35° → **2814** |
+| `decay_spectral_index` | 1.5 → **6853** | 2.0 → **10 437** | 2.7 → **11 349** | |
 
-Every criterion sits near a cliff. **The decay energy was the worst**: across TAMBO's
-own 3 PeV – 1 EeV reach the answer ran from 10 878 to zero, because a single energy
-cannot stand in for a spectrum.
+Both cuts sit near a cliff: `min_score` runs 6.25× to zero across the swept range and
+`min_target_slope_deg` 1.78× to 0.27×, about a baseline of 10 437.
 
-That row is now history, and it is the reason the code changed. The decay term is
-folded over a power-law spectrum instead, with the index pinned or marginalised
-(`--decay_spectral_index`), and the same result then varies by **1.46×** across a
-plausible range of index rather than without bound. `min_score` is what remains
-dominant, at 2.38× to 0.20× about its baseline."""),
+**A fourth row used to head this table, and its disappearance is the point.**
+`decay_energy_pev` once ran 3 PeV → 10 878 detector positions and 100 PeV → zero: a
+single representative energy was choosing the answer rather than approximating it. The
+decay term is folded over a power-law spectrum now, so the same question is asked as
+`decay_spectral_index` above and the answer varies by **1.66×** across a plausible range
+of index rather than without bound.
+
+> Sweeping `decay_energy_pev` today reports **1.00× at every value**, and that is not
+> robustness — it is the parameter being ignored. `scoring.score_candidates` prefers
+> `decay_energy_min_pev`/`max_pev` when both are set, which this configuration sets, so
+> the single-energy branch is never reached. A sweep over a parameter the configuration
+> does not consult looks exactly like a sweep over one that does not matter."""),
 ("code", """crossing_m = 3000.0
 print(f"P(tau decays within a {crossing_m/1000:.0f} km crossing):\\n")
 for e in (3.0, 10.0, 55.0, 100.0, 1000.0):
@@ -1415,8 +1421,8 @@ else:
     print(explain.explain_combination(report, runs))"""),
 ("md", """### Comparing against the crop
 
-The crop's numbers, for reference — GRAND 4580.2 km² in 1 site with 5317 detectors,
-TAMBO 83.6 km² in 15 sites with 9717, joint 50.1 km². If the full DEM's binding
+The crop's numbers, for reference — GRAND 4569.4 km² in 1 site with 5315 detectors,
+TAMBO 203.0 km² in 16 sites with 10 437, joint 123.3 km². If the full DEM's binding
 constraint or weakest component differs from these, the crop was not representative and
 the comparison is the finding.
 
@@ -1474,14 +1480,14 @@ systems. TAMBO needs a wall to stand on facing a wall to watch, and that exists 
 where the ground is cut."""),
 ("code", """show_stage("combined_overview_2_tambo.png",
            "TAMBO alone — 112 km², following the canyons")"""),
-("md", """**And both.** The magenta is the ground that satisfies the two at once: 50.2 km²,
-0.1% of GRAND's and 44.9% of TAMBO's. The asymmetry is the finding — co-location costs
+("md", """**And both.** The magenta is the ground that satisfies the two at once: 619.1 km²,
+0.7% of GRAND's and 59.7% of TAMBO's. The asymmetry is the finding — co-location costs
 GRAND nothing and is most of what TAMBO has.
 
 Look at where the magenta *is*. It traces the canyon rims, and the roads run along them
 too, which is not a coincidence: a canyon rim is where a road goes in this terrain."""),
 ("code", """show_stage("combined_overview_3_both.png",
-           "Both — the 50.2 km² that satisfies GRAND and TAMBO together")"""),
+           "Both — the 619.1 km² that satisfies GRAND and TAMBO together")"""),
 ("md", """## What moves the answer
 
 The numbers above come from one setting of every parameter. The honest question is how
@@ -2262,8 +2268,10 @@ closing element fills in around a mask that steep ground fragments. TAMBO's gain
 *exceeds* its naive 2.41%, because **both** of its stages improve at once: the slope
 screen keeps 33.9 million pixels in Ancash against 26.8 million in Arequipa — more
 candidates from a DEM half the size — and the share of those that then accept a
-direction rises from 9.7% to 15.1%. GRAND's acceptance moves the other way, 61.6% down
-to 54.9%.
+direction rises from 62.0% to 81.6%. GRAND's acceptance moves the other way, 60.1%
+down to 53.4%. (Those TAMBO figures are the *geometry* row: before 6.53 separated it from
+the score cut they read 9.7% and 15.1%, which was geometry and scoring multiplied
+together.)
 
 **So Ancash is a worse GRAND site and a much better TAMBO site than Arequipa, per unit
 of ground.** That is the result, and it is a statement about mountains rather than about
@@ -2343,8 +2351,8 @@ if rows:
 rather than GRAND, which is what you would expect if the joint region is limited by the
 scarcer of the two.
 
-The last column is the one to keep. **The joint region is 44.9% of TAMBO's mask at
-Arequipa and 43.0% at Ancash** — essentially unchanged across two regions whose terrain
+The last column is the one to keep. **The joint region is 59.7% of TAMBO's mask at
+Arequipa and 55.6% at Ancash** — essentially unchanged across two regions whose terrain
 could hardly be more different. Co-location costs GRAND almost nothing and consumes
 roughly half of what TAMBO has, wherever you look. The Jaccard index tripling is not the
 two experiments agreeing more; it is TAMBO's mask growing while GRAND's shrinks."""),
@@ -2446,8 +2454,8 @@ stride gap without noticing.
 a strided, downsampled run is a lower bound by a factor that is terrain-dependent and, in
 practice, unbounded — 1.51× at Colca, 23.0× here. Quote TAMBO numbers from unbiased runs,
 or quote them as "at least". The Callejón de Huaylas was effectively invisible to the
-department run: its TAMBO mask contributes **1.2 km² inside this crop window** against
-the crop's own 855.1 km²."""),
+department run: its TAMBO mask contributes **18.2 km² inside this crop window** against
+the crop's own 291.3 km²."""),
 ("md", """### The zoom-in, drawn
 
 The crop's own maps. `--reveal` writes the combination one experiment at a time, so the
@@ -2461,10 +2469,10 @@ for frame, caption in (
         ("combined_overview_2_tambo.png",
          "TAMBO over the crop at stride 1 — 109 sites along the Río Santa"),
         ("combined_overview_3_both.png",
-         "Both — 637 km² of joint ground, 74.5% of TAMBO's mask")):
+         "Both — 228.7 km² of joint ground, 78.5% of TAMBO's mask")):
     show_figure(os.path.join(CROP_OUT, frame), caption=caption)"""),
 ("md", """**And the same TAMBO search at the department run's sampling**, for the
-comparison the numbers above make. One picture is 109 sites; the other is one."""),
+comparison the numbers above make. One picture is 32 sites; the other is two."""),
 ("code", """show_figure(os.path.abspath(os.path.join(
                 "..", "output", "huaylas_ctl_tambo", "oroscope_results_huaylas.png")),
             caption="TAMBO on the same crop at downsample 4 / stride 5 — the control")"""),
@@ -2724,7 +2732,7 @@ for label in ("grand", "tambo"):
 ("md", """**The crop alone finds six times the TAMBO area of the entire Lima department
 run, and eight times the detector positions — from 8% of its pixels.** That is not new
 terrain; it is the same terrain measured without striding and downsampling, and it is the
-291× of notebook 10 arriving independently on different ground.
+23.0× of notebook 10 arriving independently on different ground.
 
 It also revises something. The joint region's share of TAMBO's mask sat near 44% across
 all three department runs, which looked like a constant of the two experiments."""),
@@ -2940,7 +2948,7 @@ At 1 arc-second the same country is 3,052 Mpx, nine times this table. The chosen
 available on the machine this ran on."""),
 ("md", """## Raising the stride costs area unless the closing element keeps up
 
-This is the trap that made a published TAMBO area 4.75× too low
+This is the trap that made a published TAMBO area 1.51× too low
 ([notebook 7](07_animating_the_mechanism.ipynb) animates it as `stride_and_closing`).
 Striding marks one surviving pixel in N; the mask is then closed morphologically before
 area is measured. If the closing element cannot bridge the gap the stride leaves, the
@@ -2987,7 +2995,7 @@ arriving from the other direction."""),
 ("md", """Two rows deserve attention.
 
 **`directions accepted` over `kept by stride 15` is the acceptance rate: 43.1%.** The
-full Arequipa DEM gave 61.6% for the same criteria. Lower is the expected direction —
+full Arequipa DEM gave 60.1% for the same criteria. Lower is the expected direction —
 the national box adds coastal desert below the 3° slope floor, high Andes above the 25°
 ceiling, and Amazon lowlands that are simply flat.
 
@@ -3283,7 +3291,7 @@ Striding leaves a gap. Closing repairs it — but how *well* depends on somethin
 parameter does not mention: **the width of the accepted feature**. A wide blob survives a
 marginal element; a narrow strip does not.
 
-That is the difference between a 4.75× under-report at Colca and a 291× one on the
+That is the difference between a 1.51× under-report at Colca and a 23.0× one on the
 Callejón de Huaylas, and it is worth seeing on its own, so here it is on synthetic
 strips of controlled width rather than on the canyon above."""),
 ("code", """def recovery(width_px, stride=5, elements=(3, 5, 9)):
@@ -3323,7 +3331,7 @@ for width in (3, 6, 12, 30, 80):
     print(f"{width:>10} px{recovery(width)[5][1]:>32,}")"""),
 ("md", """A strip that should be one region becomes dozens or hundreds, and
 `min_sub_array_size` then throws away every piece too small to hold an array. **That is
-where the factor of 291 went** — not into the area measurement.
+where the factor of 23 went** — not into the area measurement.
 
 The warning that fires on the first condition:"""),
 ("code", """for stride in (1, 5, 15):
@@ -3429,7 +3437,7 @@ the whole pipeline rather than one stage."""),
   responses above, as films.
 - **[6. Combining and sensitivity](06_combining_and_sensitivity.ipynb)** — sweeps over
   the whole pipeline.
-- **[10. Ancash](10_ancash_dem.ipynb)** — where the striding cliff was measured at 291×
+- **[10. Ancash](10_ancash_dem.ipynb)** — where the striding cliff was measured at 23.0×
   on real ground."""),
 ("md", footer(prev=("12_peru_dem.ipynb", "Peru, all of it"))),
 ]

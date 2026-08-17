@@ -50,6 +50,95 @@ def read(*parts):
         return f.read()
 
 
+class TestAPresetNamesTheDemTheFetcherActuallyGets(unittest.TestCase):
+    """
+    A preset that names a DEM the downloader will never produce is a dangling path.
+
+    ``--generate_config --config_preset lima`` wrote ``lima_AW3D30.tif`` long after Lima
+    was re-fetched as SRTMGL1 so the three departments would share a dataset. REGIONS,
+    the shipped configs and the CLI page were all updated; this one line was not, and it
+    went unnoticed because the old file is still present on the machine where the switch
+    was made. Following the documented flow on a clean machine gave a config pointing at
+    a file ``oroscope-fetch-dem`` does not fetch.
+    """
+
+    def test_each_region_preset_matches_its_fetch_filename(self):
+        import os
+
+        from oroscope.fetch_dem import REGIONS
+        for preset in ss.CONFIG_PRESETS:
+            if preset not in REGIONS:
+                continue                      # "default" names no region
+            with self.subTest(preset=preset):
+                named = os.path.basename(ss.default_config(preset)["dem_path"])
+                self.assertEqual(named, REGIONS[preset]["filename"])
+
+
+class TestAConfigCanBeHandedToTheSearch(unittest.TestCase):
+    """
+    A configuration is not a call signature, and the gap is where documented examples rot.
+
+    Two README examples were broken by it at once. The headline splatted
+    ``load_config(...)`` straight into :func:`find_grand_regions_interactive`, which has
+    no ``**kwargs`` and does not take ``_comment``. The other hand-rolled the filter --
+    dropping ``_``-prefixed keys, ``print_info`` and
+    ``output_directory_base_with_given_json`` -- and was one key out of date, so it died
+    on ``require_sky``. Both raised ``TypeError`` on the first line a reader would run.
+
+    The translation belongs to :func:`config_to_pipeline_kwargs`, and this asserts it
+    really does produce something the search accepts. Add a config key that steers the
+    tool rather than the physics and this fails here, which is where it should, instead
+    of in the README.
+    """
+
+    def _presets(self):
+        return sorted(getattr(ss, "CONFIG_PRESETS", {"default": None}))
+
+    def test_every_preset_translates_into_a_callable_signature(self):
+        import inspect
+        sig = inspect.signature(ss.find_grand_regions_interactive)
+        for preset in self._presets():
+            with self.subTest(preset=preset):
+                kwargs = ss.config_to_pipeline_kwargs(ss.default_config(preset),
+                                                      quiet=True)
+                sig.bind(run_output_dir="out", **kwargs)
+
+    def test_the_translation_is_needed(self):
+        """
+        Guards the claim above rather than the code: if a raw config ever *did* bind,
+        the warning in the README would be telling readers to avoid a problem that no
+        longer exists, and this test would be asserting nothing.
+        """
+        import inspect
+        sig = inspect.signature(ss.find_grand_regions_interactive)
+        with self.assertRaises(TypeError):
+            sig.bind(run_output_dir="out", **ss.default_config("arequipa"))
+
+
+class TestTheOptionCountIsNotQuotedFromMemory(unittest.TestCase):
+    """
+    Three places stated how many options there are, and all three disagreed.
+
+    The README said 93, ``cli.rst`` said 82 and the parser had 87. The existing tests
+    compare the *names* in ``cli.rst`` against the parser, which is the check that
+    matters and which passed throughout -- a count is a separate claim, and nothing
+    read it. So the page could document every flag correctly while announcing the wrong
+    total, and the README could be six behind with no test noticing either.
+    """
+
+    def test_the_cli_page_states_the_real_count(self):
+        n = len(cli_flags())
+        page = read("docs", "source", "cli.rst")
+        self.assertIn(f"accepts {n} options", page,
+                      f"cli.rst does not say it accepts {n} options")
+        self.assertIn(f"Every option ({n} of them)", page)
+
+    def test_the_readme_states_the_real_count(self):
+        n = len(cli_flags())
+        self.assertIn(f"There are {n} of them", read("README.md"),
+                      f"README.md does not say there are {n} options")
+
+
 class TestTheVersionIsOneNumber(unittest.TestCase):
     """
     The version is written twice, and nothing checked that the two agreed.
@@ -301,6 +390,61 @@ class TestTheDocumentedPublicSurfaceIsReal(unittest.TestCase):
         from oroscope import explain
         for name in explain.__all__:
             self.assertTrue(hasattr(explain, name), f"explain.__all__ names {name}")
+
+    def test_no_name_in_all_is_missing_from_its_module(self):
+        """The same check, over every module that declares one."""
+        import importlib
+        for mod in ("physics", "scoring", "arrival_scan", "aperture", "explain",
+                    "site_searcher", "combine_experiments", "crop_dem", "sensitivity",
+                    "figures"):
+            m = importlib.import_module(f"oroscope.{mod}")
+            for name in getattr(m, "__all__", ()):
+                with self.subTest(module=mod, name=name):
+                    self.assertTrue(hasattr(m, name))
+
+    def test_the_package_re_exports_all_of_physics(self):
+        """
+        ``physics`` is re-exported whole, and it had a hole in it.
+
+        The front door is *curated*, not exhaustive -- ``site_searcher`` keeps
+        ``WATER_COLOUR`` and ``AREQUIPA_SETTLEMENTS`` to itself, and rightly. But
+        ``physics`` is offered entire, and the hand-maintained import list had picked up
+        every function while missing every constant: ``NC_TO_CC_RATIO``,
+        ``NC_INELASTICITY`` and ``DEFAULT_MUON_SHIELDING_KM``. So ``import oroscope``
+        could compute a muon shielding depth and not offer the thickness to compute it
+        at.
+
+        Asserted for physics alone, because that is where "all of it" is the actual
+        rule. Claiming it for every module would fail on sixteen names that are kept
+        back deliberately, and a test that has to be argued with is one that gets
+        deleted.
+        """
+        from oroscope import physics
+
+        import oroscope
+        missing = [n for n in physics.__all__ if not hasattr(oroscope, n)]
+        self.assertEqual(missing, [],
+                         f"physics.__all__ offers names the package does not: {missing}")
+
+    def test_every_figure_builder_is_exported(self):
+        """
+        The other direction, which is the one that actually broke.
+
+        ``__all__`` existing and every name in it resolving says nothing about a
+        public function that was never added. ``automodule :members:`` publishes from
+        ``__all__``, so ``pipeline_stages``, ``striding_and_closing`` and
+        ``score_composition`` were drawn on :doc:`howitworks` and simultaneously absent
+        from the API reference — added by a docs commit that did not touch the list.
+        """
+        import inspect
+
+        from oroscope import figures
+        builders = [n for n, o in vars(figures).items()
+                    if not n.startswith("_") and inspect.isfunction(o)
+                    and o.__module__ == figures.__name__]
+        missing = sorted(set(builders) - set(figures.__all__))
+        self.assertEqual(missing, [],
+                         f"public figure builders missing from __all__: {missing}")
 
 
 if __name__ == "__main__":

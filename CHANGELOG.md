@@ -10,11 +10,13 @@ prototype that number described.
 
 ### Added
 - **One import: `import oroscope`.** The modules moved from flat top-level names into a
-  real package, whose `__init__` re-exports the whole public surface — 131 names — while
-  the submodules stay importable when a narrower namespace reads better. The notebooks'
+  real package, whose `__init__` re-exports a curated public surface — 154 names —
+  while the submodules stay importable when a narrower namespace reads better.
+  Curated rather than exhaustive: `physics` is offered entire, while things like
+  `site_searcher.WATER_COLOUR` stay behind their own module. The notebooks'
   `sys.path` insert is gone; `pip install -e .` is the only setup step.
 - **A dedicated CLI page** in the documentation, with the complete option reference —
-  all 82, with types and defaults, generated from the parser so it cannot drift. The
+  all 87, with types and defaults, generated from the parser so it cannot drift. The
   README and the quickstart now lead with code, since that is how most people use this.
 - **Every run explains itself.** A plain-language summary — what was found, which
   funnel stage set the size of the answer and the parameter behind it, which named
@@ -106,7 +108,8 @@ prototype that number described.
   to `0.0`, a *valid* coordinate in the Gulf of Guinea, so a forgotten placeholder
   georeferenced a run to the wrong continent instead of failing. They are `null` now,
   meaning "read the DEM's own tiepoint". The bundled configurations set every
-  parameter explicitly and are unaffected: Colca is still 15 sites and 9717 detectors.
+  parameter explicitly and are unaffected: Colca was 15 sites and 9717 detectors before
+  and after that change (it is 16 and 10 437 now, at the 150 m re-run below).
 - **`import oroscope` forced the matplotlib backend.** `combine_experiments` called
   `matplotlib.use("Agg")` at module level — harmless for a standalone module, not for a
   package front door: it reached into every caller's session and overrode the inline

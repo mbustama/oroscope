@@ -237,7 +237,14 @@ def absolute_from_published(results, curve_path, published,
     Examples
     --------
     Paths are resolved by the caller, so this example builds one from the package's own
-    location rather than from the working directory -- the test job runs from ``tests/``:
+    location rather than from the working directory -- the test job runs from ``tests/``.
+
+    **This resolves only in a source checkout.** ``data/`` sits beside ``src/`` in the
+    repository and is not shipped in the wheel, so from an installed
+    ``site-packages/oroscope/aperture.py`` the three ``dirname`` calls land outside
+    site-packages entirely. That is not a limitation of the function -- it takes whatever
+    path it is given -- but the example below cannot be pasted into a fresh install
+    unchanged. Point it at your own copy of the curve, or at a clone.
 
     >>> import os
     >>> from oroscope import aperture

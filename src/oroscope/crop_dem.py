@@ -52,6 +52,58 @@ def read_geo(path: str) -> tuple[float, float, float, float, int, int]:
 
 def crop(src: str, dst: str, north: float, south: float, west: float,
          east: float) -> dict:
+    """
+    Cuts a geographic window out of a DEM, writing a GeoTIFF that stands on its own.
+
+    The point of cropping is not disk space, it is sampling: a department at
+    ``downsample_factor`` 4 and ``candidate_stride`` 5 costs area and fragments a thin
+    mask, while a crop small enough to run at 1 and 1 does neither. Every unbiased
+    number this project quotes comes from a crop made here.
+
+    The window is snapped outward to whole pixels, so the result contains the requested
+    box rather than approximating it, and is clipped to the DEM. A window that misses
+    the DEM entirely raises rather than writing an empty file.
+
+    **The crop carries its own tiepoint**, not the parent's. That is what lets it be
+    searched with no reference back to where it came from — and it is why a crop's
+    ``origin_lat``/``origin_lon`` differ from the parent's, which is correct and not
+    drift.
+
+    Parameters
+    ----------
+    src : str
+        The GeoTIFF to cut from.
+    dst : str
+        Where to write the crop.
+    north, south : float
+        Latitude bounds in degrees. ``north`` is the larger (less negative) value.
+    west, east : float
+        Longitude bounds in degrees.
+
+    Returns
+    -------
+    dict
+        ``path``, the grid as ``rows`` and ``cols``, the crop's own ``origin_lat`` and
+        ``origin_lon`` with the matching ``south`` and ``east`` edges,
+        ``cell_size_deg``, and the elevation range as ``z_min`` and ``z_max``.
+
+    Raises
+    ------
+    SystemExit
+        If the requested window does not overlap the DEM, reporting what the DEM
+        actually covers.
+
+    Examples
+    --------
+    Cutting the Colca crop out of the Arequipa department DEM, which is how
+    ``input/dem/colca.tif`` was made::
+
+        from oroscope import crop_dem
+
+        info = crop_dem.crop("input/dem/arequipa_SRTMGL1.tif", "input/dem/colca.tif",
+                             north=-15.30, south=-15.85, west=-72.40, east=-71.55)
+        print(info["rows"], info["cols"], info["z_min"], info["z_max"])
+    """
     cell_x_deg, cell_y_deg, lon0, lat0, rows, cols = read_geo(src)
 
     # Rows run north to south, columns west to east
