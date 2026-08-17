@@ -1,0 +1,56 @@
+==============================================================================
+ WHERE THESE EXPERIMENTS CAN SHARE GROUND, AND WHY
+==============================================================================
+
+WHAT EACH BRINGS
+----------------
+  experiment |     area km² |   sites |  detectors |  in joint
+  ----------------------------------------------------------
+  GRAND      |      8,249.5 |       1 |      9,559 |      2.8%
+  TAMBO      |        291.3 |      32 |     14,925 |     78.5%
+
+  Ground satisfying GRAND and TAMBO at once: 228.7 km². Ground useful to any
+  of them: 8,312.1 km². The first is the number that matters for one site,
+  one road and one power feed serving two experiments; the second is what the
+  programme as a whole could use.
+
+WHAT DECIDES IT
+---------------
+  A pixel has one slope, one altitude and one aspect, and both experiments
+  must accept those same values to stand on it. So co-location is settled by
+  whichever of those bands they share least of — before any arrival geometry
+  is considered.
+
+  band               |            GRAND |            TAMBO | shared
+  --------------------------------------------------------------------
+  deployable slope   |            3–25° |           20–60° | 20–25°  (23%)
+
+  “deployable slope” is what limits the sharing: they overlap only over
+  20–25°, which is 23% of the narrower of the two bands. Co-location is
+  decided there, not by anything about the physics of either experiment.
+
+  What they ask of the *view* differs, and that is no obstacle: two
+  experiments can look out from the same hillside at different ranges and
+  different elevations without conflict.
+
+  target distance    | GRAND: 10–40 km, TAMBO: 2–5 km
+  arrival elevation  | GRAND: -3–3°, TAMBO: -20–20°
+
+PAIRWISE
+--------
+  GRAND & TAMBO: 228.7 km² shared, Jaccard 0.0275.
+        2.8% of GRAND's own ground
+       78.5% of TAMBO's own ground
+
+HOW TO READ THIS
+----------------
+  Every caveat on the individual runs applies here and compounds: these are
+  the same masks, so morphological closing has already moved each area, and
+  the joint of two inflated masks is inflated twice over. The overlay is
+  exact — the masks are pixel-aligned and the alignment is checked, not
+  assumed — but what it overlays is only as good as each run.
+
+  And co-location is a question about ground, not about detectors. Two
+  experiments sharing a hillside still need their own arrays, their own
+  spacing and their own trigger; what they share is the site, the access and
+  the power.

@@ -298,7 +298,7 @@ class TestExplainCombination(unittest.TestCase):
 class TestClosingInflation(unittest.TestCase):
     """
     The gap between accepted pixels and reported area, measured from the run rather
-    than quoted from Colca. On the GRAND Colca config it gives 2.19x against the 2.29x
+    than quoted from Colca. On the GRAND Colca config it gives 2.25x against the 2.35x
     a stride-1 control measured, which is the cross-check that makes it worth printing.
     """
 
@@ -393,9 +393,15 @@ class TestExplainText(unittest.TestCase):
     def test_it_warns_that_reported_area_is_not_accepted_area(self):
         """
         The error a reader makes unaided, and the reason the warning defaults to on:
-        morphological closing inflated the reported area 2.29x at Colca.
+        morphological closing inflated the reported area 2.35x at Colca.
+
+        Asserted against the constant rather than a literal. The literal was "2.29"
+        here, which is a copy of a measurement kept in a second place: re-measuring the
+        control moves the constant and leaves this test asserting the old value still
+        appears, so the one test guarding the warning would have failed for the right
+        reason and been "fixed" by pasting the new number in beside the old mistake.
         """
-        self.assertIn("2.29", self.text)
+        self.assertIn(f"{explain.AREA_INFLATION_AT_COLCA:.2f}", self.text)
 
     def test_it_attributes_the_sites_to_a_component(self):
         self.assertIn("shower", self.text)
@@ -631,6 +637,119 @@ class TestLibraryParity(unittest.TestCase):
             report = ss.preflight_memory(dem, downsample_factor=2, max_memory_gb=0)
         self.assertGreater(report["estimate_gb"], 0.0)
         self.assertFalse(report["capped"], "max_memory_gb=0 must disable the cap")
+
+    def test_the_preflight_says_when_the_cap_cannot_protect_the_machine(self):
+        """
+        A cap above the available memory is not a cap: the OOM killer arrives before
+        RLIMIT_AS fires. Easy to set by accident, because the estimate counts only
+        anonymous memory, so on a large DEM the cap must clear it by the size of the
+        memory-mapped file -- and raising it for that reason can carry it past what the
+        machine has. A 339 Mpx search capped at 13.0 GiB against 8.0 GiB available took
+        the machine down; nothing said a word.
+        """
+        import resource
+
+        keep = resource.getrlimit(resource.RLIMIT_AS)
+        try:
+            with quiet():
+                # Far above any real machine, so the comparison is deterministic, and
+                # high enough that applying it constrains nothing.
+                report = ss.preflight_memory("nonexistent.tif", max_memory_gb=1.0e6)
+            self.assertTrue(report["capped"])
+            self.assertTrue(report["cap_exceeds_available"],
+                            "a cap of 1e6 GiB must be reported as unprotective")
+        finally:
+            resource.setrlimit(resource.RLIMIT_AS, keep)
+
+        with quiet():
+            report = ss.preflight_memory("nonexistent.tif", max_memory_gb=0)
+        self.assertFalse(report["cap_exceeds_available"],
+                         "no cap applied means nothing to warn about")
+
+    def test_the_preflight_counts_the_map_as_well_as_the_search(self):
+        """
+        Three runs in one session finished their searches and then died drawing the
+        picture — the JSON and the GeoTIFF already written, only the map lost. A
+        pre-flight that models the search alone sizes a cap that cannot survive the run.
+        """
+        viz = ss.estimate_visualisation_memory_gb(3961, 2881, 1)
+        self.assertGreater(viz, 0.5, "a 2.85 Mpx viz raster costs more than half a GiB")
+        # It renders at downsample_factor * 2, so the cost falls as its square.
+        self.assertLess(ss.estimate_visualisation_memory_gb(3961, 2881, 4), viz)
+
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "viz.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        with quiet():
+            report = ss.preflight_memory(dem, max_memory_gb=0)
+        self.assertGreater(report["visualisation_gb"], 0.0)
+        self.assertAlmostEqual(report["estimate_gb"],
+                               report["search_gb"] + report["visualisation_gb"],
+                               places=6, msg="the reported total must be the sum")
+
+    def test_the_combination_is_the_larger_figure_and_is_now_counted(self):
+        """
+        The overlay renders at the mask's own resolution, not at ``viz_ds``, so it is
+        four times the pixels. It was outside the estimate entirely, ran last, and is
+        what actually kept failing: measured 1.96 GiB at the Arequipa mask's 2551x3151
+        against the 0.48 GiB budgeted for a map. Composited in float32 it is 1.31 GiB,
+        and the model is fitted to four measured sizes.
+        """
+        rows, cols = 10204, 12603
+        for ds in (1, 2, 4):
+            solo = ss.estimate_visualisation_memory_gb(rows, cols, ds)
+            joint = ss.estimate_visualisation_memory_gb(rows, cols, ds, combine=True)
+            self.assertGreater(joint, solo, msg=f"downsample_factor {ds}")
+
+        # Against the bench: 8.04 Mpx of raster measured 1.31 GiB peak RSS.
+        self.assertAlmostEqual(
+            ss.estimate_visualisation_memory_gb(10204, 12603, 4, combine=True),
+            1.31, delta=0.06)
+
+    def test_the_preflight_judges_the_largest_stage_not_the_sum(self):
+        """
+        The search, its map and the combination happen one after another, so what has
+        to fit is the biggest of them. The map is the exception -- it is drawn while the
+        search's arrays are still live -- so those two are added and the combination is
+        compared against that total.
+        """
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "combine.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        with quiet():
+            without = ss.preflight_memory(dem, max_memory_gb=0)
+            with_it = ss.preflight_memory(dem, max_memory_gb=0, combine=True)
+
+        self.assertIsNone(without["combine_gb"], "not asked for, not reported")
+        self.assertIsNotNone(with_it["combine_gb"])
+        self.assertGreaterEqual(with_it["estimate_gb"], without["estimate_gb"],
+                                "counting a stage cannot lower the estimate")
+        self.assertEqual(with_it["estimate_gb"],
+                         max(with_it["search_gb"] + with_it["visualisation_gb"],
+                             with_it["combine_gb"]))
+
+    def test_the_preflight_can_refuse_instead_of_merely_warning(self):
+        """
+        Warning is what it did while three runs died anyway. ``refuse=True`` is the
+        gate, and it fires before anything is allocated.
+        """
+        grid_x = synthetic.cell_sizes(ORIGIN_LAT)[1]
+        z = synthetic.ridge_and_slope(200, grid_x)
+        dem = synthetic.write_geotiff(os.path.join(self.tmp, "refuse.tif"), z,
+                                      ORIGIN_LAT, ORIGIN_LON)
+        real = ss.available_memory_gb
+
+        ss.available_memory_gb = lambda: 0.001          # anything is too much
+        try:
+            with self.assertRaises(MemoryError):
+                with quiet():
+                    ss.preflight_memory(dem, max_memory_gb=0, refuse=True)
+            with quiet():                                # the default still only warns
+                ss.preflight_memory(dem, max_memory_gb=0)
+        finally:
+            ss.available_memory_gb = real
 
     def test_the_preflight_survives_a_dem_it_cannot_measure(self):
         with quiet():

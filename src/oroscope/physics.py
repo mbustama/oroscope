@@ -1016,18 +1016,67 @@ def tau_exit_probability(column_depth_gcm2: float | np.ndarray, energy_pev: floa
         Mean inelasticity of the charged-current interaction; the tau carries away
         ``1 - y`` of the neutrino energy.
     samples : int, optional
-        Points used for the numerical integration over interaction depth.
+        Points used for the numerical integration over interaction depth, spaced
+        logarithmically in the *remaining* depth ``X - x``.
 
     Returns
     -------
     float or ndarray
         Relative exit probability, matching the shape of ``column_depth_gcm2``.
 
+    Notes
+    -----
+    **The grid is in ``u = X - x``, not in ``x``, and that is the whole of the
+    accuracy.** Only interactions within a few tau ranges of the far surface contribute
+    anything -- everything produced deeper is absorbed -- so the integrand is a spike
+    against the far end of a range that can be five decades wide. Sampled uniformly in
+    ``x``, as this was, the spacing outruns the spike and the trapezoid rule reports the
+    area of something it never resolved. Measured at 3 PeV and ``X`` = 10^9 g/cm^2:
+
+    ====================  ==============
+    grid                  P(X)
+    ====================  ==============
+    uniform, 2000 pts     8.884e-05
+    uniform, 20,000       1.328e-05
+    uniform, 200,000      1.103e-05
+    uniform, 2,000,000    1.100e-05
+    **log in u, 2000**    **1.1004e-05**
+    ====================  ==============
+
+    So the old default was **8x** the converged value, and the substitution reaches that
+    value with a thousandth of the points. Worse than the magnitude, it inverted the
+    trend. P(X) has a genuine maximum -- :func:`production_escape_optimum_gcm2` exists
+    to find it, and dP/dX = (S(X) - P(X))/lambda is positive wherever S(X) exceeds
+    P(X) -- so it rises to that peak and falls beyond. At 3 PeV the peak sits near
+    3.1e5 g/cm^2. What the unresolved grid did was invent a *second*, spurious rise far
+    past the peak, at the edge of the grid, where the converged curve is falling.
+
+    The error was confined to low energy against deep rock -- at 100 PeV and above the
+    worst case over the same grid was 3%, and below 10^7 g/cm^2 it was exact everywhere
+    -- which is why nothing else showed it. But
+    :func:`depth_band_from_energy` takes its low edge at the *lowest* energy asked for,
+    and TAMBO's configured range starts at 3 PeV, so the band inherited the whole of it:
+    (1.18e8, 2.89e8) over 3 PeV - 1 EeV where the converged answer is (2.17e4, 1.15e8).
+    The published 1 EeV optimum of 5.7e6 g/cm^2 lies inside the second and 20x below the
+    first. No published number moved: every config leaves ``depth_band_gcm2`` null, so
+    no search has ever called this (roadmap 6.44, 6.56).
+
     Examples
     --------
     >>> from oroscope import physics
     >>> p = physics.tau_exit_probability(1.0e6, 1000.0)
     >>> 0.0 <= p <= 1.0
+    True
+
+    Converged where it used to be eight times too large:
+
+    >>> round(physics.tau_exit_probability(1.0e9, 3.0) * 1.0e5, 3)
+    1.1
+
+    and falling with depth, as more rock must:
+
+    >>> p = physics.tau_exit_probability([1.0e8, 3.0e8, 1.0e9, 3.0e9], 3.0)
+    >>> bool((p[1:] < p[:-1]).all())
     True
     """
     e_tau = energy_pev * (1.0 - inelasticity)
@@ -1036,9 +1085,14 @@ def tau_exit_probability(column_depth_gcm2: float | np.ndarray, energy_pev: floa
     def one(X):
         if X <= 0:
             return 0.0
-        x = np.linspace(0.0, float(X), samples)
-        s = tau_survival(X - x, e_tau, beta_cm2g, density_gcm3)
-        return float(_trapezoid(np.exp(-x / lam) / lam * s, x))
+        X = float(X)
+        # Substituted u = X - x: u is the rock the tau still has to cross, and S(u) is
+        # what kills the integrand. Sampled logarithmically in u so the points land
+        # where the weight is, which is within a few tau ranges of the far surface.
+        # See the notes: uniform in x, this needed a thousand times as many points.
+        u = np.concatenate(([0.0], np.geomspace(max(X * 1.0e-12, 1.0e-9), X, samples)))
+        s = tau_survival(u, e_tau, beta_cm2g, density_gcm3)
+        return float(_trapezoid(np.exp(-(X - u) / lam) / lam * s, u))
 
     if np.ndim(column_depth_gcm2) == 0:
         return one(column_depth_gcm2)
@@ -1233,10 +1287,19 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
         was computed with. Says: *of the neutrinos that arrive, what fraction decays
         usefully?*
     ``"acceptance"``
-        :math:`w(E) = A(E)`. Says: *over the energies this detector actually responds
-        to, what fraction decays usefully?* -- a property of the instrument and the
-        terrain, with no assumed spectrum. Useful precisely because :math:`\gamma` is an
-        assumption and this removes it.
+        :math:`w(E) = A(E)`, per unit energy. Says: *over the energies this detector
+        actually responds to, what fraction decays usefully?*
+
+        **This does not remove the spectral assumption; it replaces it.** Weighting by
+        :math:`A(E)\,{\rm d}E` is weighting by :math:`A(E)` against a *flat* differential
+        flux, which is :math:`\gamma = 0` -- harder than any astrophysical spectrum, so
+        the average leans on the top of the range rather than sitting free of it.
+        Measured against TAMBO's rising :math:`A(E)` over 3 PeV - 1 EeV, **97.4% of the
+        weight lands above 100 PeV**, against 31.3% for ``flux``. That is a large part
+        of why weighting by acceptance alone emptied a search (roadmap 6.42), alongside
+        the shape of the inferred response itself. Read it as *a different assumption*,
+        useful for asking what the instrument's own band favours, and not as the
+        assumption-free option.
     ``"flux_times_acceptance"``
         :math:`w(E) = E^{-\gamma} A(E)`, the event-rate integrand itself, and the right
         one when both the spectrum and a response table are trusted.
@@ -1248,7 +1311,8 @@ def spectrum_weighted_decay_probability(distance_m, energy_min_pev, energy_max_p
     Note a steep spectrum weights low energies heavily, where the tau decays readily --
     so a soft spectrum drives :math:`P` toward 1 and the term stops discriminating. That
     is the physics rather than a defect, but it means the spectral index deserves the
-    same scrutiny as any other assumption, and it is the reason ``"acceptance"`` exists.
+    same scrutiny as any other assumption -- including the :math:`\gamma = 0` that
+    ``"acceptance"`` quietly substitutes for it.
 
     Parameters
     ----------

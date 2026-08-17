@@ -88,6 +88,7 @@ oroscope-combine = "oroscope.combine_experiments:main"
 oroscope-crop = "oroscope.crop_dem:main"
 oroscope-sensitivity = "oroscope.sensitivity:main"
 oroscope-fetch-dem = "oroscope.fetch_dem:main"
+oroscope-fetch-roads = "oroscope.fetch_roads:main"
 
 # A real package, `oroscope`, rather than the flat top-level modules this used to
 # install. Flat modules were right while the names were still moving -- they let a
@@ -124,10 +125,23 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 exclude_also = [
-    # The Numba kernels. Not untested -- tests/test_arrival_scan.py drives every one of
-    # them against closed-form terrain -- but @jit compiles to machine code and
-    # coverage.py traces Python bytecode, so no line of a compiled body can ever be
+    # The Numba kernels. Not untested -- tests/test_arrival_scan.py drives the scanning
+    # ones against closed-form terrain, test_physics.py drives _rfi_exposure and
+    # test_capacity.py drives count_grid_capacity -- but @jit compiles to machine code
+    # and coverage.py traces Python bytecode, so no line of a compiled body can ever be
     # recorded as executed. Left in, they report permanently-missing lines that no test
     # could close, which makes a real regression indistinguishable from the noise floor.
+    #
+    # To measure them for real, disable the compiler and they become ordinary Python:
+    #
+    #     NUMBA_DISABLE_JIT=1 coverage run -m unittest discover -s tests -t tests \
+    #         -p "test_arrival_scan.py"
+    #     coverage report --include="*arrival_scan*"        # 90%, kernels included
+    #
+    # Not the default, and not in CI: interpreted, the kernels run about a hundred times
+    # slower and the whole suite does not finish in ten minutes. Run it by hand after
+    # touching a kernel. Note that fastmath reassociates, so a test comparing two nearly
+    # equal results needs a tolerance to pass both ways -- see
+    # test_nearest_sampling_blocks_more_than_bilinear.
     '^\s*@jit',
 ]

@@ -1,0 +1,52 @@
+{
+  "runs": [
+    {
+      "label": "GRAND",
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/lima_full_grand",
+      "pixels": 3441005,
+      "area_km2": 51208.98047060799,
+      "reported_capacity": 58669,
+      "reported_sites": 1,
+      "area_in_joint_km2": 509.8269990779114,
+      "fraction_of_own_area_in_joint": 0.009955812328084382
+    },
+    {
+      "label": "TAMBO",
+      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/lima_full_tambo",
+      "pixels": 61509,
+      "area_km2": 915.375938066532,
+      "reported_capacity": 42549,
+      "reported_sites": 84,
+      "area_in_joint_km2": 509.8269990779114,
+      "fraction_of_own_area_in_joint": 0.5569591441902811
+    }
+  ],
+  "pixel_area_km2": 0.014881983743298249,
+  "joint_requires": [
+    "GRAND",
+    "TAMBO"
+  ],
+  "joint": {
+    "pixels": 34258,
+    "area_km2": 509.8269990779114
+  },
+  "union": {
+    "pixels": 3468256,
+    "area_km2": 51614.52940959661
+  },
+  "pairwise_overlap": {
+    "GRAND & TAMBO": {
+      "area_km2": 509.8269990779114,
+      "jaccard": 0.00987758689093308,
+      "fraction_of_GRAND": 0.009955812328084382,
+      "fraction_of_TAMBO": 0.5569591441902811
+    }
+  },
+  "membership_encoding": {
+    "description": "bit i is set where run i's mask is set",
+    "bits": {
+      "0": "GRAND",
+      "1": "TAMBO"
+    }
+  }
+}

@@ -1,0 +1,277 @@
+==============================================================================
+ WHAT THIS SEARCH FOUND, AND WHY
+==============================================================================
+
+THE RUN
+-------
+  DEM              /home/mbustamante/Research/GRAND/oroscope/input/dem/ancash_SRTMGL1.tif
+  Origin           -8.049583, -78.658750  (auto-detected from the GeoTIFF tiepoint)
+  Resolution       0.00027778°/px  =  30.7 m N-S x 30.5 m E-W
+  Layout           distributed search, hex grid, 0.15 km spacing
+  Finished         2026-08-17 04:34:27
+  Code             commit 8c73445 on dev (dirty tree)
+  DEM checksum     sha256 182f1b4e41cfc381…
+  Command          tools/run_full_dem.py --region ancash
+
+THE HEADLINE
+------------
+  62 sites covering 740.0 km² between them, 34,275 detectors against a target
+  of 5,000.
+
+  Largest by capacity: site 14415, 30.32 km², 1,456 detectors, facing S,
+  centred -10.5136, -77.2081 — paste that into a map.
+
+WHERE THE CANDIDATES WENT
+-------------------------
+  stage                           |         pixels |   of DEM |  of prev
+  ----------------------------------------------------------------------
+  DEM pixels                      |     68,571,090 | 100.000% |         -
+  finite elevation                |     68,571,090 | 100.000% | 100.000%
+  slope 20.0-60.0 deg             |     33,943,993 |  49.502% |  49.502%
+  kept by stride 5                |      6,788,807 |   9.900% |  20.000%
+  directions accepted             |      5,540,555 |   8.080% |  81.613%
+  score >= 0.35                   |        663,209 |   0.967% |  11.970%
+  after gap closing               |      2,612,764 |   3.810% | 393.958%
+  after pruning (< 0.0 km wide)   |      2,612,764 |   3.810% | 100.000%
+  pixels in selected sites (est.) |        789,552 |   1.151% |  30.219%
+
+  The binding constraint is “score >= 0.35”. It kept 12.0% of the 5,540,555
+  pixels that reached it, a larger cut than any other stage made — so it, not
+  the stages around it, is what set the size of this result.
+
+  To move it, change: min_score -- or switch to --score_percentile, which is
+  rank-based.
+
+  “kept by stride 5” is not a constraint. Striding subsamples the candidates
+  deliberately, and acceptance was measured identical at strides 1 and 5 on a
+  GRAND-scale search. How well the gaps it leaves are closed again depends on
+  the closing element, which the next section measures for this run.
+
+FROM PIXELS TO SITES
+--------------------
+  15,440 connected regions were labelled. 62 were large enough (at least 375
+  pixels), 62 then held enough detectors (at least 250), and 62 were
+  selected.
+
+  Almost every region was too small. That is the signature of an accepted set
+  that is scattered rather than contiguous — worth checking min_width_km and
+  gap_close_km before reading the area.
+
+THE SITES
+---------
+      id |  area km² |  capacity | facing |  score | weakest component
+  --------------------------------------------------------------------
+   14415 |     30.32 |     1,456 |      S |  0.492 | solid_angle (0.57)
+   14695 |     29.54 |     1,419 |      S |  0.482 | solid_angle (0.57)
+   14574 |     30.53 |     1,408 |     SW |  0.455 | solid_angle (0.54)
+   14505 |     23.90 |     1,135 |      S |  0.501 | solid_angle (0.58)
+     480 |     22.97 |     1,083 |      S |  0.455 | solid_angle (0.54)
+   14746 |     22.96 |     1,078 |      S |  0.487 | solid_angle (0.56)
+   14656 |     22.51 |     1,071 |     SE |  0.490 | solid_angle (0.56)
+    5664 |     22.43 |     1,037 |     SE |  0.493 | solid_angle (0.55)
+    5522 |     22.00 |     1,031 |     SE |  0.465 | solid_angle (0.52)
+    3494 |     21.88 |     1,008 |     SE |  0.488 | solid_angle (0.58)
+    4753 |     20.50 |       960 |      W |  0.467 | solid_angle (0.51)
+    1089 |     20.80 |       938 |     SW |  0.451 | solid_angle (0.55)
+    5110 |     19.24 |       896 |      S |  0.480 | solid_angle (0.54)
+    5553 |     16.79 |       800 |      S |  0.489 | solid_angle (0.54)
+    4201 |     17.27 |       766 |     SW |  0.445 | solid_angle (0.52)
+    3134 |     14.23 |       651 |     SW |  0.503 | solid_angle (0.61)
+   14256 |     12.96 |       602 |      S |  0.458 | solid_angle (0.56)
+     145 |     13.20 |       598 |      E |  0.453 | solid_angle (0.55)
+    5444 |     12.96 |       598 |     SE |  0.480 | solid_angle (0.57)
+    6363 |     12.90 |       582 |      W |  0.448 | solid_angle (0.53)
+    4017 |     12.22 |       555 |     SE |  0.477 | solid_angle (0.57)
+    1708 |     10.75 |       512 |     SE |  0.492 | solid_angle (0.60)
+   15253 |     10.29 |       480 |     NW |  0.470 | solid_angle (0.58)
+   14872 |     10.21 |       474 |      S |  0.467 | solid_angle (0.56)
+    4511 |      9.72 |       457 |      E |  0.499 | solid_angle (0.56)
+  … and 37 more, in the results JSON.
+
+  “solid_angle” is the weakest component at 62 of 62 sites (100%). Under a
+  product composition the weakest component bounds the total from above, so
+  that is where a better site would have to come from.
+
+WHY THESE SITES QUALIFY
+-----------------------
+  What the terrain at each one actually offers. The score is a product of
+  named criteria, so a site can be described rather than merely ranked —
+  these are the criteria it satisfies, with the measurement that earned each.
+
+  Site 14415 — 30.32 km², 1,456 detectors, facing S, centred -10.5136, -77.2081
+      Measured: 0.35 sr of accepted sky, targets at 3,271 m, striking 36°
+      terrain, 787,136 g/cm² of rock behind, at 2,406 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (787,136 g/cm²) — 1.00
+        • exit distance (3,271 m) — 1.00
+        • shower development (308 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,406 m) — 0.91
+      Held back by accepted sky at 0.57, which under a product composition is
+      what bounds the total.
+
+  Site 14695 — 29.54 km², 1,419 detectors, facing S, centred -10.5706, -77.2235
+      Measured: 0.36 sr of accepted sky, targets at 3,163 m, striking 37°
+      terrain, 792,346 g/cm² of rock behind, at 2,354 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (792,346 g/cm²) — 1.00
+        • exit distance (3,163 m) — 1.00
+        • shower development (301 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,354 m) — 0.89
+      Held back by accepted sky at 0.57, which under a product composition is
+      what bounds the total.
+
+  Site 14574 — 30.53 km², 1,408 detectors, facing SW, centred -10.5556, -77.1201
+      Measured: 0.31 sr of accepted sky, targets at 3,263 m, striking 36°
+      terrain, 785,731 g/cm² of rock behind, at 2,681 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (785,731 g/cm²) — 1.00
+        • exit distance (3,263 m) — 1.00
+        • shower development (297 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,681 m) — 0.89
+      Held back by accepted sky at 0.54, which under a product composition is
+      what bounds the total.
+
+  Site 14505 — 23.90 km², 1,135 detectors, facing S, centred -10.5251, -77.2715
+      Measured: 0.37 sr of accepted sky, targets at 3,245 m, striking 38°
+      terrain, 793,915 g/cm² of rock behind, at 2,330 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (793,915 g/cm²) — 1.00
+        • exit distance (3,245 m) — 1.00
+        • shower development (307 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,330 m) — 0.91
+      Held back by accepted sky at 0.58, which under a product composition is
+      what bounds the total.
+
+  Site 480 — 22.97 km², 1,083 detectors, facing S, centred -8.1733, -77.6112
+      Measured: 0.31 sr of accepted sky, targets at 3,254 m, striking 37°
+      terrain, 792,346 g/cm² of rock behind, at 2,628 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (792,346 g/cm²) — 1.00
+        • exit distance (3,254 m) — 1.00
+        • shower development (297 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,628 m) — 0.89
+      Held back by accepted sky at 0.54, which under a product composition is
+      what bounds the total.
+
+  Site 14746 — 22.96 km², 1,078 detectors, facing S, centred -10.5973, -77.2816
+      Measured: 0.34 sr of accepted sky, targets at 3,276 m, striking 37°
+      terrain, 792,346 g/cm² of rock behind, at 2,275 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (792,346 g/cm²) — 1.00
+        • exit distance (3,276 m) — 1.00
+        • shower development (311 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,275 m) — 0.92
+      Held back by accepted sky at 0.56, which under a product composition is
+      what bounds the total.
+
+  The remaining 56 sites are in the results file, each with the same
+  per-criterion record.
+
+  Every selected site satisfies: column depth, exit distance, footprint
+  sampling, shower development, tau decay. That is a statement about this
+  terrain, not about any one site — and if a criterion is satisfied
+  everywhere, it is not discriminating between sites and its threshold is
+  worth checking.
+
+WHAT ENERGY THIS GEOMETRY FAVOURS
+---------------------------------
+  Folding each site's accepted solid angle and area against the tau decay
+  length gives a geometric aperture that peaks near 63 PeV (analytically 67
+  PeV), at 8.06e+07 m² sr.
+
+           1 PeV    4.57e-10  
+           4 PeV     8.7e+03  
+          16 PeV    1.84e+07  #########
+          63 PeV    8.06e+07  ########################################
+         251 PeV    4.56e+07  #######################
+       1,000 PeV    1.41e+07  #######
+       3,981 PeV    3.74e+06  ##
+      15,849 PeV    9.53e+05  
+      63,096 PeV     2.4e+05  
+
+  Relative, not absolute: this is geometry and an analytic decay factor, with
+  no flux, no cross-section and no detector response. The detector acceptance
+  A(E) is the one thing no available table supplies, and it is why these are
+  apertures in shape only.
+
+HOW TO READ THESE NUMBERS
+-------------------------
+  Reported area is not physics-accepted area. The mask is closed
+  morphologically with a 0.15 km element before areas are measured. Closing
+  is not wrong — a site has to be a deployable region rather than a scatter
+  of pixels — but it moves the number, and at Colca with a 1 km element it
+  inflated the reported area by 2.35× against a stride-1 control. Set
+  gap_close_km to 0 to see the accepted area directly.
+
+  This run's own funnel puts that factor at 0.79× — below 1, so here closing
+  did not inflate. The element is only a few pixels across at this spacing,
+  too small to bridge the gaps candidate_stride left, so the area above
+  understates the accepted set rather than overstating it. A stride-1 control
+  run is the way to settle it.
+
+  Area and capacity are measured on different grids. Area comes from the map
+  downsampled by 4, capacity from the full-resolution mask, so a feature a
+  few pixels wide loses area while keeping its detectors — around 30% for a
+  canyon strip. Use downsample_factor 1 for thin features.
+
+  The scores rank sites against each other for one experiment and one energy
+  band. They are not apertures, and no flux or detector response has been
+  folded in.
+
+  The layout is anchored, not fitted: detectors are placed from each site's
+  bounding-box corner rather than optimised, so capacity is an estimate for
+  an arbitrarily placed array.
+
+WHICH OF THESE ARE ASSUMPTIONS
+------------------------------
+  Choices, not measurements. Check them before quoting a result.
+
+  • min_score = 0.35
+      A cut on a product of components, whose distribution piles up near
+      zero, so any threshold in the middle sits on a cliff. Measured on one
+      search: 0.0, 0.35 and 0.5 gave 45928, 2056 and zero detectors. This is
+      the dominant assumption — prefer --score_percentile.
+  • decay_spectral_index = 2, pinned
+      The flux slope the decay term is folded against. Capacity varies by
+      1.46× across a plausible range.
+  • min_target_slope_deg = 25°
+      The floor separating a canyon wall from a hillside. Strongly selective:
+      0°, 25° and 35° gave 7442, 2056 and zero detectors.
+  • max_range_km = unset
+      Column depth accumulates over the whole profile walk, which then stops
+      at max_dist_km — so the reported depth is a property of where the walk
+      stopped, not of the target's thickness. Measured on TAMBO at Colca:
+      walking to 20 km instead of the 5 km distance window raised the
+      reported depth 6.4× and changed the selection not at all. Read this
+      depth as a lower bound. Do not simply set it large, though — at 60 km
+      the same run kept only 6.0% of directions against 17.5%, so the walk
+      length is a parameter to check rather than to maximise.
+
+  Not modelled at all: tau production and escape through rock (so β, the
+  energy-loss constant, does not enter these numbers — the decay length used
+  here is kinematics, E/m·cτ, and carries no β), neutral-current regeneration
+  (so Earth-chord suppression is overstated), shower simulation, detector
+  response and trigger, and any geology beyond one standard rock density.
+  Nothing here has been checked against an external simulation.
+
+WHAT TO TRY NEXT
+----------------
+  Chosen from what this run did, not a generic list.
+
+  Test the constraint that bound this run — “score >= 0.35”
+      oroscope-sensitivity <config> --sweep min_score <values>
+
+  Replace the absolute score cut with a rank, which is scale-free
+      oroscope <config> --score_percentile 10   (instead of --min_score 0.35)
+
+  See the area the physics accepted, without morphological closing
+      oroscope <config> --gap_close_km 0
+
+  Confirm the stride is unbiased at this closing element
+      oroscope <config> --candidate_stride 1   (currently 5)

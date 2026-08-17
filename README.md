@@ -77,85 +77,33 @@ per-experiment criteria and turned into sites with detector capacity.
 
 ---
 
-## 1. Requirements
+## 1. Install and get a DEM
 
-The package requires **Python 3.9+**. Due to the heavy reliance on C-compiled math and geospatial array processing, using a virtual environment (like Conda) is highly recommended.
-
-### Core Dependencies:
-
-* `numpy` (Core matrix math)
-* `scipy` (Morphological image processing and connected-component labeling)
-* `numba` (JIT compiler for parallelized physics kernels)
-* `tifffile` (Reading/Writing large geospatial TIFFs)
-* `matplotlib` (Generating visualization maps and extracting KML contours)
-* `tqdm` (Progress bars)
-* `psutil` (Optional, used for printing system RAM diagnostics)
-
-**Installation via pip:**
+Python 3.9+.
 
 ```bash
 pip install oroscope          # or, from a clone: pip install -e .
 ```
 
-That installs the dependencies and five console scripts: `oroscope`,
-`oroscope-combine`, `oroscope-crop`, `oroscope-sensitivity` and `oroscope-fetch-dem`.
+That pulls in the dependencies and installs six console scripts: `oroscope`,
+`oroscope-combine`, `oroscope-crop`, `oroscope-sensitivity`, `oroscope-fetch-dem` and
+`oroscope-fetch-roads`.
 
-### Automated Conda Environment Generation:
-
-Instead of installing packages manually, you can use the included `generate_env.py` script. This tool parses the main script using Python's Abstract Syntax Tree (AST) to securely identify all required third-party dependencies, checks what is missing from your active environment, and generates a clean, `conda-forge` prioritized `environment.yml` file.
-
-**Usage:**
-
-```bash
-# Generate environment.yml from what the code actually imports.
-# Run from src/: it reads site_searcher.py in the working directory.
-cd src && python generate_env.py
-
-# Create the new Conda environment from the generated file
-conda env create -f environment.yml
-
-# Activate the environment
-conda activate oroscope
-
-```
-
-It parses the sources rather than importing them, so it works in an environment where
-the dependencies are precisely what is not installed yet. `pyproject.toml` remains the
-authoritative list.
-
----
-
-## 2. Setup & Data Acquisition
-
-The script requires a **Digital Elevation Model (DEM)** in `.tif` format, optimized for ~30-meter resolution models. We highly recommend using **[OpenTopography](https://opentopography.org/)** to acquire this data (e.g., SRTM or ALOS AW3D30).
-
-### Automated Setup (Recommended)
-
-We provide a `fetch_dem.py` script that verifies your environment dependencies, automatically downloads the required DEM files for the primary target regions (Lima and Arequipa), and generates ready-to-use configuration files.
-
-**Step 1: Obtain an OpenTopography API Key**
-
-1. Create a free account at [OpenTopography](https://portal.opentopography.org/myopentopo).
-2. Log in and navigate to the **"myOpenTopo"** dashboard.
-3. Click on **"Request an API Key"** to generate your unique authorization token.
-
-**Step 2: Run the Setup Script**
-Pass your API key to the setup script to begin the automated download and configuration process:
+A search needs a **Digital Elevation Model** in `.tif` form, ~30 m resolution. Four
+regions are bundled and fetch themselves, given a free
+[OpenTopography](https://portal.opentopography.org/myopentopo) key:
 
 ```bash
-oroscope-fetch-dem --open_topography_api_key YOUR_API_KEY_HERE
-
+oroscope-fetch-dem --region arequipa --open_topography_api_key YOUR_KEY
 ```
 
-This downloads the `.tif` files into `../input/dem/` and generates matching JSON config
-files in `../config/`. Run it from `src/`, since both paths are relative to it.
+It writes the `.tif` into `input/dem/` and a matching configuration into `config/`,
+both relative to the working directory unless `--output_dir` and `--config_dir` say
+otherwise.
 
-### Manual Setup
-
-If you are targeting a region other than Lima or Arequipa:
-
-* Download the required regional tiles manually via the OpenTopography web portal.
-* **Preparation:** If your target region spans multiple tiles, merge them into a single `.tif` using a GIS tool like QGIS or GDAL (`gdal_merge.py`) before running the script.
+**[Installation and data →](https://mbustama.github.io/oroscope/installation.html)** for
+conda environments, `oroscope.generate_env`, merging tiles for a region of your own, and
+what each bundled DEM covers.
 
 ---
 
@@ -312,49 +260,23 @@ A complete run will produce the following files inside that directory:
 
 ---
 
-## 3b. Development: tests and benchmarks
+## 3b. Development
 
-The test suite uses only the standard library's `unittest`, so it runs anywhere the
-tool itself runs — no extra dependencies. Terrain fixtures are synthetic with
-analytically known slope, aspect, target distance and canyon geometry, so assertions
-are against arithmetic rather than against a previous run.
+The suite is standard-library `unittest` only, so it runs anywhere the tool does.
+Terrain fixtures are synthetic with analytically known slope, aspect, target distance
+and canyon geometry, so assertions are against arithmetic rather than a previous run.
 
 ```bash
 cd tests && python -m unittest discover
 ```
 
-Tests that need a real DEM skip automatically when `input/dem/` is absent (it is
-gitignored). After an intended change to results, regenerate the golden files:
+Tests needing a real DEM skip when `input/dem/` is absent. After an intended change to
+results, regenerate the golden files with `UPDATE_GOLDEN=1`.
 
-```bash
-cd tests && UPDATE_GOLDEN=1 python -m unittest test_regression
-```
-
-The benchmark harness records per-stage wall time and peak memory on fixed inputs and
-compares against `bench/baseline.json`, failing if any stage slows by more than 30%:
-
-```bash
-python bench/benchmark.py
-```
-
-Every run also writes a **selection funnel** to the log and results JSON, showing how
-many pixels survived each filter, plus a `provenance.json` capturing the git commit,
-DEM checksum, resolved parameters and package versions. When a search returns no
-sites, the funnel is the first place to look.
-
-And every run **explains itself**, in plain language, at the end and in
-`explanation.txt`: what was found, which funnel stage set the size of the answer and
-which parameter to change, which named score component held each site back, and which
-of the numbers are assumptions rather than measurements. On by default; `--no_explain`
-suppresses it. Any results file can be re-explained later without re-running anything:
-
-```python
-import json, explain
-print(explain.explain_results(json.load(open("output/.../oroscope_results_colca.json"))))
-```
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the development plan and a review of the
-current selection criteria.
+**[Implementation notes →](https://mbustama.github.io/oroscope/implementation.html)**
+for the benchmark harness, coverage of the Numba kernels, and the failure modes worth
+knowing about. [docs/ROADMAP.md](docs/ROADMAP.md) carries the development plan and every
+measurement behind the current criteria.
 
 ---
 
@@ -377,142 +299,22 @@ Nothing here is required except a DEM: `origin_lat`/`origin_lon` are read from t
 own GeoTIFF tiepoint when omitted, and a supplied origin that disagrees with the file by
 more than ~100 m is reported rather than silently honoured.
 
-### Complete List of Options
+### The options
 
-Every option the tool accepts. Anything shaping a result is here — nothing that matters
-is hard-coded.
+There are 93 of them, and the complete reference — every flag with its type, default and
+what it does — lives on the **[CLI page](https://mbustama.github.io/oroscope/cli.html)**.
+It is generated against the parser and a test fails if the two drift, which a copy here
+could not promise: this README carried its own table until it had quietly fallen ten
+flags behind and was documenting one that no longer existed.
 
-#### Required Data Inputs
+The four worth knowing before the first run:
 
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--dem_path` | String | — | Path to the input elevation `.tif`. The only genuinely required input. |
-| `--origin_lat` | Float | from DEM | Latitude of the DEM's north-west corner. Read from the GeoTIFF tiepoint when omitted, which is the recommended use. |
-| `--origin_lon` | Float | from DEM | Longitude of the same corner. |
-
-#### Physical Layout & Geometry
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--target_antennas` | Int | `10000` | Capacity wanted from the array. |
-| `--antenna_spacing_km` | Float | `1.0` | Distance between detectors. |
-| `--grid_type` | String | `hex` | Deployment lattice, `hex` or `square`. |
-| `--min_width_km` | Float | `2.0` | Narrowest feature to keep. `0` disables pruning, which is what a strip along a canyon wall needs. |
-| `--min_sub_array_size` | Int | `500` | Capacity a disconnected sub-array must reach to count. |
-| `--search_mode` | String | `distributed` | `single` finds one monolithic site; `distributed` allows sub-arrays. |
-| `--stop_at_target` | Flag | off | Stop selecting sites once `target_antennas` is met. Sites are ranked by capacity, so this reports the best sites for the array actually wanted rather than every patch of qualifying ground. |
-| `--gap_close_km` | Float | `antenna_spacing_km` | Morphological closing element. Closing more than doubled the reported area on real terrain (2.29× at Colca), so this is worth setting deliberately; `0` disables it. |
-
-#### Topographic Screening
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--min_slope_deg` | Float | `3.0` | Minimum terrain steepness. |
-| `--max_slope_deg` | Float | `25.0` | Maximum terrain steepness. |
-| `--slope_baseline_m` | Float | DEM resolution | Ground distance over which slope is measured. It matters: the same terrain gives a median 17.8° at ~61 m and 10.8° at 1 km. |
-| `--min_altitude` | Float | `None` | Minimum site altitude, in metres. |
-| `--max_altitude` | Float | `None` | Maximum site altitude, in metres. |
-| `--min_aspect_deg` | Float | `None` | Restrict sites to a facing direction (0–360). |
-| `--max_aspect_deg` | Float | `None` | Upper bound of that range. |
-| `--candidate_stride` | Int | `5` | Keep every Nth screened pixel before scanning. Measured unbiased against a stride-1 control. Use `1` to scan every candidate. |
-
-#### The Arrival Scan
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--min_dist_km` | Float | `10.0` | Nearest accepted exit point. |
-| `--max_dist_km` | Float | `80.0` | Furthest accepted exit point. |
-| `--energy_min_pev` | Float | `None` | Lower tau energy, in PeV. With `--energy_max_pev`, derives the decay-baseline distance window instead of setting it by hand. |
-| `--energy_max_pev` | Float | `None` | Upper tau energy, in PeV. |
-| `--elev_min_deg` | Float | `-3.0` | Lower edge of the accepted arrival-elevation window. |
-| `--elev_max_deg` | Float | `3.0` | Upper edge of that window. |
-| `--n_elev_bins` | Int | `12` | Bins across the window. Nearly free: one profile walk serves every bin. |
-| `--n_azimuths` | Int | `9` | Azimuths per candidate. **This is what sets the cost.** |
-| `--azimuth_half_width_deg` | Float | `60.0` | Half-width of the azimuth fan about the pixel's aspect. `-1` sweeps the full 360°. |
-| `--max_range_km` | Float | `max_dist_km` | How far each profile is walked. Worth setting larger for a short-range search, or the reported column depth is a property of where the walk stopped rather than of the target. |
-| `--min_column_depth_gcm2` | Float | `0.0` | Column depth a direction must have to count. |
-| `--min_target_slope_deg` | Float | `None` | Require the struck terrain to be at least this steep, along the arrival azimuth. This is what separates a canyon *wall* from a hillside. |
-| `--max_target_slope_deg` | Float | `None` | Upper bound on the struck terrain's slope. |
-| `--muon_shielding_km` | Float | `None` | Rock overburden required to reject atmospheric muons (TAMBO quotes >4). A floor on column depth, not a band. |
-| `--require_sky` | Flag | off | Invert the test: accept directions reaching clear sky, for cosmic-ray-style channels. |
-| `--nearest_sampling` | Flag | off (bilinear on) | Sample profiles at pixel centres instead of interpolating. Faster, but treats terrain as blocky, which over-estimates blocking. Measured: bilinear gives +13.4% acceptance at 1.44× cost. |
-| `--refraction_k` | Float | `4/3` | Refraction k-factor, **radio path only**. Particle trajectories always use the true Earth radius. |
-
-#### Radio Propagation
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--fresnel_frequency_mhz` | Float | `None` | Band for the Fresnel clearance measurement, e.g. 50. Omitting it skips that pass entirely. |
-| `--antenna_height_m` | Float | `2.0` | Antenna height above ground, for that measurement. |
-| `--fresnel_near_field_m` | Float | `500.0` | Skip this much of the path when measuring clearance. Below ~500 m the measure is dominated by the ground beside the antenna. |
-| `--include_near_field` | Flag | off (excluded) | Measure from the antenna outward instead. For study only, for the reason above. |
-| `--geomag_declination_deg` | Float | `-6.9` | Declination, degrees east of north. **Does not follow the site** — supply the IGRF value per region. |
-| `--geomag_inclination_deg` | Float | dipole | Inclination, positive downward. Defaults to a centred-dipole estimate at the DEM's own centre, so it does follow the site. |
-| `--no_geomagnetic` | Flag | off (weighting on) | Ignore the geomagnetic angle and weight all directions equally. Radio emission goes as \|v × B\|; particles do not care. |
-
-#### Shower and Scoring
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--min_score` | Float | `0.0` | Discard candidates scoring below this. **A product score has no safe threshold** — measured, 0.0/0.35/0.5 gave 45928/2056/0 detector positions. Prefer the percentile below. |
-| `--score_percentile` | Float | `None` | Keep this percentage of viable candidates by rank instead. Scale-free, and preferred for exactly that reason. |
-| `--score_composition` | String | `product` | How components combine: `product`, `mean` or `min`. |
-| `--score_weights` | String | `None` | Per-component weights for `weighted` composition, as `shower=2,solid_angle=1`. |
-| `--grammage_mode` | String | `radio` | How atmospheric depth is scored: `radio` is a maturity threshold (emission comes from shower maximum and then propagates through transparent air); `particle` is a band (particle content dies after maximum). |
-| `--grammage_maturity_gcm2` | Float | `700` | Depth at which the `radio` ramp reaches 1. |
-| `--grammage_band_gcm2` | Float ×2 | `(700, 2800)` | Depth band scoring 1 in `particle` mode. A short crossing gives far less — Colca supplies ~170 g/cm², so this must be lowered there or nothing scores. |
-| `--grammage_band_fraction` | Float | `0.1` | Fraction of peak particle content still counting as a usable shower, when the band is derived from an energy range. |
-| `--shower_elongation_rate_gcm2` | Float | `55` | How much deeper shower maximum sits per decade of energy. 85 for a purely electromagnetic cascade. |
-| `--shower_lambda_gcm2` | Float | `70` | Gaisser–Hillas interaction length, setting how fast the profile rises and falls. |
-| `--shower_development_m` | Float | `3000.0` | Path the shower needs after the tau decays. |
-| `--depth_band_gcm2` | Float ×2 | `None` | Column-depth band scoring 1. A band, not a floor: the tau must be produced *and* escape. |
-| `--distance_band_m` | Float ×2 | decay window | Exit-distance band scoring 1. |
-| `--solid_angle_half_sr` | Float | `0.05` | Accepted solid angle scoring 0.5. The default is GRAND-scale; a canyon experiment sees far more sky, and leaving it here saturates the term. |
-| `--clearance_full_at` | Float | `1.0` | Fresnel clearance ratio, in first-Fresnel radii, that scores 1. |
-| `--nu_interaction_length_gcm2` | Float | `None` | Neutrino interaction length, enabling the Earth-chord attenuation term (order 1e8 near an EeV). |
-| `--decay_energy_pev` | Float | `None` | Score the decay probability at a single tau energy. Left off by default: across one experiment's reach this *chooses* the answer rather than approximating it. |
-| `--decay_energy_min_pev` | Float | `None` | Lower end of the energy range for the decay term. With the maximum, folds the probability over a power-law spectrum — the defensible form. |
-| `--decay_energy_max_pev` | Float | `None` | Upper end of that range. |
-| `--decay_spectral_index` | Float ×1–2 | `2.0` | Spectral index γ for the folded decay term. One value pins the spectrum; two marginalise uniformly over the range, which says "not known" rather than pretending to a value. |
-
-#### Logistics & Exclusions
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--rfi_zones` | String | `none` | Radio exclusion zones: a preset (`lima`, `arequipa`) or a JSON list of polygons/circles. |
-| `--road_map_path` | String | `None` | Aligned `.tif` of distance-to-roads. |
-| `--max_road_dist_km` | Float | `20.0` | Maximum allowed distance from a road, when a road map is given. |
-
-#### Compute & System Management
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--num_cores` | Int | `-1` | CPU threads for the scan. `-1` uses all available. Measured scaling: 1.85× at 2 threads, 3.70× at 8. |
-| `--tile_size` | Int | `2048` | Square chunk loaded into RAM at a time. Reduce if memory is tight. |
-| `--downsample_factor` | Int | `4` | Coarsening applied before labelling and area measurement. Memory scales as its inverse square — the knob that matters most for a large DEM. |
-| `--cell_size_deg` | Float | from DEM | Map resolution in degrees per pixel. Read from the GeoTIFF's own tags; set only to override a DEM with wrong metadata. |
-| `--max_memory_gb` | Float | 80% of free | Ceiling on the process's address space, in GiB, so a search that outgrows the machine fails with `MemoryError` rather than inviting the OOM killer to pick a victim. `0` disables the cap. |
-| `--resume` | Flag | off | Resume from the ray-tracing checkpoint if buffers exist. |
-| `--resume_dir` | String | run dir | Path to a failed run's directory to resume from. |
-
-#### Output & Metadata
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--region_name` | String | `None` | Cosmetic name printed on the visualization map. |
-| `--generate_kml` | Flag | off | Also write a Google Earth `.kml` of the findings. |
-| `--output_image_format` | String | `png` | Format of the map: `png`, `pdf`, `svg`. |
-| `--output_directory_base_with_given_json` | String | `../output/` | Base directory for run folders. |
-| `--no_explain` | Flag | off (explain on) | Suppress the plain-language run summary. It is **on** by default: printed at the end and saved as `explanation.txt`. |
-| `--no_print_info` | Flag | off (info on) | Skip the explanatory banner printed before a run. |
-
-#### Configuration Tools
-
-| Argument | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--config_path` | String | `None` | JSON configuration file to read. |
-| `--generate_config` | String | `None` | Write a template naming every key to this path, then exit. |
-| `--config_preset` | String | `default` | Preset to inject into that template: `default`, `lima` or `arequipa`. |
+| Option | What it decides |
+| --- | --- |
+| `--config_path` | The configuration to run. Everything else has a default; an explicitly typed option beats the file. |
+| `--candidate_stride` | The memory and time lever. Unbiased in acceptance, but it costs area unless the closing element outruns the gap it leaves. |
+| `--downsample_factor` | The resolution area and sites are measured at. Costs a thin feature more than a blocky one. |
+| `--max_memory_gb` | An address-space cap. Leave it unset for 80% of what is free; a search that reaches the OOM killer takes the session with it. |
 
 ## 5. Internal Workings: The 6-Step Pipeline
 

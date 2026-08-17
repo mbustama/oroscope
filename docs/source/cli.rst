@@ -159,16 +159,111 @@ Read this before quoting a capacity. Several criteria sit near cliffs.
 
 .. code-block:: shell
 
-   oroscope-fetch-dem --open_topography_api_key YOUR_KEY
+   oroscope-fetch-dem --region arequipa --open_topography_api_key YOUR_KEY
+   oroscope-fetch-dem --region peru                     # key from the environment
+   oroscope-fetch-dem                                   # all four regions
 
-Fetches the bundled regions — Lima and Arequipa — into ``input/dem/`` and writes a
-ready-to-run configuration for each. The key is free from
-`OpenTopography <https://portal.opentopography.org/myopentopo>`_.
+Fetches a bundled region into ``input/dem/`` and writes a ready-to-run configuration
+for it.
 
-Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/``, both relative
-to the working directory. Unlike the search, this one has not been made
-config-relative — there is no configuration file to be relative *to* — so it still
-needs a directory one level below the repository root.
+.. list-table::
+   :header-rows: 1
+   :widths: 12 16 14 58
+
+   * - ``--region``
+     - dataset
+     - size
+     -
+   * - ``arequipa``
+     - SRTMGL1, 30 m
+     - 148 MB
+     - The department. Every published number in this project comes from it or from a
+       crop of it.
+   * - ``ancash``
+     - SRTMGL1, 30 m
+     - 95 MB
+     - The Cordillera Blanca and the Callejón de Huaylas. Run at the same resolution
+       and criteria as Arequipa, so the two are directly comparable.
+   * - ``lima``
+     - SRTMGL1, 30 m
+     - 110 MB
+     - Coastal, and a useful contrast: desert shelf rising to the western Andean flank.
+       **SRTMGL1, not the AW3D30 it used to fetch** — the three department runs are
+       compared against one another, and a dataset difference would sit inside every
+       comparison as a confound.
+   * - ``peru``
+     - SRTMGL3, 90 m
+     - 302 MB
+     - The whole country. 3 arc-seconds, not by preference — see
+       ``config/grand_peru_survey.json``.
+
+**Getting a key.** It is free and takes a minute.
+
+1. Register at `OpenTopography <https://portal.opentopography.org/myopentopo>`_ and
+   sign in.
+2. Open **myOpenTopo Authorizations and API Key** from the account menu.
+3. Copy the key.
+
+Pass it as ``--open_topography_api_key``, or set ``OPENTOPOGRAPHY_API_KEY`` in the
+environment — which keeps it out of your shell history, and out of any file that might
+be committed by accident.
+
+.. warning::
+
+   **Requests are capped by area, per dataset:** 450,000 km² for every 30 m dataset and
+   4,050,000 km² for the 90 m ones. Peru's bounding box is about 2.86 million km², six
+   times over the 30 m limit, which is one of the two reasons ``peru`` is 3 arc-seconds.
+   The other is memory.
+
+Run it from ``src/``: it writes to ``../input/dem/`` and ``../config/`` by default, both
+relative to the working directory. Pass ``--output_dir`` and ``--config_dir`` to run it
+from anywhere else. Unlike the search, this one is not config-relative — there is no
+configuration file to be relative *to*.
+
+The configuration it writes is a **default template** pointed at the DEM. The tuned
+configurations that produced this project's numbers are committed in ``config/``
+alongside it, and those are the ones to run.
+
+
+``oroscope-fetch-roads`` — road geometry for the map
+------------------------------------------------------
+
+.. code-block:: shell
+
+   oroscope-fetch-roads --dem input/dem/arequipa_SRTMGL1.tif --places
+   oroscope --config_path config/grand_colca_config.json \
+       --roads_geojson input/roads/arequipa_SRTMGL1.geojson \
+       --settlements input/roads/arequipa_SRTMGL1_places.geojson
+
+Downloads roads from OpenStreetMap through Overpass and writes a GeoJSON, so a map can
+show what a site count cannot: whether the good ground is reachable. Over the Arequipa
+DEM that is 8,780 roads of motorway through tertiary class.
+
+**Drawing, not screening.** This changes no result. The searcher has a separate and
+older facility for access as a *criterion* — ``--road_map_path`` takes an aligned
+distance-to-road raster and ``--max_road_dist_km`` cuts on it, appearing in the funnel
+as ``road distance`` — which nothing yet produces and no bundled configuration uses.
+
+``--places`` fetches populated places — city, town, village — into a sibling
+``_places.geojson``, which ``--settlements`` then marks on the map. **This is how to get
+real town coordinates.** The bundled ``arequipa`` and ``lima`` presets are the handful of
+named places already curated as RFI zones; anything beyond them should be *sourced*, not
+written from memory, because a town in the wrong valley looks exactly like a town in the
+right one. Over the Arequipa DEM that is 1,268 places, and over the Colca crop it puts
+Chivay where OSM says it is.
+
+Markers scale with the place class and only the most important few are labelled — every
+place inside the map gets a marker, but sixty village names over one canyon is not a
+map. Raise ``max_labels`` on :func:`oroscope.add_settlements` if you want more.
+
+The bounding box is **tiled** and fetched a piece at a time, with a pause between
+requests and a fallback to a second mirror. A single query over the 3.5-degree Arequipa
+box answers with a gateway timeout; nine smaller ones succeed. Overpass is a shared
+free service, and the pacing is not optional politeness.
+
+Data is © OpenStreetMap contributors, ODbL. The loader carries that attribution inside
+the file and both maps print it beneath the axes, so it cannot be separated from the
+data by copying the picture.
 
 
 ``tools/make_animations.py`` — animations of the mechanism
@@ -176,17 +271,23 @@ needs a directory one level below the repository root.
 
 .. code-block:: shell
 
-   python tools/make_animations.py                    # all four, MP4 and GIF
+   python tools/make_animations.py                    # all eight, MP4 and GIF
    python tools/make_animations.py --only the_walk
    python tools/make_animations.py --format gif --out docs/source/_static
 
-Four animations, each showing a *process* whose intermediate states are the point —
+Eight animations, each showing a *process* whose intermediate states are the point —
 anything that is a single state is already a figure in :mod:`oroscope.figures`.
+:doc:`Notebook 9 <notebooks>` builds all of them and explains what each is for.
 
 ``the_walk``
    One backward ray sweeping down through the elevation window: the first intersection
    sliding along the profile and the column depth accumulating behind it. This is the
    mechanism the whole search rests on.
+
+``the_azimuth_fan``
+   The other half of that mechanism. ``the_walk`` sweeps elevation at one bearing; this
+   sweeps the bearing, and reports whether each one finds a wall at the accepted range,
+   the candidate's own hillside a few hundred metres off, or sky.
 
 ``the_funnel``
    The map draining stage by stage. The funnel table says where the candidates went;
@@ -196,26 +297,68 @@ anything that is a single state is already a figure in :mod:`oroscope.figures`.
    Why a closing element smaller than the stride gap loses the mask. Shown on the
    :doc:`assumptions` page.
 
+``product_collapse``
+   Why a threshold on a product is treacherous, and why the reason is dynamic: each
+   component multiplied in walks the population toward zero while the cut stays put.
+   Measured on Colca, 100% of candidates survive the cut before any component and 32%
+   after six — but the fall is not evenly shared, and one component contributes nothing
+   at all.
+
+``slope_criterion``
+   Where a criterion bites, as opposed to how much it costs. The accepted mask over
+   Colca as ``min_target_slope_deg`` climbs through the wall-slope distribution.
+
+``tau_in_rock``
+   More rock is not better. A tau's energy and survival falling as it burrows, against
+   the depth that maximises production and escape together — 5.7×10⁶ g/cm², about 22 km
+   of standard rock, at 1 EeV.
+
 ``energy_window``
    The arrival window narrowing as Earth absorption bites, its lower edge climbing from
    −4.4° at 100 PeV to −0.9° at 10 EeV.
 
-Everything is built from committed code and synthetic terrain, so these reproduce on
-any clone with no DEM present. MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs
-land in ``output/animations/``, which is gitignored.
+MP4 needs ``ffmpeg``; GIF falls back to pillow. Outputs land in ``output/animations/``,
+which is gitignored.
+
+Five of the eight are built from committed code and synthetic terrain and reproduce on
+any clone. The three that are about what happens on *real* ground —
+``the_azimuth_fan``, ``product_collapse`` and ``slope_criterion`` — read
+``input/dem/colca.tif`` when it is present and fall back to synthetic terrain when it
+is not, saying on the figure which they used.
 
 
-``tools/run_arequipa_full.py`` — the full-DEM run
----------------------------------------------------
+``tools/run_full_dem.py`` — the full-DEM runs
+-----------------------------------------------
 
 Not a console script — it lives in the repository, because it is about *this* project's
-full-DEM run rather than about searching in general. It runs GRAND, then TAMBO, then
-the combination, over the whole Arequipa DEM, and stores the small artefacts for
-:doc:`notebook 8 <notebooks>` to read.
+own runs rather than about searching in general. For one region it runs GRAND, then
+TAMBO, then the combination over the whole DEM, and stores the small artefacts for that
+region's :doc:`notebook <notebooks>` to read.
+
+Regions come from a table in the file, each needing a DEM in ``input/dem/`` and a
+``config/{grand,tambo}_<region>_full.json`` pair:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 20 66
+
+   * - ``--region``
+     - grid
+     -
+   * - ``arequipa``
+     - 129 Mpx, 1 arc-sec
+     - The default. GRAND takes about 25 minutes, TAMBO about one.
+   * - ``ancash``
+     - 69 Mpx, 1 arc-sec
+     - The Cordillera Blanca. Roughly half the pixels, so roughly half the time.
+
+This was ``run_arequipa_full.py``, which hard-coded one DEM, one store and one pair of
+configurations. The second region asked for was not a reason to copy two hundred lines.
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py --dry-run
+   python tools/run_full_dem.py --dry-run
+   python tools/run_full_dem.py --region ancash --dry-run
 
 **What ``--dry-run`` does.** It reports what the real run would cost and then stops,
 without starting a search, writing a file or touching the store:
@@ -265,13 +408,20 @@ Then, for real:
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py
+   python tools/run_full_dem.py                     # arequipa, the default
+   python tools/run_full_dem.py --region ancash
 
 or one experiment at a time:
 
 .. code-block:: shell
 
-   python tools/run_arequipa_full.py --only grand
+   python tools/run_full_dem.py --region ancash --only grand
+
+Afterwards, refresh the cross-region table:
+
+.. code-block:: shell
+
+   python tools/compare_regions.py
 
 **Run it when a configuration changes, not otherwise.** The store carries a manifest
 naming the configurations and the time, so a stale one is detectable rather than merely
@@ -497,6 +647,14 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - How far to walk each profile, in km. Defaults to max_dist_km. Worth setting larger for a short-range search: column depth accumulates over the whole walk, so tying the two makes the reported depth a property of where the walk stopped rather than of the target's thickness.
+   * - ``--roads_geojson``
+     - str
+     - ``—``
+     - GeoJSON of road geometry to **draw** on the map, from ``oroscope-fetch-roads``. Distinct from ``--road_map_path``, which is a distance-to-road raster used to **screen** candidates: this one only draws, and changes no result. Only roads intersecting the map are drawn and counted.
+   * - ``--settlements``
+     - str
+     - ``auto``
+     - Named places to mark on the map. ``auto`` uses whichever curated list has points inside the DEM; or give a preset (``arequipa``, ``lima``), ``none``, or an explicit list of ``(latitude, longitude, name)`` in a configuration file. The bundled coordinates are the ones already curated as RFI exclusion zones, not a second set sourced separately.
    * - ``--decay_weight_by``
      - str
      - ``flux``
@@ -536,7 +694,7 @@ option below exists and that every option that exists appears below.
    * - ``--gap_close_km``
      - float
      - ``—``
-     - Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.
+     - Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.35x at Colca), so this is worth setting deliberately; 0 disables it.
    * - ``--min_target_slope_deg``
      - float
      - ``—``
@@ -557,10 +715,14 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).
+   * - ``--solid_angle_half_fraction``
+     - float
+     - ``—``
+     - Fraction of the sky the azimuth fan and arrival window could accept that scores 0.5 (default: 0.076). Dimensionless and therefore portable: unlike ``--solid_angle_half_sr`` it does not have to be re-tuned when the fan width or the elevation window changes.
    * - ``--solid_angle_half_sr``
      - float
      - ``—``
-     - Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.
+     - Accepted solid angle scoring 0.5, in steradians (default: 0.0167). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at the default saturates the term so it stops discriminating. It is calibrated against the reported solid angle, which depends on azimuth_half_width_deg and the elevation window -- change either and this wants re-checking.
    * - ``--distance_band_m``
      - float ×2
      - ``—``
@@ -572,7 +734,7 @@ option below exists and that every option that exists appears below.
    * - ``--score_weights``
      - string
      - ``—``
-     - Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1.
+     - Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1; a weight of 0 excludes a component. Names are checked against the score components and a misspelling is refused, because a dropped weight changes every number in the run and leaves no trace in the output.
    * - ``--nu_interaction_length_gcm2``
      - float
      - ``—``

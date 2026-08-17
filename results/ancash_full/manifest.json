@@ -1,0 +1,21 @@
+{
+    "generated": "2026-08-17T04:34:39",
+    "generated_by": "tools/run_full_dem.py",
+    "region": "ancash",
+    "dem": "input/dem/ancash_SRTMGL1.tif",
+    "configs": {
+        "grand": "config/grand_ancash_full.json",
+        "tambo": "config/tambo_ancash_full.json"
+    },
+    "files": [
+        "combination_explanation.txt",
+        "combined_report.json",
+        "grand_explanation.txt",
+        "grand_provenance.json",
+        "grand_results.json",
+        "tambo_explanation.txt",
+        "tambo_provenance.json",
+        "tambo_results.json"
+    ],
+    "note": "Regenerate when a configuration changes. Notebook 8 reads these and does not run the searches itself: grand takes about 25 minutes, tambo about 1 (its targets are 2-5 km away against grand's 10-40, so the profile walks are far shorter)."
+}

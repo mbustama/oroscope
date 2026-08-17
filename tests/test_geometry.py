@@ -19,7 +19,7 @@ import synthetic
 
 class TestResolutionDetection(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="sitesearch_geom_")
+        self.tmp = tempfile.mkdtemp(prefix="oroscope_geom_")
         self.z = np.zeros((64, 64), dtype=np.float32)
 
     def tearDown(self):
@@ -71,7 +71,7 @@ class TestPixelAnisotropy(unittest.TestCase):
         Evaluating cos(latitude) at the top edge biases the whole map; the centre
         spreads the residual error evenly. A tall DEM makes the difference visible.
         """
-        tmp = tempfile.mkdtemp(prefix="sitesearch_centre_")
+        tmp = tempfile.mkdtemp(prefix="oroscope_centre_")
         try:
             z = np.zeros((10000, 16), dtype=np.float32)   # ~2.8 degrees tall
             path = synthetic.write_geotiff(os.path.join(tmp, "tall.tif"), z, -14.5, -72.0)
@@ -86,7 +86,7 @@ class TestPixelAnisotropy(unittest.TestCase):
 
 class TestNonSquarePixelWarning(unittest.TestCase):
     def test_reports_the_latitude_scale_for_non_square_pixels(self):
-        tmp = tempfile.mkdtemp(prefix="sitesearch_nonsq_")
+        tmp = tempfile.mkdtemp(prefix="oroscope_nonsq_")
         try:
             import tifffile as tiff
             path = os.path.join(tmp, "nonsquare.tif")
@@ -96,7 +96,7 @@ class TestNonSquarePixelWarning(unittest.TestCase):
             import contextlib
             import io
             with contextlib.redirect_stdout(io.StringIO()):
-                deg, rows = ss.read_dem_geometry(path)
+                deg, rows, _ = ss.read_dem_geometry(path)
             self.assertAlmostEqual(deg, 0.00025, places=12)
             self.assertEqual(rows, 32)
         finally:
@@ -115,7 +115,7 @@ class TestElevationCache(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="sitesearch_cache_")
+        self.tmp = tempfile.mkdtemp(prefix="oroscope_cache_")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

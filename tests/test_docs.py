@@ -71,12 +71,43 @@ class TestTheCliPageDocumentsTheCli(unittest.TestCase):
     # full-DEM runner, which this page documents too.
     OTHER_TOOLS = {"--only", "--dry-run", "--north", "--south", "--west", "--east",
                    "--labels", "--out", "--mode", "--require", "--no_image", "--sweep",
-                   "--keep_runs", "--open_topography_api_key"}
+                   "--keep_runs",
+                   # oroscope-fetch-dem
+                   "--open_topography_api_key", "--region", "--output_dir",
+                   "--config_dir",
+                   # oroscope-fetch-roads
+                   "--places", "--places_only", "--bbox", "--classes", "--step_deg",
+                   # oroscope-combine
+                   "--roads"}
 
     def test_no_option_is_documented_that_does_not_exist(self):
         """``--fresnel_buffer`` outlived the code by some months."""
         phantom = sorted(self.documented - self.flags - self.OTHER_TOOLS)
         self.assertEqual(phantom, [], f"cli.rst documents non-existent flags: {phantom}")
+
+    def test_no_shipped_config_sets_a_key_the_pipeline_does_not_take(self):
+        """
+        The same drift as the line above, one directory over and unguarded.
+
+        ``--fresnel_buffer`` was removed from the code and from ``cli.rst`` -- which
+        that test has watched ever since -- but it stayed in two shipped configs for
+        the same months, where ``config_to_pipeline_kwargs`` dropped it on every run.
+        A key the pipeline does not take is a request that silently does nothing, so
+        the configs deserve the guard the documentation already has.
+        """
+        import glob
+        import json
+        known = set(ss.default_config())
+        offenders = {}
+        for path in sorted(glob.glob(os.path.join(REPO_ROOT, "config", "*.json"))):
+            with open(path) as f:
+                cfg = json.load(f)
+            unknown = sorted(k for k in cfg
+                             if k not in known and not k.startswith("_"))
+            if unknown:
+                offenders[os.path.basename(path)] = unknown
+        self.assertEqual(offenders, {},
+                         f"configs set keys default_config() does not know: {offenders}")
 
     def test_the_option_table_carries_types_and_defaults(self):
         """A reference without defaults sends the reader to the source anyway."""
@@ -144,14 +175,16 @@ class TestEveryModuleIntroducesItself(unittest.TestCase):
 class TestTheNotebooksCallRealNames(unittest.TestCase):
     """
     Notebooks are executed in CI, which is what makes their claim to work checkable —
-    except notebooks 7 and 8, which drive whole searches and read stored full-DEM
-    results, and are excluded because executing them on every push costs far more than
-    it checks.
+    except 07 through 11. Seven builds eight animations and wants an ffmpeg the runner
+    does not have; eight drives whole searches; nine, ten and eleven read stored
+    full-DEM results. All five are excluded because executing them on every push costs far more
+    than it checks. Twelve is *not* excluded, and is written so that it survives a
+    runner with no store.
 
     So the drift they are exposed to is checked here instead, statically: every
-    ``ss.<name>`` and ``explain.<name>`` the generator writes must still exist. That is
-    the failure mode a rename produces, and it is the one the excluded execution would
-    otherwise have caught.
+    ``ss.<name>``, ``explain.<name>`` and ``ma.<name>`` the generator writes must still
+    exist. That is the failure mode a rename produces, and it is the one the excluded
+    execution would otherwise have caught.
     """
 
     @classmethod
@@ -172,6 +205,34 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
         self.assertEqual(missing, [],
                          f"notebooks call explain names that do not exist: {missing}")
 
+    def test_every_animation_name_exists(self):
+        """
+        The animations notebook names every builder in ``tools/make_animations.py``
+        and is not
+        executed in CI, so a renamed animation would break it silently. The tool is a
+        script rather than a package, so it is loaded by path the same way the notebook
+        loads it.
+        """
+        import importlib.util
+
+        path = os.path.join(REPO_ROOT, "tools", "make_animations.py")
+        spec = importlib.util.spec_from_file_location("_make_animations", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        called = self.attributes("ma")
+        self.assertTrue(called, "the animations notebook calls nothing on "
+                                "make_animations")
+        missing = sorted(n for n in called if not hasattr(module, n))
+        self.assertEqual(missing, [],
+                         f"notebooks call make_animations names that do not exist: {missing}")
+
+        named = set(re.findall(r'build\("([a-z_]+)"', self.source))
+        self.assertEqual(named, set(module.BUILDERS),
+                         "the animations notebook must build every animation and no "
+                         "others; "
+                         f"it names {sorted(named)} against {sorted(module.BUILDERS)}")
+
     def test_every_generated_notebook_is_committed(self):
         """A generator entry with no notebook beside it means someone forgot to run it."""
         names = set(re.findall(r'"(\d\d_[a-z_]+\.ipynb)":', self.source))
@@ -187,7 +248,9 @@ class TestTheNotebooksCallRealNames(unittest.TestCase):
         every push by an hour and a half.
         """
         workflow = read(".github", "workflows", "lint.yml")
-        for name in ("07_explaining_a_run.ipynb", "08_the_full_dem.ipynb"):
+        for name in ("07_animating_the_mechanism.ipynb", "08_explaining_a_run.ipynb",
+                     "09_arequipa_dem.ipynb", "10_ancash_dem.ipynb",
+                     "11_lima_dem.ipynb"):
             self.assertIn(name, workflow,
                           f"{name} must be named in the CI workflow, excluded or not")
 

@@ -58,16 +58,28 @@ jobs:
         # reproducible bit-for-bit across matplotlib versions -- so nothing is written
         # back and the working tree stays clean.
         #
-        # 07 and 08 are excluded. Both drive the whole pipeline rather than the
-        # kernels, and 08 reads stored full-DEM results that take about half an hour
-        # each to produce and are not in a runner's filesystem anyway. Executing them
-        # on every push would cost more than it checks. They are run locally when a
-        # configuration changes and their outputs are committed; test_docs.py checks
-        # that the API names they call still exist, which is the drift that mattered.
+        # 07 through 11 are excluded, by number after the 2026-08-16 renumbering:
+        # 07 (animations) builds eight films -- two minutes of rendering, three of them
+        # running full arrival scans per frame, and it needs an ffmpeg the runner does
+        # not have. 08 (explaining a run) drives the whole pipeline rather than the
+        # kernels. 09 (Arequipa), 10 (Ancash) and 11 (Lima) read stored full-DEM results
+        # that take tens of minutes to produce and are not in a runner filesystem anyway.
+        # Executing any of them on every push would cost more than it checks.
+        #
+        # 12 (Peru) is deliberately NOT excluded: every cell that needs its store is
+        # guarded and nothing else touches the filesystem outside the library, so on a
+        # bare runner it degrades to prose and arithmetic. Keep that property.
+        #
+        # The excluded ones are run locally when a configuration changes and their
+        # outputs are committed; test_docs.py checks that the API names they call still
+        # exist, which is the drift that mattered.
         run: |
           mkdir -p /tmp/nbcheck
           cp notebooks/*.ipynb /tmp/nbcheck/
-          rm -f /tmp/nbcheck/07_explaining_a_run.ipynb
-          rm -f /tmp/nbcheck/08_the_full_dem.ipynb
+          rm -f /tmp/nbcheck/07_animating_the_mechanism.ipynb
+          rm -f /tmp/nbcheck/08_explaining_a_run.ipynb
+          rm -f /tmp/nbcheck/09_arequipa_dem.ipynb
+          rm -f /tmp/nbcheck/10_ancash_dem.ipynb
+          rm -f /tmp/nbcheck/11_lima_dem.ipynb
           cd /tmp/nbcheck
           jupyter nbconvert --to notebook --execute --inplace *.ipynb

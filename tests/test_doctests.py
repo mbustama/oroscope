@@ -24,6 +24,12 @@ import _support  # noqa: F401  (path setup)
 # site_searcher is included for the routines that take plain arrays -- the terrain
 # derivatives, the slope band, the capacity lattice. Its pipeline stages need a DEM on
 # disk and are exercised by the regression tests instead.
+#
+# **No example may open a path relative to the working directory.** CI runs this job
+# with `working-directory: tests`, so `data/whatever.csv` resolves under tests/ there
+# and under the repository root when run by hand -- passing locally and failing in CI,
+# which is exactly what happened. Build the path from the module's own __file__, as the
+# aperture examples do, or write an example that needs no file at all.
 DOCTESTED = ("oroscope.physics", "oroscope.scoring", "oroscope.arrival_scan",
              "oroscope.aperture", "oroscope.explain", "oroscope.site_searcher")
 

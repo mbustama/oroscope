@@ -6,7 +6,7 @@ the *story*: which constraint did the work, which sites survived and what weaken
 them, and which of the numbers on the page are choices rather than measurements. A
 reader who assembles that themselves gets it wrong in predictable ways -- most often
 by reading the reported area as physics-accepted area, which it is not (see
-:doc:`assumptions`, and the 2.29x measured at Colca).
+:doc:`assumptions`, and the 2.35x measured at Colca).
 
 The entry point is :func:`explain_results`, which takes the results dictionary and
 returns a string. It runs nothing, opens nothing and needs no DEM, so the pipeline,
@@ -109,7 +109,14 @@ _VIEWING_BANDS = (
 # more than doubles the area it reports. Quoted rather than recomputed because it is a
 # property of the terrain and the element, not of any one run -- but it is the right
 # order of magnitude to warn with whenever closing is enabled at all.
-AREA_INFLATION_AT_COLCA = 2.29
+#
+# Re-measured 2026-08-17 against config/grand_colca_stride1.json, after the audit of
+# 6.53-6.67 changed what the pipeline computes: 5,278,338 closed pixels over 2,250,827
+# accepted is 2.35x, where the pre-audit control said 2.29x. The strided production
+# config agrees to within 4% -- closing_inflation on grand_colca_config.json gives
+# 2.25x once corrected for its stride of 5 -- and that agreement between two runs that
+# sample the terrain differently is what makes the number worth quoting at all.
+AREA_INFLATION_AT_COLCA = 2.35
 
 # Funnel stages that must not be read as constraints.
 #
@@ -134,6 +141,7 @@ STAGE_KNOBS = (
                             "distance window (min_dist_km/max_dist_km), "
                             "min_column_depth_gcm2 and min_target_slope_deg"),
     ("score >=", "min_score -- or switch to --score_percentile, which is rank-based"),
+    ("score in top", "score_percentile"),
     ("after gap closing", "gap_close_km"),
     ("after pruning", "min_width_km"),
     ("pixels in selected sites", "min_sub_array_size and target_antennas"),
@@ -264,7 +272,7 @@ def closing_inflation(funnel, candidate_stride=1):
     """
     How much morphological closing grew this run's mask, measured from its own funnel.
 
-    The 2.29x quoted from Colca is a property of that terrain and a 1 km element, not
+    The 2.35x quoted from Colca is a property of that terrain and a 1 km element, not
     a constant. This run has the number in it: the stage before closing counts the
     accepted candidates, closing counts the pixels after, and the only correction
     needed between them is the stride -- which samples one candidate in
@@ -311,7 +319,7 @@ def site_strengths(arrival_scan, statistic="p50", threshold=0.75):
 
     The mirror of :func:`weakest_component`, and the more useful half when a site has
     been *selected*. "Site 3555 scored 0.55" says nothing a reader can act on; "it sees
-    1.08 sr of usable sky across a 3.1 km gap with 780,000 g/cm² of rock behind it, and
+    0.36 sr of usable sky across a 3.1 km gap with 780,000 g/cm² of rock behind it, and
     every criterion but the accepted solid angle is satisfied outright" says what the
     ground is actually like.
 
@@ -406,18 +414,47 @@ def constraint_overlap(params_a, params_b, bands=None):
         b_lo, b_hi = _get(params_b, lo_key), _get(params_b, hi_key)
         if None in (a_lo, a_hi, b_lo, b_hi):
             continue                       # unset on one side is not a constraint
-        lo, hi = max(a_lo, b_lo), min(a_hi, b_hi)
-        width_a, width_b = a_hi - a_lo, b_hi - b_lo
+        a_parts, width_a = _band_intervals(a_lo, a_hi, label)
+        b_parts, width_b = _band_intervals(b_lo, b_hi, label)
+        pieces = [(max(x0, y0), min(x1, y1))
+                  for x0, x1 in a_parts for y0, y1 in b_parts
+                  if min(x1, y1) > max(x0, y0)]
+        total = sum(hi - lo for lo, hi in pieces)
         narrower = min(width_a, width_b)
-        overlap = (lo, hi) if hi > lo else None
         out.append({
             "label": label, "unit": unit,
             "a": (a_lo, a_hi), "b": (b_lo, b_hi),
-            "overlap": overlap,
-            "width": (hi - lo) if overlap else 0.0,
-            "share_of_narrower": ((hi - lo) / narrower) if overlap and narrower else 0.0,
+            # `overlap` is the widest piece and `width` the total across all of them.
+            # For a band that wraps these differ, and the renderer prints them in one
+            # sentence -- "shared 350-360 deg (100%)" for a 10 deg piece of a 20 deg
+            # overlap. `pieces` carries the whole answer so a consumer can say so.
+            "overlap": max(pieces, key=lambda p: p[1] - p[0]) if pieces else None,
+            "pieces": pieces,
+            "width": total,
+            "share_of_narrower": (total / narrower) if pieces and narrower else 0.0,
         })
     return out
+
+
+# Bands measured on a compass wrap; the others do not. Aspect is the only one here,
+# and the screen already handles it -- `min_aspect_deg > max_aspect_deg` means an arc
+# through north, and `get_candidates_chunked` reads it that way. This did not, so a
+# north-facing window of 350-10 degrees was compared as though it ran *backwards* from
+# 350 to 10, and reported no overlap with 0-90 when they plainly share 0-10.
+_CIRCULAR_BANDS = ("aspect",)
+_FULL_CIRCLE_DEG = 360.0
+
+
+def _band_intervals(lo, hi, label):
+    """
+    A band as one or two ordinary intervals, plus its true width.
+
+    A wrapping compass band becomes two pieces, so an intersection can be taken with
+    ordinary arithmetic and the pieces summed.
+    """
+    if label in _CIRCULAR_BANDS and lo > hi:
+        return [(lo, _FULL_CIRCLE_DEG), (0.0, hi)], (_FULL_CIRCLE_DEG - lo) + hi
+    return [(lo, hi)], hi - lo
 
 
 def weakest_component(arrival_scan, statistic="p50"):

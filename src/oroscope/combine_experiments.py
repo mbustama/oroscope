@@ -35,7 +35,9 @@ import os
 import numpy as np
 
 __all__ = ["load_run", "check_alignment", "read_world_file",
-           "pixel_area_km2", "capacity_of", "main"]
+           "pixel_area_km2", "capacity_of", "main",
+           "colocation_capacity", "smallest_radius_for",
+           "dem_for_run", "relief_for_mask", "elevation_for_mask", "geographic_extent"]
 import tifffile as tiff
 
 from oroscope import explain as explain_mod
@@ -49,6 +51,175 @@ from oroscope import site_searcher as ss
 import matplotlib
 import matplotlib.pyplot as plt                      # noqa: E402
 from matplotlib.patches import Patch                 # noqa: E402
+from matplotlib.lines import Line2D                  # noqa: E402
+
+
+def geographic_extent(world: tuple[float, ...], shape: tuple[int, int]) -> tuple:
+    """
+    The ``(left, right, bottom, top)`` an overlay needs to sit in degrees.
+
+    Without it ``imshow`` puts a map in *pixel* coordinates, which is why the overview
+    used to carry no axes at all: pixel indices are not worth labelling, so the ticks
+    were switched off rather than made meaningful.
+
+    The world file's terms are the centre of the top-left pixel, so half a pixel is
+    added back at each edge to give the outer bounds of the raster.
+
+    Parameters
+    ----------
+    world : tuple of float
+        The six affine terms, from :func:`read_world_file`.
+    shape : tuple of int
+        ``(rows, cols)`` of the raster.
+
+    Returns
+    -------
+    tuple of float
+        ``(left, right, bottom, top)`` in degrees, for ``imshow(extent=...)``.
+
+    Examples
+    --------
+    >>> from oroscope import combine_experiments as ce
+    >>> world = (0.01, 0.0, 0.0, -0.01, -72.0, -15.0)     # 0.01 deg pixels
+    >>> left, right, bottom, top = ce.geographic_extent(world, (100, 200))
+    >>> round(left, 3), round(right, 3)
+    (-72.005, -70.005)
+    >>> round(bottom, 3), round(top, 3)
+    (-16.005, -14.995)
+    """
+    cell_x, _, _, cell_y, x0, y0 = world
+    rows, cols = shape
+    left = x0 - 0.5 * cell_x
+    right = x0 + (cols - 0.5) * cell_x
+    top = y0 - 0.5 * cell_y                          # cell_y is negative going south
+    bottom = y0 + (rows - 0.5) * cell_y
+    return (left, right, bottom, top)
+
+
+def dem_for_run(run: dict) -> str | None:
+    """
+    The DEM a run searched, if it can still be found.
+
+    The combiner works from the masks the runs wrote, so it never needed the DEM --
+    which is why the overview lost its terrain. The path is recorded twice, in the
+    results parameters and in ``provenance.json``, so it can be recovered when the file
+    is still there and reported as absent when it is not.
+
+    Parameters
+    ----------
+    run : dict
+        A run, as :func:`load_run` returns.
+
+    Returns
+    -------
+    str or None
+        Absolute path to the DEM, or ``None`` when it is not recorded or not present.
+    """
+    results = run.get("results") or {}
+    candidates = [(results.get("parameters") or {}).get("dem")]
+    prov = os.path.join(run.get("dir", ""), "provenance.json")
+    if os.path.exists(prov):
+        try:
+            with open(prov) as f:
+                candidates.append((json.load(f).get("dem") or {}).get("path"))
+        except (OSError, ValueError):                # pragma: no cover - defensive
+            pass
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def elevation_for_mask(dem_path: str, shape: tuple[int, int]) -> np.ndarray | None:
+    """
+    The run's DEM, read strided onto the mask grid.
+
+    The mask is the DEM downsampled, so it is read strided to match rather than
+    resampled. The float32 ``.npy`` cache the searcher leaves beside the DEM is
+    memory-mapped when present, which makes a strided read of a 129 Mpx DEM cost almost
+    nothing; otherwise the GeoTIFF is read whole.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM the run searched.
+    shape : tuple of int
+        ``(rows, cols)`` of the mask to match.
+
+    Returns
+    -------
+    ndarray or None
+        Elevation in metres with the given shape, or ``None`` if the DEM could not be
+        read or is smaller than the mask.
+    """
+    cache = os.path.splitext(dem_path)[0] + ".npy"
+    try:
+        if os.path.exists(cache):
+            elevation = np.load(cache, mmap_mode="r")
+        else:
+            elevation = tiff.imread(dem_path)
+    except Exception:                                # pragma: no cover - unreadable DEM
+        return None
+
+    rows, cols = shape
+    step = max(1, int(round(elevation.shape[0] / float(rows))))
+    small = np.asarray(elevation[::step, ::step], dtype=np.float64)
+    if small.shape[0] < rows or small.shape[1] < cols:
+        return None
+    return small[:rows, :cols]
+
+
+def relief_for_mask(dem_path: str, shape: tuple[int, int]) -> np.ndarray | None:
+    """
+    Hillshaded relief for the mask grid, as a greyscale array in [0, 1].
+
+    Shaded relief rather than a colour elevation ramp, deliberately: the overlay needs
+    the colour for its categories, and a terrain colourmap underneath would compete
+    with them for the reader's attention. Relief carries the shape of the ground
+    without spending any hue on it.
+
+    The mask is the DEM downsampled, so the DEM is read strided to match rather than
+    resampled. The float32 ``.npy`` cache the searcher leaves beside the DEM is
+    memory-mapped when present, which makes a strided read of a 129 Mpx DEM cost
+    almost nothing; otherwise the GeoTIFF is read whole.
+
+    Parameters
+    ----------
+    dem_path : str
+        Path to the DEM the run searched.
+    shape : tuple of int
+        ``(rows, cols)`` of the mask to match.
+
+    Returns
+    -------
+    ndarray or None
+        Relief in [0, 1] with the given shape, or ``None`` if the DEM could not be
+        read or does not divide onto the mask grid.
+    """
+    cache = os.path.splitext(dem_path)[0] + ".npy"
+    try:
+        if os.path.exists(cache):
+            elevation = np.load(cache, mmap_mode="r")
+        else:
+            elevation = tiff.imread(dem_path)
+    except Exception:                                # pragma: no cover - unreadable DEM
+        return None
+
+    rows, cols = shape
+    step = max(1, int(round(elevation.shape[0] / float(rows))))
+    small = np.asarray(elevation[::step, ::step], dtype=np.float64)
+    if small.shape[0] < rows or small.shape[1] < cols:
+        return None
+    small = small[:rows, :cols]
+
+    finite = np.isfinite(small)
+    if not finite.any():                             # pragma: no cover - empty DEM
+        return None
+    small = np.where(finite, small, np.nanmedian(small[finite]))
+
+    shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).hillshade(
+        small, vert_exag=1.5, dx=1.0, dy=1.0)
+    return np.clip(shaded, 0.0, 1.0)
 
 
 def read_world_file(tfw_path: str) -> tuple[float, ...]:
@@ -193,7 +364,7 @@ def pixel_area_km2(world: tuple[float, ...], reference_latitude_deg: float) -> f
         Area of one pixel, in km^2.
     """
     cell_deg_x, _, _, cell_deg_y, _, _ = world
-    km_y = abs(cell_deg_y) * 110.6
+    km_y = abs(cell_deg_y) * ss.KM_PER_DEG_LAT
     km_x = abs(cell_deg_x) * 111.32 * np.cos(np.radians(reference_latitude_deg))
     return km_x * km_y
 
@@ -223,6 +394,153 @@ def capacity_of(results):
         return None
 
 
+def colocation_capacity(partner_mask, world, centre_lat, centre_lon,
+                        radii_km=(5.0, 10.0, 20.0, 40.0),
+                        spacing_km=1.0, grid_type="hex"):
+    """
+    How much partner ground lies within reach of a site, and what it could hold.
+
+    The question this answers is the deployment one rather than the site-finding one:
+    *given a site chosen for one experiment, is there enough ground nearby for the
+    other?* It is deliberately **not** an intersection. The joint mask is the ground both
+    experiments accept at the same pixel, and a partner array does not have to stand
+    there -- measured on the Cajatambo crop, the GRAND-viable ground inside the joint
+    mask was 22,577 fragments of which exactly one was large enough for a single 1 km
+    lattice cell, while 976 km2 of perfectly good GRAND ground lay within 20 km
+    (roadmap 6.52). **An optimiser pointed at the intersection reports the partner array
+    impossible; the site is fine.**
+
+    What couples two arrays is a shared line of sight to the same massif, not a shared
+    footprint. GRAND's own targets are 10-40 km away, so a partner antenna 20 km from a
+    TAMBO strip is still watching the same wall.
+
+    Parameters
+    ----------
+    partner_mask : ndarray
+        2-D boolean mask of the *other* experiment's viable ground, on the mask grid.
+    world : tuple of float
+        The six affine terms of that mask's world file, from :func:`read_world_file`.
+    centre_lat, centre_lon : float
+        The site to measure from, in degrees. A site's ``center_lat``/``center_lon``
+        from a results JSON is the usual source.
+    radii_km : iterable of float, optional
+        Distances to report, in km.
+    spacing_km : float, optional
+        Detector spacing of the partner array, in km. GRAND's is 1.0, TAMBO's 0.1.
+    grid_type : {'hex', 'square'}, optional
+        Lattice the partner array uses.
+
+    Returns
+    -------
+    list of dict
+        One entry per radius, ascending, with ``radius_km``, ``area_km2`` and
+        ``capacity``. ``capacity`` counts positions on an **anchored** lattice, as
+        :func:`~oroscope.site_searcher.count_grid_capacity` does, so it is an estimate
+        for an arbitrarily placed array rather than the best achievable packing.
+
+    Notes
+    -----
+    Distances are great-circle-free: a local flat approximation with the east-west
+    degree shrunk by the cosine of the site's latitude, which is what the rest of this
+    project uses and is good to much better than a pixel over the tens of kilometres
+    involved.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import combine_experiments as ce
+    >>> mask = np.ones((200, 200), dtype=bool)
+    >>> world = (1/3600, 0.0, 0.0, -1/3600, -77.0, -10.0)
+    >>> rows = ce.colocation_capacity(mask, world, -10.02, -76.98, radii_km=(2.0,))
+    >>> rows[0]["radius_km"]
+    2.0
+    >>> rows[0]["capacity"] > 0
+    True
+    """
+    mask = np.asarray(partner_mask, dtype=bool)
+    pixel_deg_x, _, _, pixel_deg_y, upper_left_x, upper_left_y = world
+
+    rows, cols = np.indices(mask.shape)
+    lat = upper_left_y + (rows + 0.5) * pixel_deg_y
+    lon = upper_left_x + (cols + 0.5) * pixel_deg_x
+    # 110.6 km per degree of latitude, 111.32 per degree of longitude at the equator.
+    # These two were both 111.32 here, which is the *longitude* constant: the
+    # north-south scale came out 0.651% long, so the disc was slightly too tall, the
+    # pixel area 0.651% too large and the lattice row pitch off by the same. Small, but
+    # it also meant this function and `pixel_area_km2` in the same module disagreed
+    # about how many kilometres a degree of latitude is.
+    km_per_deg_lon = 111.32 * np.cos(np.radians(centre_lat))
+    distance_km = np.hypot((lat - centre_lat) * ss.KM_PER_DEG_LAT,
+                           (lon - centre_lon) * km_per_deg_lon)
+
+    cell_y = abs(pixel_deg_y) * ss.KM_PER_DEG_LAT * 1000.0
+    cell_x = abs(pixel_deg_x) * km_per_deg_lon * 1000.0
+    per_pixel_km2 = (cell_y * cell_x) / 1.0e6
+
+    out = []
+    for radius in sorted(float(r) for r in radii_km):
+        near = np.ascontiguousarray(mask & (distance_km <= radius))
+        out.append({
+            "radius_km": radius,
+            "area_km2": float(near.sum()) * per_pixel_km2,
+            "capacity": int(ss.count_grid_capacity(
+                near, cell_y, cell_x, spacing_km * 1000.0,
+                1 if grid_type == "hex" else 0)),
+        })
+    return out
+
+
+def smallest_radius_for(partner_mask, world, centre_lat, centre_lon, wanted,
+                        spacing_km=1.0, grid_type="hex",
+                        radii_km=(2.0, 5.0, 10.0, 20.0, 30.0, 40.0, 60.0, 80.0)):
+    """
+    The nearest radius at which a partner array of ``wanted`` detectors fits.
+
+    A convenience over :func:`colocation_capacity` for the question actually asked of a
+    candidate site --- *how far would the partner array have to spread?* --- rather than
+    the table.
+
+    Parameters
+    ----------
+    partner_mask : ndarray
+        As :func:`colocation_capacity`.
+    world : tuple of float
+        As :func:`colocation_capacity`.
+    centre_lat, centre_lon : float
+        The site to measure from, in degrees.
+    wanted : int
+        Detectors the partner array needs.
+    spacing_km : float, optional
+        Partner detector spacing, in km.
+    grid_type : {'hex', 'square'}, optional
+        Partner lattice.
+    radii_km : iterable of float, optional
+        Radii to try, ascending.
+
+    Returns
+    -------
+    float or None
+        The smallest radius tried at which the capacity reaches ``wanted``, or ``None``
+        if none of them does. ``None`` means "not within the largest radius tried", not
+        "impossible".
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import combine_experiments as ce
+    >>> mask = np.ones((400, 400), dtype=bool)
+    >>> world = (1/3600, 0.0, 0.0, -1/3600, -77.0, -10.0)
+    >>> ce.smallest_radius_for(mask, world, -10.05, -76.95, 4, radii_km=(2.0, 5.0))
+    2.0
+    """
+    for row in colocation_capacity(partner_mask, world, centre_lat, centre_lon,
+                                   radii_km=radii_km, spacing_km=spacing_km,
+                                   grid_type=grid_type):
+        if row["capacity"] >= wanted:
+            return row["radius_km"]
+    return None
+
+
 def main():
     # Headless, because this is the command line and it writes a PNG to disk.
     # Set here rather than at import, so importing the module leaves a
@@ -241,6 +559,19 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--reveal", action="store_true",
+                    help="Also write the overlay as three frames -- first experiment, "
+                         "second experiment, both -- for uncovering a result "
+                         "progressively in a talk. Everything but the categories is "
+                         "identical in all three, so nothing shifts between slides.")
+    ap.add_argument("--roads", type=str, default=None,
+                    help="GeoJSON of road geometry to draw as context, from "
+                         "oroscope-fetch-roads. Access is the question a joint area "
+                         "cannot answer on its own.")
+    ap.add_argument("--settlements", type=str, default="auto",
+                    help="Named places to mark on the overview: 'auto' (the default) "
+                         "uses whichever curated list has points inside the map, or "
+                         "give a preset name ('arequipa', 'lima') or 'none'.")
     ap.add_argument("--no_explain", action="store_false", dest="explain",
                     help="Skip the plain-language account of the overlay. It is printed "
                          "by default and saved as combination_explanation.txt: what each "
@@ -341,27 +672,188 @@ def main():
 
     if not args.no_image and len(labels) == 2:
         a, b = labels
-        fig, ax = plt.subplots(figsize=(10, 7))
-        # 0 neither, 1 a only, 2 b only, 3 both
-        img = np.zeros(code.shape, dtype=np.uint8)
-        img[masks[a] & ~masks[b]] = 1
-        img[masks[b] & ~masks[a]] = 2
-        img[masks[a] & masks[b]] = 3
-        cmap = matplotlib.colors.ListedColormap(
-            ["#EDEFEC", "#2C6E8F", "#B0781E", "#7B2D8E"])
-        ax.imshow(img, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
-        ax.set_title(f"{a} and {b}: where each is viable, and where both are")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.legend(handles=[
-            Patch(facecolor="#2C6E8F", label=f"{a} only"),
-            Patch(facecolor="#B0781E", label=f"{b} only"),
-            Patch(facecolor="#7B2D8E", label="Both (co-located)"),
-        ], loc="lower right", framealpha=0.9)
-        png = os.path.join(out_dir, "combined_overview.png")
-        fig.savefig(png, dpi=140, bbox_inches="tight")
-        plt.close(fig)
-        written.append(png)
+        extent = geographic_extent(world, code.shape)
+        # Size the figure to the ground it shows. set_aspect on its own is not enough:
+        # attach_colorbar's divider pins the axes position, so matplotlib satisfies the
+        # aspect by widening the *data* limits instead, padding the map with empty
+        # degrees until it looks like the raster failed to fill its frame. Giving the
+        # figure the right shape up front leaves nothing to adjust.
+        _centre_lat = 0.5 * (extent[2] + extent[3])
+        _aspect = 1.0 / np.cos(np.radians(_centre_lat))
+        _ratio = abs(extent[3] - extent[2]) * _aspect / abs(extent[1] - extent[0])
+        only_a = masks[a] & ~masks[b]
+        only_b = masks[b] & ~masks[a]
+        both = masks[a] & masks[b]
+        joint_km2 = float(both.sum()) * px_km2
+
+        dem_path = next((p for p in (dem_for_run(r) for r in runs) if p), None)
+        elevation = elevation_for_mask(dem_path, code.shape) if dem_path else None
+        base_alpha = 0.55 if elevation is not None else 1.0
+
+        # A class covering most of the frame is outlined, not filled: a translucent
+        # wash over 80% of a map turns the whole thing to mud and makes the other
+        # classes look like terrain. Decided ONCE, from the full set, so a stage that
+        # omits a class still draws and labels the rest exactly as the final figure
+        # does -- otherwise the legend would change shape between slides.
+        fill_limit = 0.40 * code.size
+        layers = (("a", only_a, "#1B6CA8", base_alpha, 1),
+                  ("b", only_b, "#C8621B", 0.95, 2),
+                  ("both", both, "#E8189B", 1.0, 3))
+        outlined = {colour for _, mask, colour, _, _ in layers
+                    if mask.any() and mask.sum() > fill_limit and elevation is not None}
+
+        def key(colour, label, alpha=1.0):
+            """A filled patch, or a line when that class is outlined rather than filled."""
+            if colour in outlined:
+                return Line2D([0], [0], color=colour, lw=1.6, label=f"{label} (outline)")
+            return Patch(facecolor=colour, alpha=alpha, label=label)
+
+        places = ss.resolve_settlements(
+            args.settlements, (extent[2], extent[3], extent[0], extent[1]))
+
+        def to_deg(lat, lon):
+            """This overlay's axes are already degrees."""
+            return (lon, lat)
+
+        def draw(visible, path):
+            """
+            Draws the overlay showing only ``visible`` categories, and saves it.
+
+            Everything outside the categories -- the terrain, the colour bar, the
+            roads, the towns, the scale bar, the legend -- is built identically every
+            time. That is the point: these are frames of a progressive reveal for a
+            talk, so nothing may shift as one is replaced by the next.
+            """
+            fig, ax = plt.subplots(
+                figsize=(11.0, max(3.5, min(13.0, 11.0 * _ratio))))
+
+            im = None
+            if elevation is not None:
+                vmin, vmax = ss.altitude_limits(elevation)
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                # Light greys only, so the darkest ground still sits well behind the
+                # overlay rather than competing with it for contrast.
+                grey = matplotlib.colors.LinearSegmentedColormap.from_list(
+                    "altitude_grey", ["#3C3C3C", "#F2F2F2"])
+                shaded = matplotlib.colors.LightSource(azdeg=315, altdeg=45).shade(
+                    np.nan_to_num(elevation, nan=vmin), cmap=grey, norm=norm,
+                    blend_mode="soft", vert_exag=2.0, dx=1.0, dy=1.0)
+                # Water is water, not the bottom of the ramp. And nodata is neither:
+                # filling NaN with vmin before shading painted the empty corner of the
+                # Arequipa DEM as dark low ground.
+                water = elevation <= ss.SEA_LEVEL_M
+                missing = ~np.isfinite(elevation)
+                shaded[water & ~missing, :3] = matplotlib.colors.to_rgb(ss.WATER_COLOUR)
+                shaded[missing, :3] = matplotlib.colors.to_rgb(ss.NODATA_COLOUR)
+                ax.imshow(shaded, extent=extent, origin="upper",
+                          interpolation="bilinear", zorder=0)
+                im = matplotlib.cm.ScalarMappable(norm=norm, cmap=grey)
+
+            # Consecutive filled classes share one RGBA raster, in float32.
+            #
+            # This was one float64 raster per class, each handed to its own imshow and
+            # so each held alive by the axes until the figure closes. At the Arequipa
+            # mask's 2551x3151 those are 257 MB each, and the overlay measured 1.96 GiB
+            # of peak RSS -- against the 0.48 GiB the pre-flight budgets for a map. It
+            # is the stage that has actually been running out of memory.
+            #
+            # The classes are disjoint by construction (only_a, only_b and both
+            # partition the union), so no pixel is claimed twice and painting several
+            # into one array cannot lose an ordering *between them*. What it can lose is
+            # an ordering against a contour drawn in between, so the run is flushed
+            # whenever an outlined class intervenes. Compared over all 32 combinations
+            # of visible and outlined classes, this is pixel-identical to the stacked
+            # form; compositing everything unconditionally was not, and differed in two
+            # of them.
+            run = []
+
+            def flush(zorder):
+                """Paints the accumulated filled classes as one raster."""
+                if not run:
+                    return
+                rgba = np.zeros(code.shape + (4,), dtype=np.float32)
+                for mask, colour, alpha in run:
+                    rgba[mask, :3] = matplotlib.colors.to_rgb(colour)
+                    rgba[mask, 3] = alpha
+                ax.imshow(rgba, extent=extent, origin="upper",
+                          interpolation="nearest", zorder=zorder)
+                run.clear()
+
+            for name, mask, colour, alpha, order in layers:
+                if name not in visible or not mask.any():
+                    continue
+                if colour in outlined:
+                    flush(order - 0.5)
+                    ax.contour(mask.astype(float), levels=[0.5], colors=[colour],
+                               linewidths=1.4, extent=extent, origin="upper",
+                               zorder=order)
+                    continue
+                run.append((mask, colour, alpha))
+            flush(len(layers))
+
+            ax.set_xlabel("Longitude (°)")
+            ax.set_ylabel("Latitude (°)")
+            ax.tick_params(direction="out", length=4)
+            # "auto" rather than set_aspect(1/cos(lat)): attach_colorbar's divider pins
+            # the axes position, so a fixed aspect is satisfied by widening the data
+            # limits rather than shrinking the box, padding the map with empty degrees.
+            # The figure was shaped to the ground above, so letting the axes fill it
+            # gives those proportions with nothing left over.
+            ax.set_aspect("auto")
+            ax.set_xlim(extent[0], extent[1])
+            ax.set_ylim(extent[2], extent[3])
+            ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(_centre_lat)))
+            ss.add_north_arrow(ax)
+
+            roads_drawn = 0
+            if args.roads:
+                from oroscope import fetch_roads as fetch_roads_mod
+                roads_drawn = ss.add_roads(
+                    ax, fetch_roads_mod.load_roads(args.roads), to_deg)
+                # No attribution on the figure: it belongs in the caption, where a
+                # reader of the paper or the slide will see it. The loader still keeps
+                # it inside the GeoJSON, so it is not lost with the picture.
+            ss.add_settlements(ax, places, to_deg)
+
+            if im is not None:
+                ss.attach_colorbar(fig, ax, im, "Altitude (m)")
+
+            handles = [
+                # The class each colour actually paints, not the experiment's total:
+                # `masks[a]` includes the overlap, which "Both" already reports, so the
+                # three legend numbers double-counted the intersection -- TAMBO read
+                # "only - 992 km2" beside "Both - 597.9" where the orange it labels is
+                # 393.6.
+                key("#1B6CA8", f"{a} only — {only_a.sum() * px_km2:,.0f} km²",
+                    base_alpha),
+                key("#C8621B", f"{b} only — {only_b.sum() * px_km2:,.0f} km²", 0.95),
+                key("#E8189B", f"Both — {joint_km2:,.1f} km²"),
+            ]
+            if roads_drawn:
+                handles.append(Line2D([0], [0], color=ss.ROAD_COLOUR, lw=1.0,
+                                      alpha=0.7, label="Roads"))
+            ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=4,
+                      loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
+                      columnspacing=1.6)
+            fig.savefig(path, dpi=140, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
+
+        everything = {"a", "b", "both"}
+        draw(everything, os.path.join(out_dir, "combined_overview.png"))
+        if args.reveal:
+            # Frames for uncovering a result progressively in a talk. The legend, the
+            # axes, the colour bar and the roads are identical in all three, so only
+            # the categories appear as one frame replaces the next.
+            for suffix, visible in ((f"1_{a.lower()}", {"a"}),
+                                    (f"2_{b.lower()}", {"b"}),
+                                    ("3_both", everything)):
+                draw(visible, os.path.join(out_dir, f"combined_overview_{suffix}.png"))
+
+        if elevation is None:
+            print(f"   {ss.C.WARN}{ss.Icon.WARN}No DEM found for either run, so the overview "
+                  f"has no relief. The path is recorded in each run's results and "
+                  f"provenance; it is only missing if the DEM has moved.{ss.C.RESET}")
 
     report_path = os.path.join(out_dir, "combined_report.json")
     with open(report_path, "w") as f:

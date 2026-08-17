@@ -75,7 +75,10 @@ from oroscope.site_searcher import (  # noqa: F401
     # memory
     preflight_memory, estimate_peak_memory_gb, apply_memory_cap, available_memory_gb,
     # the stride/closing interaction, which decides whether an area is a lower bound
-    stride_gap_m, closing_element_m, warn_stride_outruns_closing,
+    stride_gap_m, closing_element_m, warn_stride_outruns_closing, add_scale_bar,
+    add_roads, ROAD_WIDTHS, ROAD_COLOUR,
+    add_settlements, resolve_settlements, attach_colorbar,
+    altitude_limits, add_north_arrow,
     # geometry and the DEM
     resolve_grid_geometry, read_dem_geometry, read_dem_origin, resolve_origin,
     build_elevation_cache, load_dem_and_init_buffers, MapGrid,
@@ -132,6 +135,8 @@ from oroscope.scoring import (  # noqa: F401
 from oroscope.aperture import (  # noqa: F401
     unit_response, TabulatedResponse, geometric_aperture_m2sr, aperture_vs_energy,
     peak_energy_pev, infer_response, load_curve_csv, summarize_sites,
+    PUBLISHED_ARRAYS, array_scale_factor, scale_published_curve,
+    absolute_from_published,
 )
 
 # --- the tools, as functions
@@ -152,8 +157,11 @@ __all__ = [
     "validate_parameters", "parse_score_weights", "explicitly_passed",
     "preflight_memory", "estimate_peak_memory_gb", "apply_memory_cap",
     "available_memory_gb",
-    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
+    "altitude_limits", "add_north_arrow",
     "resolve_grid_geometry", "read_dem_geometry", "read_dem_origin", "resolve_origin",
+    "add_roads", "ROAD_WIDTHS", "ROAD_COLOUR",
+    "add_settlements", "resolve_settlements", "attach_colorbar",
     "build_elevation_cache", "load_dem_and_init_buffers", "MapGrid",
     "terrain_gradients", "terrain_derivatives", "slope_band_gradient_sq",
     "slope_baseline_pixels", "get_candidates_chunked",
@@ -190,7 +198,8 @@ __all__ = [
     "summarize_scores", "COMPOSITION_MODES", "DEFAULT_SCORE_CONFIG",
     "unit_response", "TabulatedResponse", "geometric_aperture_m2sr",
     "aperture_vs_energy", "peak_energy_pev", "infer_response", "load_curve_csv",
-    "summarize_sites",
+    "summarize_sites", "PUBLISHED_ARRAYS", "array_scale_factor",
+    "scale_published_curve", "absolute_from_published",
     # the tools
     "crop", "read_geo",
     "load_run", "check_alignment", "read_world_file", "pixel_area_km2", "capacity_of",

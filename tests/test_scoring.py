@@ -8,10 +8,12 @@ but the invariants it must satisfy regardless of normalisation can be, and are.
 import math
 import os
 import unittest
+import warnings
 
 import numpy as np
 
 import _support  # noqa: F401  (path setup)
+from _support import ss
 from oroscope import aperture
 from oroscope import arrival_scan
 from oroscope import physics
@@ -106,6 +108,83 @@ class TestComposition(unittest.TestCase):
             v = scoring.compose(comps, mode)
             self.assertGreaterEqual(float(v.min()), 0.0)
             self.assertLessEqual(float(v.max()), 1.0)
+
+    def test_zero_weight_excludes_a_component_from_min_too(self):
+        """
+        ``min`` ignored weights entirely, so the component a user had switched off could
+        still be the smallest and so still decide the score -- the one outcome that
+        switching it off was meant to prevent.
+        """
+        v = scoring.compose(self.components, "min", {"a": 0.0})
+        np.testing.assert_allclose(v, [1.0, 1.0, 1.0])
+
+    def test_excluding_every_component_is_rejected(self):
+        with self.assertRaises(ValueError):
+            scoring.compose(self.components, "min", {"a": 0.0, "b": 0.0})
+
+    def test_a_weight_naming_an_absent_component_warns(self):
+        """
+        Silence here is how a switched-off component keeps running. The name is real --
+        a misspelling is refused by parse_score_weights -- so this says the run does not
+        have that component, and the weight did nothing.
+        """
+        with self.assertWarns(UserWarning) as caught:
+            scoring.compose(self.components, "product", {"muon_shielding": 0.0})
+        self.assertIn("muon_shielding", str(caught.warning))
+
+    def test_a_weight_naming_a_present_component_is_quiet(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            scoring.compose(self.components, "product", {"a": 2.0})
+
+
+class TestScoreWeightNamesAreChecked(unittest.TestCase):
+    """
+    A mistyped component name used to be accepted, dropped and never mentioned.
+
+    ``compose`` filtered unknown keys with ``if n in w`` and nothing behind it, so
+    ``--score_weights geomag=0`` -- one character short of ``geomagnetic`` -- ran the
+    component the user had switched off at full weight for the whole search. Every
+    number moved and nothing recorded that the request had been discarded. Weights are
+    the one input whose failure leaves no trace, which is why they are refused early.
+    """
+
+    def test_a_misspelling_is_refused_and_the_correction_offered(self):
+        with self.assertRaises(SystemExit) as caught:
+            ss.parse_score_weights("geomag=0")
+        self.assertIn("geomagnetic", str(caught.exception))
+
+    def test_the_measured_consequence_of_the_misspelling(self):
+        parts = {"geomagnetic": np.array([0.2]), "depth": np.array([0.9])}
+        # What the typo produced when it was silently dropped: the component at full
+        # weight, 0.18 where switching it off gives 0.9. compose() warns about it now;
+        # the point here is the number, so the warning is caught rather than asserted.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            dropped = float(scoring.compose(parts, "product", {"geomag": 0.0})[0])
+        self.assertAlmostEqual(dropped, 0.18, places=6)
+        self.assertAlmostEqual(
+            float(scoring.compose(parts, "product", {"geomagnetic": 0.0})[0]), 0.9,
+            places=6)
+
+    def test_every_real_component_name_is_accepted(self):
+        spec = ",".join(f"{name}=1" for name in scoring.SCORE_COMPONENTS)
+        got = ss.parse_score_weights(spec)
+        self.assertEqual(set(got), set(scoring.SCORE_COMPONENTS))
+
+    def test_the_config_spelling_is_checked_as_well(self):
+        """A config carries a mapping rather than a string, and used to skip the check."""
+        with self.assertRaises(SystemExit):
+            ss.parse_score_weights({"solid_angel": 2.0})
+        self.assertEqual(ss.parse_score_weights({"solid_angle": 2.0}), {"solid_angle": 2.0})
+
+    def test_the_component_list_matches_what_scoring_can_produce(self):
+        """
+        SCORE_COMPONENTS is the gate, so it drifting from reality would start refusing
+        legitimate weights. explain.COMPONENT_MEANING documents the same set.
+        """
+        from oroscope import explain
+        self.assertEqual(set(scoring.SCORE_COMPONENTS), set(explain.COMPONENT_MEANING))
 
 
 class TestScoreCandidates(unittest.TestCase):
@@ -331,8 +410,131 @@ class TestSiteSummary(unittest.TestCase):
                                                   5e3, 2.5e4, [10.0]), {})
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+
+class TestScalingAPublishedCurveToOurArray(unittest.TestCase):
+    """
+    A published curve belongs to one array at one site. Only the array is correctable.
+
+    Aperture scales with instrumented *ground*, so the factor carries both the detector
+    count and the spacing. Scaling by count alone would inflate a densified array by
+    exactly the factor it was densified — which is what this project would have done,
+    running TAMBO at 100 m against a curve simulated at 150 m.
+    """
+
+    def test_twice_the_detectors_at_the_same_spacing_is_twice_the_ground(self):
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(10000, "tambo_aperture_fig3"), 2.0, places=9)
+
+    def test_the_published_array_itself_scales_by_one(self):
+        for name, spec in aperture.PUBLISHED_ARRAYS.items():
+            self.assertAlmostEqual(
+                aperture.array_scale_factor(spec["units"], name), 1.0, places=9,
+                msg=name)
+
+    def test_spacing_enters_as_its_square(self):
+        """The same detectors spread twice as far apart instrument four times the ground."""
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                        target_spacing_km=0.30),
+            4.0, places=9)
+
+    def test_a_densified_array_is_not_credited_for_its_density(self):
+        """
+        The trap this exists to avoid. 11,250 units at 100 m and 5,000 at 150 m cover
+        the same ground, so they must scale identically -- counting units alone would
+        claim 2.25x.
+        """
+        same_ground = aperture.array_scale_factor(11250, "tambo_aperture_fig3",
+                                                  target_spacing_km=0.10)
+        self.assertAlmostEqual(same_ground, 1.0, places=6)
+        by_count_alone = 11250 / 5000
+        self.assertAlmostEqual(by_count_alone, 2.25, places=9)
+
+    def test_the_shipped_tambo_config_now_matches_the_published_spacing(self):
+        """
+        With the spacings equal the factor is a plain ratio of counts, which is the
+        whole reason for matching them.
+        """
+        import json
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "config", "tambo_colca_config.json")
+        with open(path) as f:
+            cfg = json.load(f)
+        self.assertEqual(cfg["antenna_spacing_km"],
+                         aperture.PUBLISHED_ARRAYS["tambo_aperture_fig3"]["spacing_km"])
+
+    def test_the_curve_is_scaled_and_its_units_survive(self):
+        data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "tambo_aperture_fig3.csv")
+        _, a = aperture.load_curve_csv(data)
+        half = aperture.scale_published_curve(a, 2500, "tambo_aperture_fig3")
+        np.testing.assert_allclose(half, a * 0.5, rtol=1e-12)
+
+    def test_an_unknown_array_is_refused(self):
+        with self.assertRaises(ValueError):
+            aperture.array_scale_factor(1000, "grand_effective_area_fig99")
+
+    def test_nonsense_sizes_are_refused(self):
+        for units, spacing in ((0, None), (-5, None), (100, 0.0), (100, -1.0)):
+            with self.assertRaises(ValueError):
+                aperture.array_scale_factor(units, "tambo_aperture_fig3",
+                                            target_spacing_km=spacing)
+
+    def test_a_run_records_its_spacing_as_spacing_km(self):
+        """
+        `antenna_spacing_km` is the *config* spelling; a results file writes
+        `spacing_km`. Reading the config key meant target_spacing_km stayed None and
+        silently fell back to the published spacing -- a 44x under-report on a real
+        1 km GRAND run, which is the density error the argument exists to prevent.
+        """
+        results = {"results": {"total_capacity": 10000},
+                   "parameters": {"spacing_km": 1.0, "grid_type": "hex"}}
+        curve = os.path.join(_support.REPO_ROOT, "data", "tambo_aperture_fig3.csv")
+        out = aperture.absolute_from_published(results, curve, "tambo_aperture_fig3")
+        # 10000 units at 1 km against 5000 at 150 m: (10000*1.0^2)/(5000*0.15^2)
+        self.assertAlmostEqual(out["scale_factor"], 88.888888, places=4)
+
+    def test_units_come_from_the_registry_not_the_path(self):
+        """A file moved into a directory named 'aperture' relabelled cm^2 as m^2 sr."""
+        results = {"results": {"total_capacity": 5000},
+                   "parameters": {"spacing_km": 1.0}}
+        curve = os.path.join(_support.REPO_ROOT, "data",
+                             "grand_effective_area_fig25.csv")
+        out = aperture.absolute_from_published(results, curve,
+                                               "grand_effective_area_fig25")
+        self.assertEqual(out["units"], "cm^2")
+
+    def test_a_capacity_that_is_not_a_number_is_refused(self):
+        """A non-distributed run writes the string 'N/A', which int() blew up on."""
+        results = {"results": {"total_capacity": "N/A"}, "parameters": {}}
+        curve = os.path.join(_support.REPO_ROOT, "data", "tambo_aperture_fig3.csv")
+        with self.assertRaises(ValueError) as caught:
+            aperture.absolute_from_published(results, curve, "tambo_aperture_fig3")
+        self.assertIn("distributed", str(caught.exception))
+
+    def test_a_square_lattice_covers_more_ground_per_detector(self):
+        """
+        sin60 cancels only when both lattices match. A square-gridded run stands on
+        1/sin60 = 1.1547x the ground per detector that the hex-simulated array does.
+        """
+        hexy = aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                           target_grid_type="hex")
+        square = aperture.array_scale_factor(5000, "tambo_aperture_fig3",
+                                             target_grid_type="square")
+        self.assertAlmostEqual(hexy, 1.0, places=9)
+        self.assertAlmostEqual(square / hexy, 1.0 / math.sin(math.radians(60.0)),
+                               places=6)
+
+    def test_the_grand_linearity_claim_the_scaling_rests_on(self):
+        """
+        The paper states GRAND200k is exactly 20x GRAND10k, and the digitization note
+        records 19.9-20.1x from tracing both. That is the evidence that aperture is
+        linear in array size at fixed spacing, so it is asserted rather than trusted.
+        """
+        self.assertAlmostEqual(
+            aperture.array_scale_factor(200000, "grand_effective_area_fig25"),
+            20.0, places=9)
 
 
 class TestDigitizedCurves(unittest.TestCase):
@@ -498,3 +700,6 @@ class TestDecayTerm(unittest.TestCase):
                 v = float(comp["decay"][0])
                 self.assertGreaterEqual(v, 0.0)
                 self.assertLessEqual(v, 1.0)
+
+if __name__ == "__main__":
+    unittest.main()

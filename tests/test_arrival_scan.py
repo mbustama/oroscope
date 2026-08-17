@@ -218,9 +218,26 @@ class TestAzimuthFan(unittest.TestCase):
     def test_fan_is_symmetric_about_the_aspect(self):
         offsets = scan_mod.azimuth_fan(9, 60.0)
         self.assertEqual(len(offsets), 9)
-        self.assertAlmostEqual(offsets[0], -60.0)
-        self.assertAlmostEqual(offsets[-1], 60.0)
         self.assertAlmostEqual(float(offsets.sum()), 0.0, places=9)
+        self.assertAlmostEqual(float(offsets[4]), 0.0, places=9,
+                               msg="an odd fan still samples the aspect itself")
+
+    def test_fan_samples_sit_at_cell_centres_and_tile_the_arc(self):
+        """
+        Samples are cell centres, not endpoints. Endpoint-inclusive sampling puts two
+        of them on the fan's edges and then weights them like the interior ones, so the
+        solid angle only came out right when every azimuth accepted: for this fan the
+        true arcs are 7.5, 15x7, 7.5 degrees against a uniform 13.333.
+        """
+        for n, half_width in ((9, 60.0), (5, 30.0), (12, 90.0)):
+            offsets = scan_mod.azimuth_fan(n, half_width)
+            cell = 2.0 * half_width / n
+            steps = np.diff(offsets)
+            np.testing.assert_allclose(steps, cell, rtol=1e-12,
+                                       err_msg=f"n={n} half_width={half_width}")
+            # each sample's cell reaches half a cell either side, tiling [-hw, +hw]
+            self.assertAlmostEqual(float(offsets[0]) - cell / 2.0, -half_width, places=9)
+            self.assertAlmostEqual(float(offsets[-1]) + cell / 2.0, half_width, places=9)
 
     def test_full_sweep_covers_the_compass_without_repeating(self):
         offsets = scan_mod.azimuth_fan(8, None)
@@ -250,6 +267,70 @@ class TestAzimuthFan(unittest.TestCase):
                              half_width_deg=60.0, **common)
         self.assertEqual(int(narrow["cells"][0]), 0)
         self.assertGreater(int(wide["cells"][0]), 0)
+
+
+class TestReportedSolidAngleIsTheArcActuallyScanned(unittest.TestCase):
+    """
+    The azimuthal cell width comes from the fan's span, not from the whole circle.
+
+    ``d_phi`` read ``2*pi / n_az`` unconditionally, which is right only for a full
+    sweep. With the shipped +/-60 degree fan every reported solid angle was exactly 3x
+    the arc the scan had looked at, and ``azimuth_half_width_deg`` -- the knob that says
+    how much sky a slope-mounted array can see -- changed the reported figure not at
+    all: 360, 180, 120 and 60 degree fans all returned the same 3.0565 sr.
+
+    Nothing downstream moved when this was corrected. The factor is uniform across
+    candidates, and ``saturating_score`` is ``x / (x + h)``, so dividing
+    ``solid_angle_half_sr`` by the same 3 leaves every score where it was.
+    """
+
+    def scan_open_sky(self, half_width_deg, n_azimuths, lo=5.0, hi=35.0, bins=12):
+        """Flat ground and no terrain requirement, so every direction is accepted."""
+        grid = grid_at()
+        flat = np.zeros((400, 400), dtype=np.float32)
+        cands = np.array([[200.0, 200.0, 90.0]])
+        out = scan_mod.scan(cands, flat, grid, n_azimuths=n_azimuths,
+                            half_width_deg=half_width_deg, elev_min_deg=lo,
+                            elev_max_deg=hi, n_elev_bins=bins, max_range_m=5000.0,
+                            min_dist_km=0.0, max_dist_km=5.0,
+                            require_terrain=False, use_aspect=False)
+        span = 2.0 * math.pi if half_width_deg is None else \
+            2.0 * math.radians(half_width_deg)
+        exact = span * (math.sin(math.radians(hi)) - math.sin(math.radians(lo)))
+        return float(out["solid_angle_sr"][0]), exact
+
+    def test_a_full_sweep_recovers_the_analytic_solid_angle(self):
+        got, exact = self.scan_open_sky(None, 12)
+        self.assertAlmostEqual(got / exact, 1.0, places=3)
+
+    def test_every_wedge_recovers_its_own_arc(self):
+        for half_width in (20.0, 30.0, 60.0, 90.0):
+            got, exact = self.scan_open_sky(half_width, 9)
+            self.assertAlmostEqual(got / exact, 1.0, places=3,
+                                   msg=f"half_width {half_width}")
+
+    def test_a_narrower_fan_reports_less_sky(self):
+        """The knob works now. It did not: all four of these were identical."""
+        seen = [self.scan_open_sky(hw, 9)[0] for hw in (20.0, 30.0, 60.0, 90.0)]
+        self.assertEqual(seen, sorted(seen))
+        self.assertGreater(seen[-1] / seen[0], 4.0)
+
+    def test_the_shipped_fan_was_overstating_by_three(self):
+        """+/-60 degrees is 120 of the 360 the old code credited it with."""
+        got, exact = self.scan_open_sky(60.0, 9)
+        self.assertAlmostEqual(got * 3.0 / self.scan_open_sky(None, 9)[1], 1.0,
+                               places=3)
+
+    def test_the_retune_leaves_the_solid_angle_score_untouched(self):
+        """
+        Why no published number moved. saturating_score is x/(x+h), so scaling the
+        solid angle and its half-value together is exactly invariant.
+        """
+        from oroscope import scoring
+        omega = np.array([0.02, 0.1, 0.35, 1.2])
+        new = scoring.saturating_score(omega, 0.05 / 3.0)
+        old = scoring.saturating_score(omega * 3.0, 0.05)
+        np.testing.assert_allclose(new, old, rtol=0, atol=1e-15)
 
 
 class TestCanyonGeometry(unittest.TestCase):
@@ -708,7 +789,15 @@ class TestProfileSampling(unittest.TestCase):
                   n_elev_bins=24, max_range_m=12000.0, min_dist_km=1.0, max_dist_km=12.0)
         near = scan_mod.scan(cands, z, grid, bilinear=False, **kw)
         bil = scan_mod.scan(cands, z, grid, bilinear=True, **kw)
-        self.assertGreaterEqual(float(near["horizon_deg"][0]), float(bil["horizon_deg"][0]))
+        # Tolerance, because on this fixture the two agree to seven digits and the last
+        # of them is not a property of the sampling. Compiled with fastmath the nearest
+        # form came out 7e-7 deg the larger; interpreted, under NUMBA_DISABLE_JIT=1, the
+        # bilinear form did -- so an exact >= turned a floating-point reassociation into
+        # a failing test, and made the only route to coverage of these kernels look like
+        # a regression. The claim is that nearest never sees *further*, not that it
+        # differs at the eighth digit.
+        self.assertGreaterEqual(float(near["horizon_deg"][0]),
+                                float(bil["horizon_deg"][0]) - 1.0e-5)
 
     def test_nodata_neighbours_fall_back_to_nearest(self):
         grid = grid_at()

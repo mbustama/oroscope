@@ -33,11 +33,13 @@ re-read the file it was just handed the path to.
 from __future__ import annotations
 
 import argparse
+import difflib
 import inspect
 import sys
 import numpy as np
 import tifffile as tiff
 import matplotlib.pyplot as plt
+import matplotlib.axes as maxes
 from matplotlib.patches import Ellipse, Polygon as MplPolygon
 from matplotlib.ticker import FuncFormatter
 from matplotlib.lines import Line2D
@@ -84,9 +86,15 @@ __all__ = [
     # Everything the command line can do, the library can do too: configuration
     # files, the memory pre-flight, and the run summary.
     "default_config", "generate_config", "load_config", "CONFIG_PRESETS",
-    "estimate_peak_memory_gb", "apply_memory_cap", "available_memory_gb",
+    "estimate_peak_memory_gb", "estimate_visualisation_memory_gb",
+    "apply_memory_cap", "available_memory_gb",
     "preflight_memory", "emit_explanation", "resolve_config_paths",
-    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing",
+    "stride_gap_m", "closing_element_m", "warn_stride_outruns_closing", "add_scale_bar",
+    "altitude_limits", "add_north_arrow", "SEA_LEVEL_M", "WATER_COLOUR", "NODATA_COLOUR",
+    "attach_colorbar", "resolve_settlements", "add_settlements", "add_roads",
+    "PLACE_STYLE",
+    "ROAD_WIDTHS", "ROAD_COLOUR",
+    "AREQUIPA_SETTLEMENTS", "LIMA_SETTLEMENTS", "SETTLEMENT_PRESETS",
 ]
 
 # Try to import psutil for RAM stats
@@ -461,8 +469,8 @@ def collect_provenance(dem_path, map_grid):
     -------
     dict
         Git commit and dirty flag, DEM path, size and checksum, resolved grid
-        geometry, and third-party package versions -- enough to say what produced a
-        result months later.
+        geometry, third-party package versions, and the module-level physics state --
+        enough to say what produced a result months later.
     """
     dem_abs = os.path.abspath(dem_path)
     return {
@@ -484,6 +492,23 @@ def collect_provenance(dem_path, map_grid):
         },
         "packages": _package_versions(),
         "command": " ".join(sys.argv),
+        # Module-level physics state, which a library caller can change without it
+        # appearing anywhere else. `physics.set_declination_model` is recommended by
+        # the run's own summary and alters the geomagnetic score; `set_tau_energy_loss`
+        # alters beta. Neither is a parameter, neither shows up in `command` when set
+        # from a notebook or a script, and a run made under either was previously
+        # indistinguishable from a default one.
+        "physics_state": {
+            "tau_energy_loss": physics.tau_energy_loss_settings(),
+            # Presence and qualified name, not repr(): a closure's repr is a
+            # memory address that changes every process, so two runs under
+            # different declination grids recorded strings differing only in
+            # noise -- neither identifying nor comparable, which was the point.
+            "declination_model": (
+                None if physics.declination_model() is None else
+                getattr(physics.declination_model(), "__qualname__",
+                        type(physics.declination_model()).__name__)),
+        },
     }
 
 
@@ -769,27 +794,27 @@ def read_dem_geometry(dem_path):
     Returns
     -------
     tuple
-        Pixel size in degrees and the number of rows. Either is ``None`` when the file
-        or the tag cannot be read, which is not an error: the caller falls back to an
-        explicit value or to 1 arc-second.
+        Pixel size in degrees, the number of rows and the number of columns. Any of
+        them is ``None`` when the file or the tag cannot be read, which is not an
+        error: the caller falls back to an explicit value or to 1 arc-second.
     """
     try:
         with tiff.TiffFile(dem_path) as tf:
             page = tf.pages[0]
-            n_rows = int(page.shape[0])
+            n_rows, n_cols = int(page.shape[0]), int(page.shape[1])
             tag = page.tags.get('ModelPixelScaleTag')
             if tag is None:
-                return None, n_rows
+                return None, n_rows, n_cols
             scale_x, scale_y = float(tag.value[0]), float(tag.value[1])
             if scale_y <= 0:
-                return None, n_rows
+                return None, n_rows, n_cols
             # A geographic grid is square in degrees; warn if the DEM says otherwise.
             if scale_x > 0 and abs(scale_x - scale_y) / scale_y > 1e-6:
                 print(f"      {C.WARN}{Icon.WARN}WARNING: Non-square DEM pixels "
                       f"({scale_x:.8f} x {scale_y:.8f} deg). Using the latitude scale.{C.RESET}")
-            return scale_y, n_rows
+            return scale_y, n_rows, n_cols
     except Exception:
-        return None, None
+        return None, None, None
 
 # Describes the sampling grid of the DEM. Angular pixel size is identical on both
 # axes (that is what "geographic" means), but the two metric sizes are not.
@@ -799,7 +824,8 @@ def read_dem_geometry(dem_path):
 RESULTS_PREFIX = "oroscope_results_"
 LEGACY_RESULTS_PREFIX = "grand_search_results_"
 
-MapGrid = namedtuple("MapGrid", "cell_size_deg cell_size_y cell_size_x center_lat source")
+MapGrid = namedtuple("MapGrid",
+                     "cell_size_deg cell_size_y cell_size_x center_lat center_lon source")
 MapGrid.__doc__ = """
 Resolved pixel geometry of a DEM.
 
@@ -815,12 +841,18 @@ cell_size_x : float
     from the equator, by the cosine of the latitude.
 center_lat : float
     Latitude at which ``cell_size_x`` was evaluated, in degrees.
+center_lon : float or None
+    Longitude of the DEM's middle, in degrees, or ``None`` when no origin longitude
+    was supplied. Paired with ``center_lat`` it is a point actually on the DEM, which
+    is what a field model should be asked about; the geomagnetic field used to be
+    resolved at this latitude and the *west edge* longitude.
 source : str
     Where the resolution came from -- detected from the GeoTIFF, supplied explicitly,
     or defaulted. Recorded so a run's provenance says which.
 """
 
-def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
+def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None,
+                          origin_lon=None):
     """
     Determines the sampling geometry used by the whole pipeline.
 
@@ -842,6 +874,10 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
         east-west scaling.
     cell_size_deg : float, optional
         Explicit pixel size in degrees, overriding whatever the file says.
+    origin_lon : float, optional
+        Longitude of the DEM's western edge, in degrees. Supplied only so the result
+        can carry ``center_lon``; nothing about the pixel sizes depends on it. Omitted,
+        ``center_lon`` is ``None``.
 
     Returns
     -------
@@ -857,7 +893,7 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     >>> f"{grid.cell_size_y:.1f} m x {grid.cell_size_x:.1f} m"
     '30.7 m x 29.8 m'
     """
-    detected_deg, n_rows = read_dem_geometry(dem_path)
+    detected_deg, n_rows, n_cols = read_dem_geometry(dem_path)
 
     if cell_size_deg is not None:
         source = "user-specified"
@@ -871,12 +907,19 @@ def resolve_grid_geometry(dem_path, origin_lat, cell_size_deg=None):
     center_lat = origin_lat
     if n_rows:
         center_lat = origin_lat - (n_rows / 2.0) * cell_size_deg
+    # The DEM's middle in both axes, so a model that varies with position is asked
+    # about the same point twice. The geomagnetic field was resolved at the centre
+    # *latitude* and the west-edge *longitude*, which is not anywhere on the DEM.
+    center_lon = None
+    if origin_lon is not None:
+        center_lon = origin_lon + ((n_cols / 2.0) * cell_size_deg if n_cols else 0.0)
 
     cell_size_y = cell_size_deg * KM_PER_DEG_LAT * 1000.0
     cell_size_x = cell_size_deg * KM_PER_DEG_LON_EQUATOR * math.cos(math.radians(center_lat)) * 1000.0
 
     return MapGrid(float(cell_size_deg), float(cell_size_y), float(cell_size_x),
-                   float(center_lat), source)
+                   float(center_lat),
+                   None if center_lon is None else float(center_lon), source)
 
 # Values below this are ocean or void in the DEMs this tool reads
 NODATA_BELOW_M = -100.0
@@ -1223,7 +1266,7 @@ def get_candidates_chunked(elevation, map_grid, rfi_zones, origin_lat, origin_lo
 
 def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
                      score_config=None, min_score=0.0, rfi_zones_px=None,
-                     score_percentile=None):
+                     score_percentile=None, funnel=None):
     """
     Step 3 alternative: scan arrival directions instead of casting one ray per pixel.
 
@@ -1254,14 +1297,33 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     score_percentile : float, optional
         Keep this percentage of viable candidates, by score. Rank-based and so
         scale-free: preferred over ``min_score`` for exactly the reason above.
+    funnel : Funnel, optional
+        Records the two stages this function decides: ``directions accepted``, the
+        candidates the *geometry* accepted, and -- only when a score cut is in force --
+        how many of those the cut kept.
 
     Returns
     -------
     n_hits : int
-        Number of accepted candidates.
+        Number of accepted candidates, after the score cut when one applies.
     observables : dict
         Per-candidate arrays, including the scores and their named components, kept
         for per-site aggregation.
+
+    Notes
+    -----
+    ``directions accepted`` counts the geometry alone. It previously carried the
+    post-cut count, identical to the score row beside it, which made the score stage
+    invisible: :func:`~oroscope.explain.binding_constraint` compares each stage against
+    the one before, so a stage that keeps exactly 100% can never be named the binding
+    constraint however much it removed. A run emptied by ``min_score`` was therefore
+    blamed on the arrival geometry, and the summary told the reader to widen the
+    arrival and distance windows -- advice that could not help.
+
+    Stored results written before this carry the post-cut count under
+    ``directions accepted``. Only runs with a cut are affected: ``min_score`` 0 accepts
+    every viable candidate, so every GRAND run in the store already held the geometric
+    number and is unchanged.
     """
     observables = arrival_scan.scan(candidates_arr, elevation, map_grid, **scan_params)
 
@@ -1294,9 +1356,27 @@ def run_arrival_scan(candidates_arr, elevation, map_grid, buf_a, scan_params,
     if score_percentile is not None and np.any(viable):
         floor = float(np.percentile(total[viable], 100.0 - float(score_percentile)))
         accepted = viable & (total >= floor)
+        cut = f"score in top {float(score_percentile):g}%"
     else:
         accepted = viable & (total >= min_score)
+        cut = f"score >= {min_score:g}" if min_score > 0 else None
     n_hits = int(np.count_nonzero(accepted))
+    # Which candidates the run actually kept, so per-site statistics can be taken over
+    # them. Not the same as `cells > 0`: that is the geometry alone, and a site's
+    # extent comes from the *scored* set, grown by closing. Summarising over the
+    # geometric set let candidates the cut had rejected back into the site's own
+    # numbers, wherever closing had grown the mask over them.
+    observables["accepted"] = accepted
+
+    # Two counts, not one. The geometry and the score cut are separate questions and
+    # the funnel exists to tell them apart; recording n_hits under both names made the
+    # score row a tautology -- 100.000% of the previous stage in all twelve stored runs
+    # -- and left the geometric acceptance unrecorded whenever a cut was in force.
+    if funnel is not None:
+        funnel.add("directions accepted", int(np.count_nonzero(viable)))
+        if cut:
+            funnel.add(cut, n_hits)
+
     if n_hits:
         buf_a[candidates_arr[accepted, 0].astype(np.int64),
               candidates_arr[accepted, 1].astype(np.int64)] = True
@@ -1336,7 +1416,15 @@ def summarize_observables_by_site(labeled, downsample_factor, candidates_arr, ob
     if observables is None or candidates_arr is None or len(site_ids) == 0:
         return {}
 
-    accepted = observables["cells"] > 0
+    # The candidates the run kept, which is the scored set where a cut applied and the
+    # geometric set otherwise. `cells > 0` alone is the geometry, and a site is defined
+    # by the scored set: taking statistics over the geometry let rejected candidates
+    # into a site's own medians wherever closing had grown its mask over them. Older
+    # observables dictionaries carry no `accepted`, so the geometry remains the
+    # fallback and a pre-existing caller still works.
+    accepted = observables.get("accepted")
+    if accepted is None:
+        accepted = observables["cells"] > 0
     if not np.any(accepted):
         return {}
 
@@ -1417,8 +1505,18 @@ def apply_morphology_pingpong(source_path, dest_path, shape, dtype, operation_fu
     rows, cols = shape
     
     with tqdm(total=(rows//tile_size + 1)*(cols//tile_size + 1), desc=f"   {desc}", unit="tile", colour='magenta' if USE_COLOR else None) as pbar:
-        # Pad the chunk by half the structure size to prevent edge artifacts between chunks
-        pad = max(structure.shape) // 2
+        # Halo, so a tile boundary cannot change the answer.
+        #
+        # Closing and opening are each a dilation followed by an erosion, and each of
+        # those reaches half the element, so the composition reaches a *whole* element:
+        # a pixel's result depends on the input up to `max(structure.shape)` away, not
+        # half that. This read `// 2`, which is the radius of one operation rather than
+        # of the pair, so the erosion ran into the edge of its own chunk and ate the
+        # core's border. Measured on a 5000 x 5000 mask at the default 2048 tile with
+        # GRAND's 33-pixel element: 27,990 pixels lost against the untiled result --
+        # every one a loss, never a gain, and aligned to the tile grid. TAMBO's 5-pixel
+        # element lost 1. The cost of the wider halo is about 3% more work per tile.
+        pad = max(structure.shape)
         for r in range(0, rows, tile_size):
             for c in range(0, cols, tile_size):
                 r_end = min(r + tile_size, rows)
@@ -1533,7 +1631,7 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     # Gap closing is its own criterion, not a consequence of detector spacing. It used
     # to be tied to antenna_spacing_km, which coupled two unrelated things and hid how
     # much of the reported area it creates: measured at Colca, closing with a 1 km
-    # element more than doubles the accepted area (2.29x, §6.17). 0 disables it.
+    # element more than doubles the accepted area (2.35x, §6.17 and §6.69). 0 disables it.
     close_km = antenna_spacing_km if gap_close_km is None else gap_close_km
     close_r = max(1, int(close_km * 1000 / cell_size_y))
     close_c = max(1, int(close_km * 1000 / cell_size_x))
@@ -1894,7 +1992,8 @@ def generate_kml_file(mask, elevation, filename, origin_lat, origin_lon, cell_si
 def generate_visualizations_and_outputs(dem_path, elevation, small_final, labeled_viz, site_details, count, cumulative_capacity,
                                         origin_lat, origin_lon, map_grid, downsample_factor, generate_kml, run_output_dir,
                                         output_image_format, rfi_zones, search_mode, grid_type, antenna_spacing_km, 
-                                        min_altitude, max_altitude, region_name, final_params, run_info=None):
+                                        min_altitude, max_altitude, region_name, final_params, run_info=None,
+                                        settlements='auto', roads_geojson=None):
     """
     Step 6 Pipeline: Formats and exports all scientific products including geo-registered TIFs, KML models, 
     an annotated map graphic, and a serialized JSON summary of the run parameters and results 
@@ -1944,6 +2043,10 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         Resolved parameters, serialised into the results JSON.
     run_info : dict, optional
         Timings, funnel and provenance to record alongside the results.
+    settlements : str or sequence, optional
+        Named places to mark on the map. See :func:`resolve_settlements`.
+    roads_geojson : str, optional
+        Road geometry to draw as context, from ``oroscope-fetch-roads``.
 
     Returns
     -------
@@ -1988,26 +2091,54 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
         elev_viz = elev_viz[:mr, :mc]
         mask_viz_labeled = mask_viz_labeled[:mr, :mc]
         
-        im = ax.imshow(elev_viz, cmap='terrain', vmin=0, vmax=6000)
-        
+        # Scaled to this DEM rather than a fixed 0-6000 m, so the whole colour range
+        # describes ground that is actually in the picture. Water is drawn as water
+        # instead of as the bottom of the terrain ramp, where it reads as low land.
+        vmin, vmax = altitude_limits(elev_viz)
+        terrain = plt.get_cmap('terrain').with_extremes(under=WATER_COLOUR,
+                                                       bad=NODATA_COLOUR)
+        # NaN survives this comparison as NaN -- `NaN <= x` is False -- so nodata
+        # reaches the colormap as "bad" and water as "under", and the two stay
+        # distinguishable. Collapsing both to water claimed sea where the DEM is
+        # simply silent.
+        land_only = np.where(elev_viz <= SEA_LEVEL_M, -np.inf, elev_viz)
+        im = ax.imshow(land_only, cmap=terrain, vmin=vmin, vmax=vmax)
+
         legend_handles = []
         legend_labels = []
 
         if count > 0:
-            cmap = plt.get_cmap('tab10') 
-            for i in range(1, count + 1): 
+            cmap = plt.get_cmap('tab10')
+            for i in range(1, count + 1):
                 color = cmap((i - 1) % 10)
                 ax.contour((mask_viz_labeled == i), levels=[0.5], colors=[color], linewidths=2.5)
-                    
+
                 site_data = site_details[i - 1]
                 label_str = f"Site {site_data['site_id']}: {site_data['capacity_exact']} DUs ({site_data['area_km2']} km²)"
                 legend_handles.append(Line2D([0], [0], color=color, lw=2.5))
                 legend_labels.append(label_str)
+
+                # The number on the map, so a site in the legend can be found in the
+                # picture. At its own centroid, which for a ring-shaped region may not
+                # be inside it -- acceptable for a label, and better than a corner.
+                where = np.argwhere(mask_viz_labeled == i)
+                if where.size:
+                    cy, cx = where.mean(axis=0)
+                    tag = ax.text(cx, cy, str(site_data['site_id']), color=color,
+                                  fontsize=11, fontweight='bold', ha='center',
+                                  va='center', zorder=12, clip_on=True)
+                    tag.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'),
+                                          path_effects.Normal()])
         
         if rfi_zones:
             deg_viz = cell_size_deg * viz_ds
-            legend_handles.append(Line2D([0], [0], color='red', linestyle='--', lw=2))
-            legend_labels.append("RFI exclusion zone")
+            viz_rows, viz_cols = mask_viz_labeled.shape[:2]
+
+            def on_map(x0, x1, y0, y1):
+                """Whether a zone's bounding box touches the raster at all."""
+                return not (x1 < 0 or x0 > viz_cols or y1 < 0 or y0 > viz_rows)
+
+            drawn, off_map = 0, []
             for item in rfi_zones:
                 type_tag = item[0]
                 if type_tag == 'circle':
@@ -2018,9 +2149,15 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                     # a pixel covers less ground east-west than north-south
                     w_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_x) / viz_ds
                     h_px = 2.0 * (radius_km * 1000.0 / map_grid.cell_size_y) / viz_ds
-                    ax.add_patch(Ellipse((px_x, px_y), w_px, h_px, edgecolor='red', facecolor='none', ls='--', lw=2))
-                    text = ax.text(px_x, px_y-h_px/4, name, color='red', fontsize=12, ha='center')
+                    if not on_map(px_x - w_px / 2, px_x + w_px / 2,
+                                  px_y - h_px / 2, px_y + h_px / 2):
+                        off_map.append(name)
+                        continue
+                    ax.add_patch(Ellipse((px_x, px_y), w_px, h_px, edgecolor='red',
+                                         facecolor='none', ls='--', lw=2, clip_on=True))
+                    text = ax.text(px_x, px_y-h_px/4, name, color='red', fontsize=12, ha='center', clip_on=True)
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
+                    drawn += 1
                 elif type_tag == 'poly':
                     _, coords, name = item
                     verts = []
@@ -2028,25 +2165,87 @@ def generate_visualizations_and_outputs(dem_path, elevation, small_final, labele
                         px = (plon - origin_lon) / deg_viz
                         py = (origin_lat - plat) / deg_viz
                         verts.append((px, py))
-                    ax.add_patch(MplPolygon(verts, closed=True, edgecolor='red', facecolor='none', ls='--', lw=2))
-                    cx = sum(p[0] for p in verts)/len(verts)
-                    cy = sum(p[1] for p in verts)/len(verts)
-                    text = ax.text(cx, cy, name, color='red', fontsize=8, ha='center')
+                    xs = [p[0] for p in verts]
+                    ys = [p[1] for p in verts]
+                    if not on_map(min(xs), max(xs), min(ys), max(ys)):
+                        off_map.append(name)
+                        continue
+                    ax.add_patch(MplPolygon(verts, closed=True, edgecolor='red',
+                                            facecolor='none', ls='--', lw=2, clip_on=True))
+                    cx = sum(xs)/len(xs)
+                    cy = sum(ys)/len(ys)
+                    text = ax.text(cx, cy, name, color='red', fontsize=8, ha='center', clip_on=True)
                     text.set_path_effects([path_effects.Stroke(linewidth=4, foreground='white'), path_effects.Normal()])
+                    drawn += 1
+
+            # Zones outside the DEM are dropped rather than drawn. They still exclude
+            # nothing inside it, and drawing them wrecked the figure: an artist beyond
+            # the image expands the axes, and `bbox_inches='tight'` then grew the saved
+            # PNG to reach a label 150 km off the south edge -- leaving the map itself
+            # in the top fifth of a mostly empty page.
+            if drawn:
+                legend_handles.append(Line2D([0], [0], color='red', linestyle='--', lw=2))
+                legend_labels.append("RFI exclusion zone")
+            if off_map:
+                print(f"      {Icon.INFO}{len(off_map)} RFI zone(s) lie outside the DEM "
+                      f"and are not drawn: {', '.join(off_map)}")
+
+        # Hold the view to the raster. Every RFI ellipse is an artist, and an artist
+        # outside the image expands the axes to contain it -- so a zone like Mollendo,
+        # 150 km off the south edge of the Colca crop, pushed the map into the top
+        # fifth of the frame and filled the rest with white. The zones are still drawn;
+        # the ones off the map are simply off the map, which is what they are.
+        viz_rows, viz_cols = mask_viz_labeled.shape[:2]
+        ax.set_xlim(-0.5, viz_cols - 0.5)
+        ax.set_ylim(viz_rows - 0.5, -0.5)
 
         deg_viz = cell_size_deg * viz_ds
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x,p: f"{origin_lon + x*deg_viz:.2f}"))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y,p: f"{origin_lat - y*deg_viz:.2f}"))
-        ax.set_xlabel("Longitude")
-        ax.set_ylabel("Latitude")
-        cbar = plt.colorbar(im, fraction=0.035, pad=0.04)
-        cbar.set_label('Altitude (m)', rotation=270, labelpad=15)
-        # "Oroscope", not "GRAND": this same map is written for a TAMBO run, and the
-        # title said GRAND on every one of them.
-        ax.set_title(f"Oroscope site search | {region_name if region_name is not None else ''} {'|' if region_name is not None else ''} {search_mode.title()} mode\nFound {count} sites | Total capacity: {cumulative_capacity if search_mode=='distributed' else 'N/A'} DUs | Grid: {grid_type} | Spacing: {antenna_spacing_km} km | Altitude restriction: {min_altitude}-{max_altitude} m")
-        
+        ax.set_xlabel("Longitude (°)")
+        ax.set_ylabel("Latitude (°)")
+        # The axes are pixels, so the bar needs the metric pixel size, not a latitude.
+        add_scale_bar(ax, map_grid.cell_size_x * viz_ds / 1000.0)
+        attach_colorbar(fig, ax, im, 'Altitude (m)', extend='min')
+        add_north_arrow(ax)
+
+        # Settlements, from the coordinates already curated in this file as RFI zones.
+        rows_px, cols_px = mask_viz_labeled.shape[:2]
+        south = origin_lat - rows_px * deg_viz
+        east = origin_lon + cols_px * deg_viz
+        def to_px(lat, lon):
+            """Degrees to this map's pixel coordinates."""
+            return ((lon - origin_lon) / deg_viz, (origin_lat - lat) / deg_viz)
+
+        # Roads under the site outlines, settlements over them: infrastructure is
+        # context for the result, and a place name has to stay readable.
+        if roads_geojson:
+            from oroscope import fetch_roads as fetch_roads_mod
+            roads = fetch_roads_mod.load_roads(roads_geojson)
+            n_roads = add_roads(ax, roads, to_px)
+            if n_roads:
+                legend_handles.append(Line2D([0], [0], color=ROAD_COLOUR, lw=1.0,
+                                             alpha=0.7))
+                legend_labels.append("Roads")
+            elif roads is None:
+                print(f"      {C.WARN}{Icon.WARN}No roads read from {roads_geojson}{C.RESET}")
+
+        places = resolve_settlements(settlements, (south, origin_lat, origin_lon, east))
+        add_settlements(ax, places, to_px)
+
+        # No title. Everything it carried is either on the figure already (the sites,
+        # in the legend), in the run's own summary, or in the caption of whatever this
+        # ends up in -- and a two-line title over a map is a caption in the wrong place.
+        #
+        # The legend goes outside the axes for the same reason: it was a filled box
+        # sitting on top of the data it describes, and on a dense map it hid whichever
+        # sites happened to be in the top right. Above rather than below, so it is read
+        # before the map rather than after it.
         fs = 'small' if len(legend_labels) > 8 else 'medium'
-        ax.legend(legend_handles, legend_labels, loc='upper right', fontsize=fs, framealpha=0.8)
+        if legend_labels:
+            ax.legend(legend_handles, legend_labels, fontsize=fs, framealpha=0.9,
+                      loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=4,
+                      borderaxespad=0.0, columnspacing=1.6)
         
         img_name = os.path.join(run_output_dir, base_filename + "." + output_image_format.strip('.'))
         
@@ -2145,7 +2344,7 @@ separate code paths: adding an experiment means writing a JSON file.
 {C.BOLD}Two things worth knowing before reading the numbers:{C.RESET}
 - The funnel is the diagnostic. When a search returns little or nothing, the stage
   where the survivor count collapses IS the constraint responsible.
-- Reported area is not physics-accepted area. Morphological closing inflated it 2.29x
+- Reported area is not physics-accepted area. Morphological closing inflated it 2.35x
   at Colca, measured against a stride-1 control. The run summary reports the factor
   for the run in front of you.
 
@@ -2258,7 +2457,19 @@ def parse_score_weights(value):
     Raises
     ------
     SystemExit
-        If a pair lacks ``=`` or its value is not a number.
+        If a pair lacks ``=``, its value is not a number, or it names something that is
+        not a score component.
+
+    Notes
+    -----
+    **The names are checked.** They were not, and :func:`~oroscope.scoring.compose`
+    then dropped anything it did not recognise with an ``if n in w`` filter, so a
+    misspelling was accepted, ignored and never reported. ``--score_weights geomag=0``
+    -- one character short of ``geomagnetic`` -- parsed cleanly, and the component the
+    user meant to switch off ran at full weight through the whole search: measured on a
+    two-component product, 0.18 where the correct spelling gives 0.9. Nothing anywhere
+    said so. Weights are the one input whose failure leaves no trace in the output, so
+    they are the one input worth rejecting outright.
 
     Examples
     --------
@@ -2271,7 +2482,9 @@ def parse_score_weights(value):
     if value is None or value == "":
         return None
     if isinstance(value, dict):
-        return {str(k): float(v) for k, v in value.items()}
+        weights = {str(k): float(v) for k, v in value.items()}
+        _reject_unknown_components(weights)
+        return weights
     weights = {}
     for pair in str(value).split(","):
         pair = pair.strip()
@@ -2284,7 +2497,34 @@ def parse_score_weights(value):
             weights[name.strip()] = float(raw)
         except ValueError:
             raise SystemExit(f"--score_weights value for {name.strip()!r} is not a number: {raw!r}")
+    _reject_unknown_components(weights)
     return weights or None
+
+
+def _reject_unknown_components(weights):
+    """
+    Refuses a weight naming something that is not a score component.
+
+    A weight is unusual among the inputs in that getting it wrong is invisible: the run
+    completes, every number moves, and nothing in the results, the funnel or the
+    explanation records that the request was dropped. So it fails here instead, where
+    the mistake is one character from its correction.
+    """
+    unknown = sorted(set(weights) - set(scoring.SCORE_COMPONENTS))
+    if not unknown:
+        return
+    lines = []
+    for name in unknown:
+        near = difflib.get_close_matches(name, scoring.SCORE_COMPONENTS, n=1, cutoff=0.6)
+        lines.append(f"  {name!r}" + (f" -- did you mean {near[0]!r}?" if near else ""))
+    raise SystemExit(
+        "--score_weights names {} that {} not score component{}:\n{}\n"
+        "The components are: {}.\nA weight naming something else would be dropped in "
+        "silence and the run would look normal, so it is refused here instead.".format(
+            "something" if len(unknown) == 1 else "things",
+            "is" if len(unknown) == 1 else "are",
+            "" if len(unknown) == 1 else "s",
+            "\n".join(lines), ", ".join(scoring.SCORE_COMPONENTS)))
 
 
 def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
@@ -2319,6 +2559,16 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     own cap 23 minutes in. ``n_scoring_arrays`` is calibrated on that run -- 15.1M
     candidates, 7 components -- where the anonymous share of the peak implies ~36
     live per-candidate arrays against the 12 this modelled.
+
+    **Re-measured after the audit, the same run peaks at 6.59 GiB resident and 7.80 GiB
+    virtual**, against an estimate of 5.08. So this remains optimistic by ~1.5 GiB on
+    the run it was calibrated against, and the calibration above is left as it was
+    rather than quietly re-fitted: ``n_scoring_arrays`` moves the pre-flight for every
+    region, and changing it to chase one number is how the estimate came to be sized
+    against the cheaper of two configurations in the first place. What matters for a
+    caller is the *other* column -- what this function estimates is anonymous memory,
+    and what ``--max-memory-gb`` caps is address space, 1.2 GiB larger here. Do not set
+    one from the other.
 
     Note also which knob moves it. ``downsample_factor`` scales only the labelling and
     gradient terms, because candidates are taken on the *native* grid; at full-DEM
@@ -2388,6 +2638,450 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
 
     total = labelling + gradients + candidates + observables + scoring + baseline
     return total / 1024 ** 3
+
+
+SEA_LEVEL_M = 0.5          # at or below this is water, not ground at zero altitude
+WATER_COLOUR = "#5A7FA6"
+# Nodata is neither water nor low ground, and painting it as either is a claim the DEM
+# does not support. A warm neutral, so it cannot be mistaken for the grey ramp or the sea.
+NODATA_COLOUR = "#E0DACE"
+
+
+def altitude_limits(elevation, low_percentile=0.5, high_percentile=99.8):
+    """
+    Altitude range for a colour scale, from the DEM rather than from a constant.
+
+    A fixed 0-6000 m scale spends most of its range on altitudes a given DEM does not
+    contain: the Colca crop runs 1500-6300 m, so half the colour bar described ground
+    that is not in the picture and the relief that is there got half the contrast it
+    could have had.
+
+    Percentiles rather than the extremes, because one spurious pixel -- a nodata
+    sentinel, a spike -- otherwise sets the whole scale. Water is excluded from the
+    upper end and pinned to the bottom, so a coastal DEM does not spend a third of its
+    range on ocean.
+
+    Parameters
+    ----------
+    elevation : ndarray
+        Elevation in metres. NaN is ignored.
+    low_percentile, high_percentile : float, optional
+        Percentiles of the land pixels to clip to.
+
+    Returns
+    -------
+    tuple of float
+        ``(vmin, vmax)`` in metres, rounded outward to a round number.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from oroscope import site_searcher as ss
+    >>> z = np.linspace(1500.0, 6300.0, 1000)
+    >>> ss.altitude_limits(z)
+    (1500.0, 6300.0)
+
+    Ocean does not drag the floor down with it:
+
+    >>> z = np.concatenate([np.zeros(500), np.linspace(2000.0, 5000.0, 500)])
+    >>> ss.altitude_limits(z)
+    (0.0, 5000.0)
+    """
+    values = np.asarray(elevation, dtype=np.float64).ravel()
+    values = values[np.isfinite(values)]
+    if values.size == 0:                             # pragma: no cover - empty DEM
+        return (0.0, 6000.0)
+    land = values[values > SEA_LEVEL_M]
+    if land.size == 0:                               # pragma: no cover - all water
+        return (0.0, 1.0)
+    lo = float(np.percentile(land, low_percentile))
+    hi = float(np.percentile(land, high_percentile))
+    if (values <= SEA_LEVEL_M).any():
+        lo = 0.0
+    step = 100.0
+    return (math.floor(lo / step) * step, math.ceil(hi / step) * step)
+
+
+# Named places already curated in this file, as the RFI exclusion zones. Reused rather
+# than sourced afresh, deliberately: these coordinates have been checked once and
+# inventing a second set from memory is how a map acquires a town in the wrong valley.
+# Cerro Verde is a mine rather than a settlement and is labelled as one.
+AREQUIPA_SETTLEMENTS = [
+    (-16.409, -71.537, "Arequipa"),
+    (-16.264, -71.956, "Majes"),
+    (-16.480, -71.930, "La Joya"),
+    (-17.015, -72.015, "Mollendo"),
+    (-16.533, -71.658, "Cerro Verde (mine)"),
+]
+LIMA_SETTLEMENTS = [
+    (-12.080, -77.010, "Lima"),
+    (-11.950, -76.680, "Chosica"),
+    (-11.850, -76.360, "Matucana"),
+    (-11.750, -76.220, "San Mateo"),
+    (-11.470, -76.630, "Canta"),
+    (-11.100, -77.600, "Huacho"),
+    (-13.060, -76.380, "Cañete"),
+    (-10.750, -77.750, "Barranca"),
+    (-12.480, -76.650, "Chilca"),
+    (-11.480, -77.200, "Huaral"),
+    (-11.560, -77.270, "Chancay"),
+]
+SETTLEMENT_PRESETS = {"arequipa": AREQUIPA_SETTLEMENTS, "lima": LIMA_SETTLEMENTS}
+
+
+def resolve_settlements(value, bounds=None):
+    """
+    Settlements to mark on a map: a preset name, an explicit list, or ``"auto"``.
+
+    ``"auto"`` picks whichever curated list has points inside the map, which is what a
+    reader wants without having to say so, and marks nothing when neither does rather
+    than guessing at a region the project has no coordinates for.
+
+    **No coordinates are invented here.** The lists are the named places already
+    curated as RFI zones; adding more means supplying them, not asking this function to
+    remember them.
+
+    Parameters
+    ----------
+    value : str, list, or None
+        ``"auto"``, a preset name, ``"none"``/``None``, or a list of
+        ``(latitude, longitude, name)``.
+    bounds : tuple, optional
+        ``(south, north, west, east)`` in degrees, used by ``"auto"``.
+
+    Returns
+    -------
+    list
+        ``(latitude, longitude, name)`` triples, possibly empty.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> [n for _, _, n in ss.resolve_settlements("arequipa")][:2]
+    ['Arequipa', 'Majes']
+
+    Auto picks the list with points on the map, and nothing when none has any:
+
+    >>> arequipa = (-17.5, -14.5, -73.6, -70.3)
+    >>> len(ss.resolve_settlements("auto", arequipa))
+    5
+    >>> ss.resolve_settlements("auto", (40.0, 42.0, 0.0, 2.0))
+    []
+    >>> ss.resolve_settlements(None)
+    []
+    """
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        return [tuple(s) for s in value]
+    key = value.lower()
+    if key in ("none", ""):
+        return []
+    # A places file from oroscope-fetch-roads --places. Real OSM coordinates, which is
+    # the only honest way to put a town on a map: the curated lists below are five
+    # named places for a whole region, and writing more from memory is how a map
+    # acquires a town in the wrong valley.
+    if value.endswith(".geojson") or value.endswith(".json"):
+        from oroscope import fetch_roads as fetch_roads_mod
+        places = fetch_roads_mod.load_places(value)
+        if bounds is not None:
+            south, north, west, east = bounds
+            places = [p for p in places
+                      if south <= p[0] <= north and west <= p[1] <= east]
+        return places
+    if key in SETTLEMENT_PRESETS:
+        return list(SETTLEMENT_PRESETS[key])
+    if key != "auto" or bounds is None:
+        return []
+    south, north, west, east = bounds
+    best = []
+    for places in SETTLEMENT_PRESETS.values():
+        inside = [p for p in places if south <= p[0] <= north and west <= p[1] <= east]
+        if len(inside) > len(best):
+            best = inside
+    return best
+
+
+# Marker size and label size by OSM place class. A city and a hamlet are both "a
+# settlement" to a bounding box and very different things to a deployment.
+PLACE_STYLE = {"city":    dict(ms=10.0, fs=11.0, marker="*"),
+               "town":    dict(ms=7.0, fs=9.5, marker="o"),
+               "village": dict(ms=4.5, fs=8.0, marker="o")}
+PLACE_DEFAULT = dict(ms=5.0, fs=8.5, marker="s")
+
+
+def add_settlements(ax, settlements, to_axes, fontsize=9, max_labels=6,
+                    max_markers=25):
+    """
+    Marks settlements, with their names, wherever they fall inside the axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final.
+    settlements : sequence
+        ``(latitude, longitude, name)`` triples.
+    to_axes : callable
+        ``to_axes(latitude, longitude) -> (x, y)`` in the axes' own units, so this
+        serves both the pixel-coordinate search map and the degree-coordinate overlay.
+    fontsize : int, optional
+        Fallback label size, for entries carrying no place class.
+    max_labels : int, optional
+        How many to name.
+    max_markers : int, optional
+        How many to mark at all. Entries arrive most-important-first -- cities, then
+        towns, then villages, by population within each -- so both caps take the ones
+        worth showing. Over the full Arequipa DEM there are 1,268 places, and drawing
+        every one buries the result under a thousand white dots; over one canyon there
+        are sixty, and naming them all is not a map either.
+
+    Returns
+    -------
+    int
+        How many were drawn. Points outside the axes are skipped rather than clipped,
+        so a label cannot appear at the edge pointing at nothing.
+    """
+    if not settlements:
+        return 0
+    x0, x1 = sorted(ax.get_xlim())
+    y0, y1 = sorted(ax.get_ylim())
+    drawn = 0
+    for entry in settlements:
+        lat, lon, name = entry[0], entry[1], entry[2]
+        kind = entry[3] if len(entry) > 3 else None
+        x, y = to_axes(lat, lon)
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            continue
+        if drawn >= max_markers:
+            break
+        style = PLACE_STYLE.get(kind, PLACE_DEFAULT)
+        ax.plot([x], [y], marker=style["marker"], ms=style["ms"], mfc="#FFFFFF",
+                mec="#1A1A1A", mew=1.1, zorder=18, linestyle="none")
+        # Places arrive most-important-first, so labelling the first few labels the
+        # ones worth naming. Sixty village names over a canyon is not a map.
+        if drawn < max_labels:
+            label = ax.annotate(name, (x, y), textcoords="offset points",
+                                xytext=(6, 3), fontsize=style["fs"], color="#1A1A1A",
+                                zorder=19, annotation_clip=True)
+            label.set_path_effects([
+                path_effects.Stroke(linewidth=2.6, foreground="white"),
+                path_effects.Normal()])
+        drawn += 1
+    return drawn
+
+
+# Line width by highway class, coarse to fine. A trunk road and a tertiary track are
+# both "a road" to the search and very different things to a deployment.
+ROAD_WIDTHS = {"motorway": 1.5, "trunk": 1.2, "primary": 0.9,
+               "secondary": 0.65, "tertiary": 0.45}
+# Green rather than a neutral dark line. Roads have to be findable against both the
+# terrain ramp and the greyscale overlay, and a dark thin line disappears into hillshade
+# exactly where the ground is steep -- which is where the sites are.
+ROAD_COLOUR = "#00B33C"
+
+
+def add_roads(ax, roads, to_axes, colour=ROAD_COLOUR, alpha=0.9, scale=1.0):
+    """
+    Draws road geometry, as context rather than as a result.
+
+    Access is the question a site count cannot answer: a canyon wall that takes a
+    hundred detectors means something different with a road along the rim than with the
+    nearest track forty kilometres away. Roads are drawn in a neutral dark line rather
+    than a colour, because on these maps colour belongs to the categories and a road is
+    not one of them -- it is what the reader measures a category against.
+
+    Uses one ``LineCollection`` per class rather than a call per road. The Arequipa DEM
+    carries 8,780 roads and 367,000 vertices; drawn individually that is slow enough to
+    notice, and matplotlib renders the collection in one pass.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final.
+    roads : dict or None
+        As :func:`fetch_roads.load_roads` returns. ``None`` draws nothing, so a missing
+        road file leaves a map without roads rather than without a map.
+    to_axes : callable
+        ``to_axes(latitude, longitude) -> (x, y)`` in the axes' own units, so this
+        serves both the pixel-coordinate search map and the degree-coordinate overlay.
+    colour : str, optional
+        Line colour.
+    alpha : float, optional
+        Line opacity.
+    scale : float, optional
+        Multiplies every width, for maps drawn at a different size.
+
+    Returns
+    -------
+    int
+        How many roads were drawn.
+    """
+    if not roads or not roads.get("lines"):
+        return 0
+    from matplotlib.collections import LineCollection
+
+    # Only what is on this map. A road file covers the whole DEM while a map may show a
+    # crop of it, so counting the file would report 8,780 roads on a picture holding a
+    # few hundred -- and drawing them all makes matplotlib clip geometry it never
+    # needed to build.
+    x_lo, x_hi = sorted(ax.get_xlim())
+    y_lo, y_hi = sorted(ax.get_ylim())
+
+    by_class = {}
+    for klass, points in roads["lines"]:
+        xy = [to_axes(lat, lon) for lat, lon in points]
+        xs = [p[0] for p in xy]
+        ys = [p[1] for p in xy]
+        if max(xs) < x_lo or min(xs) > x_hi or max(ys) < y_lo or min(ys) > y_hi:
+            continue
+        by_class.setdefault(klass, []).append(xy)
+
+    drawn = 0
+    for klass, segments in by_class.items():
+        width = ROAD_WIDTHS.get(klass, 0.4) * scale
+        ax.add_collection(LineCollection(
+            segments, colors=colour, linewidths=width, alpha=alpha,
+            zorder=14, capstyle="round", joinstyle="round"))
+        drawn += len(segments)
+    return drawn
+
+
+def attach_colorbar(fig, ax, mappable, label, width="2.6%", pad=0.12, **kwargs):
+    """
+    Adds a colour bar whose height matches the plot panel exactly.
+
+    ``fig.colorbar(..., fraction=...)`` sizes the bar as a fraction of the *figure*, so
+    on a map whose aspect is set by its data -- which every map here is -- the bar
+    overshoots the panel top and bottom by however much the axes shrank to fit. Taking
+    the space out of the axes' own divider instead ties the two together whatever the
+    aspect turns out to be.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure the axes belong to.
+    ax : matplotlib.axes.Axes
+        Axes to take the space from.
+    mappable : matplotlib.cm.ScalarMappable
+        What the bar describes.
+    label : str
+        Axis label for the bar.
+    width : str, optional
+        Bar width, as a percentage of the axes width.
+    pad : float, optional
+        Gap between panel and bar, in inches.
+    **kwargs
+        Passed to ``fig.colorbar`` -- ``extend``, for instance.
+
+    Returns
+    -------
+    matplotlib.colorbar.Colorbar
+    """
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    cax = make_axes_locatable(ax).append_axes("right", size=width, pad=pad,
+                                              axes_class=maxes.Axes)
+    cbar = fig.colorbar(mappable, cax=cax, **kwargs)
+    cbar.set_label(label, rotation=270, labelpad=15)
+    return cbar
+
+
+def add_north_arrow(ax, x=0.965, y=0.955, size=0.055):
+    """
+    Draws a north arrow in axes coordinates.
+
+    Both maps this project writes are north-up, so the arrow is a convention rather
+    than information -- but a map without one asks the reader to assume, and a map in a
+    talk gets read by people who did not make it.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on.
+    x, y : float, optional
+        Position of the arrow's tip, in axes coordinates.
+    size : float, optional
+        Length of the arrow, as a fraction of the axes height.
+    """
+    ax.annotate("N", xy=(x, y), xytext=(x, y - size), xycoords="axes fraction",
+                textcoords="axes fraction", ha="center", va="top",
+                fontsize=11, fontweight="bold", color="black", zorder=25,
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.6,
+                                shrinkA=0, shrinkB=0),
+                bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.7))
+
+
+def add_scale_bar(ax, km_per_x_unit, fraction=0.22, colour="black"):
+    """
+    Draws a kilometre scale bar on a map, and returns the length it chose.
+
+    A map axis labelled in degrees or in pixels does not tell a reader how far anything
+    is, and neither unit converts to distance without knowing where on the Earth it
+    sits: a degree of longitude at Arequipa is 4% shorter than a degree of latitude,
+    and a pixel is whatever the DEM says it is.
+
+    Taking ``km_per_x_unit`` rather than a latitude keeps one function usable by both
+    maps this project writes -- the search map, whose axes are pixels, and the
+    combination overlay, whose axes are degrees.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on. Its limits must already be final; the bar is placed relative
+        to them.
+    km_per_x_unit : float
+        Kilometres per unit of the x axis. For degrees of longitude that is
+        ``111.32 * cos(latitude)``; for pixels it is the metric pixel size over 1000.
+    fraction : float, optional
+        Roughly what fraction of the map width the bar should span, before rounding to
+        a human number.
+    colour : str, optional
+        Bar colour. The default reads on both terrain and shaded relief.
+
+    Returns
+    -------
+    float
+        Length of the bar drawn, in km. Always 1, 2 or 5 times a power of ten.
+
+    Examples
+    --------
+    A two-degree map at 16 degrees south is about 214 km wide, so it gets a 50 km bar:
+
+    >>> import matplotlib; matplotlib.use("Agg")
+    >>> import matplotlib.pyplot as plt, numpy as np
+    >>> from oroscope import site_searcher as ss
+    >>> fig, ax = plt.subplots()
+    >>> _ = ax.set_xlim(-73.0, -71.0); _ = ax.set_ylim(-17.0, -15.0)
+    >>> ss.add_scale_bar(ax, 111.32 * np.cos(np.radians(-16.0)))
+    50.0
+
+    The same function on a pixel axis, 3061 pixels of 30 m:
+
+    >>> _ = ax.set_xlim(0, 3061); _ = ax.set_ylim(1981, 0)
+    >>> ss.add_scale_bar(ax, 0.030)
+    20.0
+    >>> plt.close(fig)
+    """
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    span_km = abs(x1 - x0) * km_per_x_unit
+    if not np.isfinite(span_km) or span_km <= 0:     # pragma: no cover - defensive
+        return 0.0
+
+    target = span_km * fraction
+    power = 10.0 ** math.floor(math.log10(max(target, 1e-9)))
+    length_km = min((1.0, 2.0, 5.0, 10.0), key=lambda m: abs(m * power - target)) * power
+    length_units = length_km / km_per_x_unit
+
+    pad_x, pad_y = 0.04 * (x1 - x0), 0.05 * (y1 - y0)
+    bx, by = x0 + pad_x, y0 + pad_y
+    ax.plot([bx, bx + length_units], [by, by], color=colour, lw=3.4,
+            solid_capstyle="butt", zorder=20)
+    ax.plot([bx, bx + length_units], [by, by], color="white", lw=1.4,
+            solid_capstyle="butt", zorder=21)
+    ax.text(bx + 0.5 * length_units, by + 0.30 * pad_y, f"{length_km:g} km",
+            ha="center", va="bottom", fontsize=9, color=colour, zorder=22,
+            bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.75))
+    return float(length_km)
 
 
 def stride_gap_m(candidate_stride, cell_size_y_m):
@@ -2480,11 +3174,16 @@ def warn_stride_outruns_closing(candidate_stride, cell_size_y_m,
     >>> ss.warn_stride_outruns_closing(5, 30.72, None, 1.0, quiet=True) is None
     True
 
-    TAMBO's 100 m element does not, and that is the 4.75x:
+    TAMBO's element does not -- not at the old 100 m and not at the published 150 m
+    either, which is why striding costs it so much area:
+
+    >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.15, quiet=True)
+    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
+    (154, 150, 1.02)
 
     >>> r = ss.warn_stride_outruns_closing(5, 30.72, None, 0.1, quiet=True)
-    >>> round(r["gap_m"]), round(r["element_m"]), round(r["ratio"], 2)
-    (154, 100, 1.54)
+    >>> round(r["ratio"], 2)
+    1.54
 
     Closing disabled entirely is not this failure, so it does not warn:
 
@@ -2571,8 +3270,104 @@ def available_memory_gb():
     return None                                          # pragma: no cover
 
 
+def estimate_visualisation_memory_gb(rows, cols, downsample_factor=1, combine=False):
+    """
+    Memory the map costs, in GiB, which is *not* what the search costs.
+
+    :func:`estimate_peak_memory_gb` models the candidate and scoring arrays and nothing
+    else, because those are what a search allocates. The map is a separate peak that
+    lands on top of them at the very end, and it is the stage that has actually been
+    failing: three runs in one session finished their searches and then died drawing the
+    picture, having written the JSON and the GeoTIFF first. A pre-flight that models only
+    the search will size a cap that cannot survive the run.
+
+    The map renders at ``viz_ds = downsample_factor * 2``, so its raster is
+    ``rows/(2d) x cols/(2d)``. Measured on this machine over 0.35 to 5.6 Mpx of viz
+    raster -- shading through ``LightSource.shade`` and saving at 150 dpi:
+
+    ======================  ================
+    viz raster              peak RSS above idle
+    ======================  ================
+    700 x 500  (0.35 Mpx)   126 MB
+    1400 x 1000 (1.4 Mpx)   263 MB
+    1981 x 1441 (2.85 Mpx)  539 MB
+    2800 x 2000 (5.6 Mpx)   959 MB
+    ======================  ================
+
+    which is ~190 bytes per viz pixel once matplotlib's own ~130 MB of import and canvas
+    is taken out. Both terms are carried here.
+
+    **The combination is a different, larger stage, and was not modelled at all.**
+    ``combine_experiments`` renders at the mask's own resolution rather than at
+    ``viz_ds``, so its raster is *four times* the search map's, and it draws the two
+    experiments and their overlap on top of the relief. Sized by the search map's
+    numbers it looked cheap, ran last, and is what actually kept failing. Measured over
+    2.0 to 12.5 Mpx of raster, with the overlay composited in float32:
+
+    ======================  ===================
+    combine raster          peak RSS
+    ======================  ===================
+    1276 x 1576  (2.0 Mpx)  0.46 GiB
+    1806 x 1740  (3.1 Mpx)  0.63 GiB
+    2551 x 3151  (8.0 Mpx)  1.31 GiB
+    3200 x 3900 (12.5 Mpx)  1.95 GiB
+    ======================  ===================
+
+    which fits 182 MiB + 152.2 bytes per pixel to within 1.2% at every point. Four points
+    rather than the one the search estimator is calibrated on.
+
+    Parameters
+    ----------
+    rows, cols : int
+        Full-resolution DEM dimensions.
+    downsample_factor : int, optional
+        As the pipeline's. The search map uses twice it; the combination uses it as-is.
+    combine : bool, optional
+        Estimate the combination overlay instead of a search's own map. It renders at
+        four times the pixels and costs about 2.7x as much at DEM scale.
+
+    Returns
+    -------
+    float
+        Estimated peak for that one figure, in GiB.
+
+    Examples
+    --------
+    >>> from oroscope import site_searcher as ss
+    >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1), 2)
+    0.63
+
+    The same DEM's combination, which the search's own estimate does not cover:
+
+    >>> round(ss.estimate_visualisation_memory_gb(3961, 2881, 1, combine=True), 2)
+    1.8
+    """
+    d = max(1, int(downsample_factor or 1))
+    if combine:
+        pixels = (rows / d) * (cols / d)
+        return (COMBINE_FIXED_BYTES + COMBINE_BYTES_PER_PIXEL * pixels) / (1024 ** 3)
+    viz_pixels = (rows / (2 * d)) * (cols / (2 * d))
+    return (MATPLOTLIB_FIXED_BYTES + VIZ_BYTES_PER_PIXEL * viz_pixels) / (1024 ** 3)
+
+
+# Measured, not assumed: see estimate_visualisation_memory_gb for the tables.
+VIZ_BYTES_PER_PIXEL = 190.0
+MATPLOTLIB_FIXED_BYTES = 130 * 1024 ** 2
+# 152.2, not 145: the fit was in MiB per Mpx, and 1 MiB/Mpx is 1.048576
+# bytes/px. Taking the slope straight across under-predicted every point in
+# the table above by 2.3-4.5%, which is the wrong direction for a pre-flight.
+COMBINE_BYTES_PER_PIXEL = 152.2
+COMBINE_FIXED_BYTES = 182 * 1024 ** 2
+
+# How much of what the system reports available a run may be estimated to need before
+# preflight_memory(refuse=True) stops it. Not 1.0: the estimate is rough, the desktop
+# moves under it, and the failure mode on the wrong side of this line is the OOM killer
+# choosing a victim by size rather than by fault.
+REFUSE_FRACTION = 0.8
+
+
 def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
-                     max_memory_gb=None, quiet=False):
+                     max_memory_gb=None, quiet=False, refuse=False, combine=False):
     """
     Estimates what a search will need, says so, and caps the address space.
 
@@ -2596,18 +3391,51 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         cap bites before the kernel does; 0 disables capping entirely.
     quiet : bool, optional
         Suppress the printed report, keeping the cap and the returned numbers.
+    refuse : bool, optional
+        Raise :exc:`MemoryError` instead of warning when the estimate exceeds
+        :data:`REFUSE_FRACTION` of what is available. Default ``False``, which only
+        warns — but warning is what it did while three runs died anyway, so a caller
+        that can afford to stop should pass ``True``.
+    combine : bool, optional
+        Also account for a combination overlay after the searches. It renders at four
+        times the search map's pixels and was not modelled at all, so a region could
+        clear this pre-flight and then die at the last step — which is what happened,
+        twice. The stages are sequential rather than simultaneous, so the number
+        judged is ``max(search + map, combine)`` rather than their sum.
 
     Returns
     -------
     dict
-        ``{"estimate_gb", "available_gb", "cap_gb", "capped"}``. ``estimate_gb`` is
-        ``None`` when the DEM could not be measured.
+        ``{"estimate_gb", "search_gb", "visualisation_gb", "combine_gb",
+        "available_gb", "cap_gb", "capped", "cap_exceeds_available"}``.
+        ``estimate_gb`` is the largest stage the run will pass through, and is ``None``
+        when the DEM could not be measured. ``combine_gb`` is ``None`` unless
+        ``combine`` was asked for.
+
+    Raises
+    ------
+    MemoryError
+        When ``refuse`` is set and the estimate exceeds :data:`REFUSE_FRACTION` of the
+        available memory.
 
     Notes
     -----
     The estimate is rough by construction -- it assumes a survival fraction the
     topographic screen has not yet measured -- so an over-large search is warned about
     rather than refused.
+
+    **A cap above what is available is not a cap.** ``RLIMIT_AS`` protects the machine
+    only if the process hits it *before* the kernel runs out of memory to give; set
+    above the available figure, the OOM killer arrives first and the limit never fires.
+    This is easy to do by accident, because the two pieces of advice around it pull
+    opposite ways: the estimate counts only *anonymous* memory, so on a large DEM the
+    cap has to clear it by the size of the memory-mapped file (roadmap 6.46), and
+    raising it for that reason can quietly carry it past the available figure. It
+    happened here -- a 339 Mpx search capped at 13.0 GiB on a machine with 8.0 GiB
+    available, which took the machine down. When the two constraints cannot both be
+    met, the configuration does not fit and the answer is a coarser one, not a bigger
+    number. Warned about rather than refused, for the same reason as the estimate: the
+    available figure moves while the run is being set up.
     """
     rows = cols = None
     try:
@@ -2617,19 +3445,46 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         pass
 
     have = available_memory_gb()
-    need = None
+    need = viz = joint = None
     if rows and cols:
-        need = estimate_peak_memory_gb(rows, cols,
-                                       downsample_factor=int(downsample_factor or 1),
-                                       candidate_stride=int(candidate_stride or 5))
+        search = estimate_peak_memory_gb(rows, cols,
+                                         downsample_factor=int(downsample_factor or 1),
+                                         candidate_stride=int(candidate_stride or 5))
+        viz = estimate_visualisation_memory_gb(rows, cols,
+                                               int(downsample_factor or 1))
+        # The stages run one after another, so what has to fit is the largest of them,
+        # not their total. The map is the exception: it is built while the search's
+        # arrays are still live, so those two are added.
+        need = search + viz
+        breakdown = f"{search:.1f} search + {viz:.1f} map"
+        if combine:
+            joint = estimate_visualisation_memory_gb(rows, cols,
+                                                     int(downsample_factor or 1),
+                                                     combine=True)
+            breakdown += f", then {joint:.1f} to combine"
+            need = max(need, joint)
         if not quiet:
             print(f"   {Icon.GEAR}Estimated peak memory: {C.MAGENTA}{need:.1f} GiB{C.RESET}"
+                  f" ({breakdown})"
                   + (f", available {have:.1f} GiB" if have else ""))
-        if have and need > 0.8 * have and not quiet:
-            print(f"{C.WARN}{Icon.WARN}This search is estimated to need {need:.1f} GiB "
-                  f"against {have:.1f} GiB available. Raise downsample_factor "
-                  f"(memory scales as its inverse square) or crop the DEM. The estimate "
-                  f"is rough, so this is a warning rather than a refusal.{C.RESET}")
+        if have and need > REFUSE_FRACTION * have:
+            message = (f"This run is estimated to need {need:.1f} GiB "
+                       f"({breakdown}) "
+                       f"against {have:.1f} GiB available. "
+                       + ("Lower downsample_factor's map cost or crop the DEM: the "
+                          "binding term is the combination, which candidate_stride "
+                          "does not enter."
+                          if joint is not None and joint >= search + viz else
+                          "Raise candidate_stride, which is the memory lever, or crop "
+                          "the DEM."))
+            if refuse:
+                raise MemoryError(
+                    message + " Refused before allocating anything: a run that reaches "
+                    "the OOM killer takes the session with it. Pass refuse=False to "
+                    "override, having decided the estimate is wrong.")
+            if not quiet:
+                print(f"{C.WARN}{Icon.WARN}{message} The estimate is rough, so this is "
+                      f"a warning rather than a refusal.{C.RESET}")
 
     cap = max_memory_gb
     if cap is None:
@@ -2637,11 +3492,30 @@ def preflight_memory(dem_path, downsample_factor=1, candidate_stride=5,
         # leaving room for the address space numba and BLAS reserve without touching.
         cap = 0.8 * have if have else None
     capped = bool(cap and apply_memory_cap(cap))
+    over = bool(capped and have and cap > have)
+    if not capped and not quiet:
+        # The one setting with no backstop at all. It reads as a small convenience and
+        # it is not: with no RLIMIT_AS the OOM killer is the only thing left, and it
+        # chooses its victim by size rather than by fault. This session lost a machine
+        # to exactly this.
+        print(f"{C.WARN}{Icon.WARN}No address-space cap is in force"
+              f"{' (max_memory_gb=0)' if cap == 0 else ''}. Nothing will stop a runaway "
+              f"before the OOM killer does, and it may not pick this process."
+              f"{C.RESET}")
     if capped and not quiet:
         print(f"   {Icon.GEAR}Address space capped at {C.MAGENTA}{cap:.1f} GiB{C.RESET}"
               f" (max_memory_gb=0 disables)")
-    return {"estimate_gb": need, "available_gb": have,
-            "cap_gb": cap if capped else None, "capped": capped}
+    if over and not quiet:
+        print(f"{C.WARN}{Icon.WARN}That cap is above the {have:.1f} GiB currently "
+              f"available, so it cannot protect this machine: a runaway reaches the "
+              f"OOM killer before the limit fires. Lower --max_memory_gb below "
+              f"{have:.1f}, and if the search then does not fit, make it coarser "
+              f"(raise --candidate_stride, which is the memory lever) rather than "
+              f"raising the cap again.{C.RESET}")
+    return {"estimate_gb": need, "search_gb": search if rows and cols else None,
+            "visualisation_gb": viz, "combine_gb": joint, "available_gb": have,
+            "cap_gb": cap if capped else None, "capped": capped,
+            "cap_exceeds_available": over}
 
 
 def validate_parameters(params):
@@ -2663,6 +3537,17 @@ def validate_parameters(params):
         than one per run, since the expensive stages come afterwards.
     """
     errors = []
+    # A fan of zero width accepts no sky at all: solid_angle_sr comes out 0 for every
+    # candidate, so under the default product composition every score is 0 and any
+    # min_score empties the run while the funnel still shows the geometry accepting
+    # everything. -1 is the documented sentinel for a full sweep; 0 is not a pencil.
+    half_width = params.get("azimuth_half_width_deg")
+    if half_width is not None and 0.0 == float(half_width):
+        errors.append(
+            "azimuth_half_width_deg is 0, which gives the fan no angular width: the "
+            "accepted solid angle is then zero for every candidate and so is every "
+            "score. Use a negative value for a full 360 degree sweep, or a positive "
+            "half-width for a wedge.")
     
     # 1. Check DEM path existence
     if not os.path.exists(params['dem_path']):
@@ -2821,6 +3706,11 @@ def default_config(preset="default"):
         # The latter two need decay_response_csv, a two-column A(E) table.
         "decay_weight_by": "flux",
         "decay_response_csv": None,
+        # Named places to mark on the map: "auto" uses whichever curated list has
+        # points inside the DEM, or give a preset name, "none", or an explicit list.
+        "settlements": "auto",
+        # GeoJSON of road geometry to draw as context, from oroscope-fetch-roads.
+        "roads_geojson": None,
         "score_percentile": None,
         "stop_at_target": False,
         "max_memory_gb": None,
@@ -2849,6 +3739,7 @@ def default_config(preset="default"):
         "shower_elongation_rate_gcm2": None,
         "shower_lambda_gcm2": None,
         "solid_angle_half_sr": None,
+        "solid_angle_half_fraction": None,
         "distance_band_m": None,
         "clearance_full_at": None,
         "score_weights": None,
@@ -3154,7 +4045,7 @@ def config_to_pipeline_kwargs(config, quiet=False, **overrides):
     Translates a configuration mapping into :func:`find_grand_regions_interactive` kwargs.
 
     This translation was written out three times -- in ``main()``, in the child process
-    ``sensitivity`` spawns, and in ``tools/run_arequipa_full.py`` -- and the copies had
+    ``sensitivity`` spawns, and in ``tools/run_full_dem.py`` -- and the copies had
     already drifted. The sweep child passed ``rfi_zones`` through as the raw preset
     name, which the pipeline then iterated character by character and silently resolved
     to no zones at all; it never inverted ``require_sky`` either. Having one function
@@ -3301,6 +4192,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             min_target_slope_deg=None, max_target_slope_deg=None,
                             max_range_km=None, score_percentile=None,
                             decay_weight_by='flux', decay_response_csv=None,
+                            settlements='auto', roads_geojson=None,
                             stop_at_target=False,
                             decay_energy_pev=None,
                             decay_energy_min_pev=None, decay_energy_max_pev=None,
@@ -3312,7 +4204,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
                             score_weights=None, distance_band_m=None,
-                            solid_angle_half_sr=None, clearance_full_at=None,
+                            solid_angle_half_sr=None,
+                            solid_angle_half_fraction=None,
+                            clearance_full_at=None,
                             min_score=0.0,
                             geomag_declination_deg=None, geomag_inclination_deg=None,
                             use_geomagnetic=True, grammage_mode='radio',
@@ -3471,6 +4365,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         Detection response ``A(E)`` for the acceptance weightings: a path to a
         two-column CSV of energy in PeV against relative response, or a callable.
         :func:`aperture.infer_response` recovers one from a published integral curve.
+    settlements : str or sequence, optional
+        Named places to mark on the map. ``'auto'`` uses whichever curated list has
+        points inside the DEM; a path to a places GeoJSON from ``oroscope-fetch-roads``
+        marks those; ``'none'`` marks nothing. See :func:`resolve_settlements`.
+    roads_geojson : str, optional
+        Road geometry to draw on the map, from ``oroscope-fetch-roads``. Context only:
+        distinct from ``road_map_path``, which screens candidates, this changes no
+        result.
 
     stop_at_target : bool, optional
         In distributed mode, stop selecting sites once ``target_antennas`` is reached.
@@ -3531,6 +4433,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     solid_angle_half_sr : float, optional
         Accepted solid angle scoring 0.5, in steradians. The 0.05 default is
         GRAND-scale and saturates against a canyon's much larger acceptance.
+    solid_angle_half_fraction : float, optional
+        Fraction of the sky the azimuth fan and arrival window could accept that scores
+        0.5. Dimensionless, so it does not move when either of those does -- which the
+        steradian form could not manage.
 
     clearance_full_at : float, optional
         Fresnel clearance ratio scoring 1.
@@ -3629,7 +4535,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     candidate_stride = int(candidate_stride)
 
     # Establish the sampling geometry before anything else depends on it
-    map_grid = resolve_grid_geometry(dem_path, origin_lat, cell_size_deg)
+    map_grid = resolve_grid_geometry(dem_path, origin_lat, cell_size_deg,
+                                     origin_lon=origin_lon)
     cell_size_deg = map_grid.cell_size_deg
     cell_size_y, cell_size_x = map_grid.cell_size_y, map_grid.cell_size_x
 
@@ -3677,8 +4584,14 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
             f"published curves and aperture.infer_response() for recovering A(E) from "
             f"one of them.")
 
+    # The DEM's centre in *both* axes. This passed `origin_lon`, the west edge, beside
+    # the centre latitude -- a point on no part of the DEM. Harmless for a constant
+    # field and wrong for any model that varies with longitude: 0.03 degrees of
+    # inclination across a department, 0.20 across the Peru box.
     geomag_declination_deg, geomag_inclination_deg = physics.default_field_for_site(
-        map_grid.center_lat, origin_lon, geomag_declination_deg, geomag_inclination_deg)
+        map_grid.center_lat,
+        map_grid.center_lon if map_grid.center_lon is not None else origin_lon,
+        geomag_declination_deg, geomag_inclination_deg)
 
     # RFI sources as pixel coordinates, weighted by radius as a crude strength proxy.
     # The scan can then drop the ones terrain hides, which a circular exclusion cannot.
@@ -3734,7 +4647,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "exclude_near_field": exclude_near_field,
         "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
         "score_weights": score_weights, "distance_band_m": distance_band_m,
-        "solid_angle_half_sr": solid_angle_half_sr, "clearance_full_at": clearance_full_at,
+        "solid_angle_half_sr": solid_angle_half_sr,
+        "solid_angle_half_fraction": solid_angle_half_fraction,
+        "clearance_full_at": clearance_full_at,
         "grammage_band_fraction": grammage_band_fraction,
         "min_score": min_score,
         "geomag_declination_deg": geomag_declination_deg,
@@ -3747,6 +4662,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "shower_development_m": shower_development_m, "gap_close_km": gap_close_km,
         "max_range_km": max_range_km, "score_percentile": score_percentile,
         "decay_weight_by": decay_weight_by, "decay_response_csv": decay_response_csv,
+        "settlements": settlements, "roads_geojson": roads_geojson,
         "stop_at_target": stop_at_target,
         "min_target_slope_deg": min_target_slope_deg,
         "max_target_slope_deg": max_target_slope_deg,
@@ -3919,13 +4835,11 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "decay_response": _decay_response,
                                   "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
+                                  "solid_angle_half_fraction": solid_angle_half_fraction,
                                   "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
                 min_score=min_score, rfi_zones_px=rfi_zones_px,
-                score_percentile=score_percentile)
-            funnel.add("directions accepted", n_hits)
-            if min_score > 0:
-                funnel.add(f"score >= {min_score:g}", n_hits)
+                score_percentile=score_percentile, funnel=funnel)
             timings["ray_tracing"] = time.time() - t0
             print(f"      Time: {timings['ray_tracing']:.2f}s")
         else:
@@ -3972,7 +4886,8 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                       "timings_sec": timings, "provenance": provenance,
                       "aperture": aperture_mod.summarize_sites(
                           site_details, min_dist_km * 1000.0, max_dist_km * 1000.0,
-                          np.logspace(0, 5, 26))}
+                          np.logspace(0, 5, 26))},
+            settlements=settlements, roads_geojson=roads_geojson,
         )
         timings["outputs"] = time.time() - t0
         print(f"      Time Elapsed: {timings['outputs']:.2f}s")
@@ -4131,6 +5046,17 @@ def main():
     parser.add_argument("--grammage_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Atmospheric depth band scoring 1 in 'particle' mode, in g/cm2. Defaults to (X_max, 4*X_max) = (700, 2800), which suits a long path to a distant target. A short crossing gives far less: Colca supplies about 170 g/cm2, so a detector there sees a shower that is still developing and this band must be lowered or nothing scores.")
     parser.add_argument("--grammage_maturity_gcm2", type=float, default=None, help="Atmospheric depth at which the 'radio' maturity ramp reaches 1, in g/cm2 (default: X_max = 700).")
     parser.add_argument("--decay_energy_pev", type=float, default=None, help="Tau energy, in PeV, at which to score the probability that it decays in the gap with room left for a shower. Left out by default because the probability is strongly energy-dependent and one number cannot stand in for a spectrum. Matters most across a canyon: at 1 EeV the decay length is ~49 km against a ~3 km crossing.")
+    parser.add_argument("--roads_geojson", type=str, default=None,
+                        help="GeoJSON of road geometry to DRAW on the map, from "
+                             "oroscope-fetch-roads. Distinct from --road_map_path, "
+                             "which is a distance-to-road raster used to SCREEN "
+                             "candidates: this one only draws, and changes no result.")
+    parser.add_argument("--settlements", type=str, default="auto",
+                        help="Named places to mark on the map. 'auto' (the default) "
+                             "uses whichever curated list has points inside the DEM, or "
+                             "give a preset ('arequipa', 'lima') or 'none'. The "
+                             "coordinates are the ones already curated as RFI zones; "
+                             "supply your own as a list in a config file to add more.")
     parser.add_argument("--decay_weight_by", type=str, default="flux",
                         choices=list(physics.DECAY_WEIGHTINGS),
                         help="What weights the spectrum-folded decay probability. "
@@ -4155,16 +5081,17 @@ def main():
     parser.add_argument("--decay_energy_max_pev", type=float, default=None, help="Upper end of that range, in PeV.")
     parser.add_argument("--decay_spectral_index", type=float, nargs="+", default=None, metavar="GAMMA", help="Spectral index gamma in dN/dE ~ E^-gamma for the folded decay term (default: 2.0). Give one value to pin the spectrum, or two to marginalise uniformly over that range when the index is not known -- a flat prior says so rather than pretending to a value. A softer spectrum weights low energies, where the tau decays readily, so it drives the term toward 1.")
     parser.add_argument("--shower_development_m", type=float, default=3000.0, help="Path the shower needs after the tau decays, in metres (default: 3000). Used both by the decay term and as the far endpoint of the Fresnel clearance measurement.")
-    parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.")
+    parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.35x at Colca), so this is worth setting deliberately; 0 disables it.")
     parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
     parser.add_argument("--max_target_slope_deg", type=float, default=None, help="Upper bound on the struck terrain's slope along the arrival azimuth. Unset by default. Note a ceiling does not empty the result: a flat valley floor passes any ceiling, so this removes walls rather than everything.")
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
     parser.add_argument("--shower_elongation_rate_gcm2", type=float, default=None, help="How much deeper shower maximum sits per decade of primary energy, in g/cm2 (default: 55, the usual hadronic value; a purely electromagnetic cascade is nearer 85).")
     parser.add_argument("--shower_lambda_gcm2", type=float, default=None, help="Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).")
-    parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.05). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at 0.05 saturates the term so it stops discriminating.")
+    parser.add_argument("--solid_angle_half_fraction", type=float, default=None, help="Fraction of the sky the azimuth fan and arrival window could accept that scores 0.5 (default: 0.076). Dimensionless and therefore portable: unlike --solid_angle_half_sr it does not have to be re-tuned when the fan width or the elevation window changes.")
+    parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.0167). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at the default saturates the term so it stops discriminating. It is calibrated against the reported solid angle, which depends on azimuth_half_width_deg and the elevation window -- change either and this wants re-checking.")
     parser.add_argument("--distance_band_m", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Exit-point distance band scoring 1, in metres. Defaults to the configured decay-baseline window.")
     parser.add_argument("--clearance_full_at", type=float, default=None, help="Fresnel clearance ratio, in first-Fresnel radii, that scores 1 (default: 1.0).")
-    parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1.")
+    parser.add_argument("--score_weights", type=str, default=None, help="Per-component weights for --score_composition weighted, as name=value pairs, e.g. 'shower=2,solid_angle=1,depth=0.5'. Components not named default to weight 1; a weight of 0 excludes a component. Names are checked against the score components and a misspelling is refused, because a dropped weight changes every number in the run and leaves no trace in the output.")
     parser.add_argument("--nu_interaction_length_gcm2", type=float, default=None, help="Neutrino interaction length for the Earth-chord attenuation term, g/cm2 (order 1e8 near an EeV). Omitted reports the chord without weighting by it.")
     parser.add_argument("--refraction_k", type=float, default=None, help="Refraction k-factor for the RADIO path only (default: 4/3). Particle trajectories always use the true Earth radius, since neutrinos and taus are not refracted.")
     parser.add_argument("--depth_band_gcm2", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Column depth band scoring 1, in g/cm2. The tau must be produced and must escape, so this is a band, not a floor.")

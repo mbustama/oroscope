@@ -10,6 +10,7 @@ So the masks below are small enough to count by hand, and every expected value i
 arithmetic rather than a previous run's output.
 """
 
+import math
 import json
 import os
 import shutil
@@ -334,5 +335,184 @@ class TestCombineRefusesBadRequests(unittest.TestCase):
         self.assertIn("world file", str(caught.exception))
 
 
+class TestOneDegreeOfLatitudeIsOneLength(unittest.TestCase):
+    """
+    Two functions in this module disagreed about how long a degree of latitude is.
+
+    ``pixel_area_km2`` used 110.6 km; ``colocation_capacity`` used 111.32, which is the
+    *longitude* constant at the equator. The north-south scale came out 0.651% long, so
+    the co-location disc was slightly too tall and its pixel area and lattice row pitch
+    carried the same error. Small, and entirely avoidable: there is one constant.
+    """
+
+    def test_the_pixel_area_matches_the_searcher_convention(self):
+        world = (1 / 3600, 0.0, 0.0, -1 / 3600, -72.0, -15.0)
+        got = ce.pixel_area_km2(world, -15.0)
+        expected = ((1 / 3600) * ss.KM_PER_DEG_LAT) * \
+                   ((1 / 3600) * 111.32 * math.cos(math.radians(-15.0)))
+        self.assertAlmostEqual(got, expected, places=12)
+
+    def test_colocation_uses_the_same_degree_as_the_pixel_area(self):
+        """
+        The two must agree: a disc measured with one scale and filled with pixels
+        measured by another reports an area that is neither.
+        """
+        world = (1 / 3600, 0.0, 0.0, -1 / 3600, -77.0, -10.0)
+        mask = np.ones((300, 300), dtype=bool)
+        rows = ce.colocation_capacity(mask, world, -10.02, -76.98,
+                                      radii_km=(50.0,), spacing_km=0.15)
+        # A radius that swallows the whole mask, so the area is every pixel.
+        self.assertAlmostEqual(rows[0]["area_km2"],
+                               mask.size * ce.pixel_area_km2(world, -10.02),
+                               places=6)
+
+
+class TestTheOverlayActuallyRenders(unittest.TestCase):
+    """
+    Every other test here passes ``--no_image``, so the figure had no coverage at all.
+
+    That is the stage which has been running out of memory, and the one whose layer
+    compositing was rewritten to halve its peak. A test that never draws it cannot
+    notice either. These draw it, at both the filled and the outlined branch, since a
+    class covering more than 40% of the frame is outlined rather than filled and the
+    two take different paths through the same loop.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def render(self, a, b, reveal=False):
+        for label, mask in (("A", a), ("B", b)):
+            run_dir = os.path.join(self.tmp, label)
+            os.makedirs(run_dir, exist_ok=True)
+            write_mask(os.path.join(run_dir, ss.RESULTS_PREFIX + "x.tif"), mask)
+            with open(os.path.join(run_dir, ss.RESULTS_PREFIX + "x.json"), "w") as f:
+                json.dump({"results": {"total_capacity": 100, "total_sites": 1,
+                                       "sites": []}}, f)
+        out = os.path.join(self.tmp, "combined")
+        argv = sys.argv
+        sys.argv = ["combine_experiments.py",
+                    os.path.join(self.tmp, "A"), os.path.join(self.tmp, "B"),
+                    "--labels", "A", "B", "--out", out]
+        if reveal:
+            sys.argv.append("--reveal")
+        try:
+            with quiet():
+                ce.main()
+        finally:
+            sys.argv = argv
+        return out
+
+    def test_the_overview_is_written(self):
+        a = np.zeros((40, 50), np.uint8)
+        a[:12, :] = 1
+        b = np.zeros((40, 50), np.uint8)
+        b[8:20, :] = 1
+        out = self.render(a, b)
+        png = os.path.join(out, "combined_overview.png")
+        self.assertTrue(os.path.exists(png))
+        self.assertGreater(os.path.getsize(png), 5000, "a blank page is not a map")
+
+    def test_a_dominant_class_takes_the_outlined_branch(self):
+        """
+        Over 40% of the frame is outlined rather than filled -- a translucent wash over
+        most of a map turns it to mud. The compositing has to flush its accumulated
+        raster when that happens, or an outline lands on the wrong side of a fill.
+        """
+        a = np.zeros((40, 50), np.uint8)
+        a[:38, :] = 1                        # 95% of the frame, so `A only` is outlined
+        b = np.zeros((40, 50), np.uint8)
+        b[38:, :] = 1
+        out = self.render(a, b)
+        self.assertTrue(os.path.exists(os.path.join(out, "combined_overview.png")))
+
+    def test_the_reveal_frames_are_all_written(self):
+        """Frames for a talk: the categories appear, nothing else may move."""
+        a = np.zeros((30, 40), np.uint8)
+        a[:10, :] = 1
+        b = np.zeros((30, 40), np.uint8)
+        b[6:16, :] = 1
+        out = self.render(a, b, reveal=True)
+        for name in ("combined_overview.png", "combined_overview_1_a.png",
+                     "combined_overview_2_b.png", "combined_overview_3_both.png"):
+            self.assertTrue(os.path.exists(os.path.join(out, name)), name)
+
+    def test_an_empty_class_is_skipped_without_failing(self):
+        """Two runs that do not overlap have no `both` layer to draw."""
+        a = np.zeros((30, 40), np.uint8)
+        a[:10, :] = 1
+        b = np.zeros((30, 40), np.uint8)
+        b[20:, :] = 1
+        out = self.render(a, b)
+        self.assertTrue(os.path.exists(os.path.join(out, "combined_overview.png")))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestColocationCapacity(unittest.TestCase):
+    """
+    The deployment question, which is not the intersection question.
+
+    A partner array does not have to stand on the joint mask: measured on the Cajatambo
+    crop, the GRAND-viable ground *inside* the joint mask was 22,577 fragments of which
+    exactly one held a single 1 km lattice cell, while 976 km² of good GRAND ground lay
+    within 20 km. An optimiser pointed at the intersection calls that site impossible.
+    """
+
+    # 1 arc-second pixels, north-west corner at (-77, -10). y is negative: rows go south.
+    WORLD = (1 / 3600.0, 0.0, 0.0, -1 / 3600.0, -77.0, -10.0)
+
+    def test_capacity_never_falls_as_the_radius_grows(self):
+        mask = np.ones((300, 300), dtype=bool)
+        rows = ce.colocation_capacity(mask, self.WORLD, -10.04, -76.96,
+                                      radii_km=(2.0, 5.0, 10.0))
+        radii = [r["radius_km"] for r in rows]
+        self.assertEqual(radii, sorted(radii), "rows must come back ascending")
+        for a, b in zip(rows, rows[1:]):
+            self.assertLessEqual(a["area_km2"], b["area_km2"])
+            self.assertLessEqual(a["capacity"], b["capacity"])
+
+    def test_the_area_within_a_radius_is_about_a_disc(self):
+        """A full mask should give pi r^2, which pins the distance metric itself."""
+        mask = np.ones((900, 900), dtype=bool)
+        row = ce.colocation_capacity(mask, self.WORLD, -10.125, -76.875,
+                                     radii_km=(5.0,))[0]
+        self.assertAlmostEqual(row["area_km2"], math.pi * 25.0, delta=1.0)
+
+    def test_ground_outside_the_radius_does_not_count(self):
+        """The whole point: distance is measured, not assumed."""
+        mask = np.zeros((300, 300), dtype=bool)
+        mask[280:, 280:] = True                      # a corner, far from the anchor
+        rows = ce.colocation_capacity(mask, self.WORLD, -10.0, -77.0,
+                                      radii_km=(1.0, 100.0))
+        self.assertEqual(rows[0]["capacity"], 0, "nothing is within 1 km")
+        self.assertGreater(rows[1]["capacity"], 0, "the corner is within 100 km")
+
+    def test_spacing_sets_how_many_fit(self):
+        mask = np.ones((400, 400), dtype=bool)
+        wide = ce.colocation_capacity(mask, self.WORLD, -10.05, -76.95,
+                                      radii_km=(5.0,), spacing_km=1.0)[0]
+        tight = ce.colocation_capacity(mask, self.WORLD, -10.05, -76.95,
+                                       radii_km=(5.0,), spacing_km=0.1)[0]
+        self.assertGreater(tight["capacity"], wide["capacity"] * 50,
+                           "ten times finer spacing is ~100x the positions")
+
+    def test_smallest_radius_reports_none_rather_than_guessing(self):
+        """`None` means 'not within the radii tried', which is not 'impossible'."""
+        mask = np.zeros((200, 200), dtype=bool)
+        self.assertIsNone(ce.smallest_radius_for(mask, self.WORLD, -10.0, -77.0,
+                                                 wanted=1, radii_km=(5.0, 10.0)))
+
+    def test_smallest_radius_is_the_first_that_suffices(self):
+        mask = np.ones((600, 600), dtype=bool)
+        radii = (2.0, 5.0, 10.0)
+        wanted = ce.colocation_capacity(mask, self.WORLD, -10.08, -76.92,
+                                        radii_km=(2.0,))[0]["capacity"]
+        got = ce.smallest_radius_for(mask, self.WORLD, -10.08, -76.92,
+                                     wanted=wanted, radii_km=radii)
+        self.assertEqual(got, 2.0, "it must not overshoot to a larger radius")

@@ -1,0 +1,41 @@
+{
+    "timestamp": "2026-08-17T04:23:22.306842",
+    "git": {
+        "commit": "8c73445718d1dc3b2432822ed9a34e33b62b96e8",
+        "branch": "dev",
+        "dirty": true
+    },
+    "dem": {
+        "path": "/home/mbustamante/Research/GRAND/oroscope/input/dem/ancash_SRTMGL1.tif",
+        "sha256": "182f1b4e41cfc3811c594f9f3691a32b4ced0d61a669b7138cd3cb0ca43fe8e7",
+        "bytes": 95320831,
+        "cell_size_deg": 0.0002777777777778146,
+        "cell_size_y_m": 30.722222222226293,
+        "cell_size_x_m": 30.50538604523169,
+        "cell_size_source": "auto-detected from GeoTIFF"
+    },
+    "platform": {
+        "python": "3.12.12",
+        "system": "Linux 7.0.0-28-generic",
+        "cpu_count": 12
+    },
+    "packages": {
+        "numpy": "2.3.4",
+        "scipy": "1.16.3",
+        "numba": "0.62.1",
+        "tifffile": "2021.7.2",
+        "matplotlib": "3.10.6",
+        "tqdm": "4.67.1",
+        "psutil": "7.0.0",
+        "imagecodecs": "2024.9.22"
+    },
+    "command": "tools/run_full_dem.py --region ancash",
+    "physics_state": {
+        "tau_energy_loss": {
+            "reference": 6e-07,
+            "reference_energy_pev": 1000.0,
+            "index": 0.2
+        },
+        "declination_model": null
+    }
+}

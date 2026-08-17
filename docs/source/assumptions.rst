@@ -86,17 +86,21 @@ parameter at a time:
      - Baseline
      - High
    * - ``decay_spectral_index`` (folded)
-     - 1.5 → 7205
-     - 2.0 → **9717**
-     - 2.7 → 10 495
+     - 1.5 → 6853
+     - 2.0 → **10 437**
+     - 2.7 → 11 349
    * - ``min_score``
-     - 0.0 → 45 928
-     - 0.35 → **2056**
+     - 0.0 → 65 268
+     - 0.35 → **10 437**
      - 0.5 → **0**
    * - ``min_target_slope_deg``
-     - 0° → 7442
-     - 25° → **2056**
-     - 35° → **0**
+     - 0° → 18 622
+     - 25° → **10 437**
+     - 35° → 2814
+
+All three rows now share one baseline. They did not before — the first read 9717 and the
+other two 2056, three rows of one table quoting two different runs, which is the kind of
+thing a table makes invisible by putting the numbers in a column.
 
 **The decay term is now folded over the spectrum, and that fixed it.** Evaluated at a
 single representative energy it *was* the answer rather than an approximation to one:
@@ -109,8 +113,17 @@ than chosen.
 The full job is the number of detected events,
 :math:`\int \Phi(E)\,A(E)\,P_{\rm decay}(E)\,{\rm d}E`. What weights the fold is now
 selectable — ``decay_weight_by`` takes ``flux``, ``acceptance`` or
-``flux_times_acceptance`` — but the acceptance :math:`A(E)` is still what no available
-table supplies. **Every number on this page was computed with the flux alone.**
+``flux_times_acceptance`` — but a *differential* acceptance :math:`A(E)` is still what
+no available table supplies; what ``data/`` holds are two integral curves, and
+:ref:`published-curve-scaling` says exactly what they can and cannot carry.
+**Every number on this page was computed with the flux alone.**
+
+``acceptance`` is worth one caution of its own. It weights by :math:`A(E)\,{\rm d}E`,
+which is :math:`A(E)` against a *flat differential* flux — :math:`\gamma = 0`, harder
+than any astrophysical spectrum. It does not remove the spectral assumption, it replaces
+it: measured against TAMBO's rising :math:`A(E)`, **97.4% of the weight lands above
+100 PeV**, against 31.3% for ``flux``. That is a large part of why weighting by
+acceptance alone empties a search.
 
 An :math:`A(E)` can be *inferred* from a published integral curve by dividing out the
 geometric model (:func:`oroscope.aperture.infer_response`), and it is not a safe weight
@@ -122,8 +135,10 @@ about TAMBO. A real differential table remains the outstanding ask.
 
 **A product score has no safe threshold.** Six components each in :math:`[0,1]`
 multiply to a distribution piled up near zero, so ``min_score`` anywhere in the middle
-sits on a cliff — 22× the baseline at 0.0, zero at 0.5. Prefer ranking sites and taking
-the best :math:`N`; a weighted geometric mean would also spread the distribution.
+sits on a cliff — 6.3× the baseline at 0.0, zero at 0.5. A sweep across the cut puts the
+median candidate score near **0.13**, so the shipped 0.35 is already well into the tail:
+it keeps the top 17.8% by rank. Prefer ranking sites and taking the best :math:`N`; a
+weighted geometric mean would also spread the distribution.
 
 
 Reported area is not physics-accepted area
@@ -133,22 +148,30 @@ Three things stand between the accepted pixels and the number in the results fil
 only the first is physics.
 
 **Morphological closing inflates.** Measured with a stride-1 control run at Colca,
-closing with a 1 km element more than doubles the area — **2.29×**. So a reported
-4580 km² corresponds to about 2120 km² the physics actually accepted. Closing is not
+closing with a 1 km element more than doubles the area — **2.35×**. So a reported
+4569 km² corresponds to about 1945 km² the physics actually accepted. Closing is not
 wrong: a site has to be a deployable region rather than a scatter of pixels. But the
 reported figure is an upper bound, and the two should not be conflated.
 
 **Candidate striding is unbiased in acceptance, at both element sizes.**
-``candidate_stride: 5`` samples one pixel in five. Control runs give 60.1% against 60.1%
-for GRAND and 17.491% against 17.494% for TAMBO, so which pixels get *tested* is a fair
-sample either way.
+``candidate_stride: 5`` samples one pixel in five. Control runs give 58.414% against
+58.415% for GRAND and 75.750% against 75.736% for TAMBO, so which pixels get *tested*
+is a fair sample either way.
+
+Those TAMBO figures used to read 17.491% and 17.494%. The acceptance did not change by
+a factor of four: the older pair counted candidates surviving *geometry and the score
+cut together*, because the pre-6.53 funnel recorded the post-cut total under the name
+``directions accepted``. The row above is geometry alone. The score cut is a separate
+row and takes a further 17.8% of it.
 
 **But which pixels survive to be measured is another matter, and for TAMBO it costs
-4.75×.** The mask is closed morphologically before any area is taken. Marking one pixel
+1.51×.** The mask is closed morphologically before any area is taken. Marking one pixel
 in five leaves gaps of five pixels — 154 m at Colca's 30.7 m resolution. GRAND's closing
 element is 1 km, thirty-two pixels, and bridges that without noticing. TAMBO's element is
-``antenna_spacing_km`` = 100 m, three pixels, and **cannot**: the mask never reconnects,
-most regions fall below ``min_sub_array_size``, and the area collapses.
+``antenna_spacing_km``, and at the published **150 m** it is five pixels — just enough to
+reconnect most of what striding cut apart. At the 100 m this page used to quote it was
+three pixels and **could not**, the mask never reconnected, most regions fell below
+``min_sub_array_size``, and the same penalty was **4.75×**.
 
 Measured with a stride-1 control at TAMBO's own settings on the Colca crop:
 
@@ -161,26 +184,26 @@ Measured with a stride-1 control at TAMBO's own settings on the Colca crop:
      - stride 1
      -
    * - directions accepted
-     - 17.491%
-     - 17.494%
+     - 75.750%
+     - 75.736%
      - unbiased
    * - **area**
-     - **83.6 km²**
-     - **396.9 km²**
-     - **4.75× low**
+     - **203.0 km²**
+     - **307.2 km²**
+     - **1.51× low**
    * - capacity
-     - 9,717
-     - 45,856
-     - 4.72× low
+     - 10,437
+     - 15,806
+     - 1.51× low
 
-So **read TAMBO's Colca area as ~397 km² and its capacity as ~45,856**. The full-DEM
-figure of 111.9 km² is low for the same reason and by downsampling on top.
+So **read TAMBO's Colca area as ~307 km² and its capacity as ~15,806**. The full-DEM
+figure of 1,036.9 km² is low for the same reason and by downsampling on top.
 
 The rule generalises: *the closing element must outrun the stride gap.* Every run now
 warns when it does not. The funnel's own closing factor — closed pixels over
 stride-corrected accepted pixels — conflates the two effects and should not be read as
-the inflation alone: for TAMBO it reports 0.53× where closing by itself inflates 1.17×
-and fragmentation costs 4.75×.
+the inflation alone: for TAMBO it reports 0.97× at stride 5, where the stride-1 control,
+which has no gap to bridge, puts closing by itself at 1.28×.
 
 .. figure:: _static/stride_and_closing.gif
    :alt: A strided mask closed with elements smaller and larger than the stride gap
@@ -203,6 +226,127 @@ the downsampled map, capacity from the full-resolution mask. At ``downsample_fac
 greater than 1 a feature only a few pixels wide loses area it keeps detectors on — for
 a canyon strip that is a ~30% discrepancy. Use ``downsample_factor: 1`` for thin
 features, or read the two as measuring different things.
+
+
+.. _published-curve-scaling:
+
+Using published effective areas: what is corrected, and what is not
+-------------------------------------------------------------------
+
+``data/`` holds two curves supplied by the collaborations and hand-digitized from their
+figures:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 18 14 20 26
+
+   * - file
+     - quantity
+     - units
+     - energy range
+     - array simulated
+   * - ``tambo_aperture_fig3``
+     - aperture (:math:`A\Omega`)
+     - m² sr
+     - 0.35 PeV – 8.8 EeV
+     - 5 000 units at 150 m, **Colca Canyon**
+   * - ``grand_effective_area_fig25``
+     - effective area
+     - cm²
+     - 0.1 – 100 EeV
+     - 10 000 antennas at 1 km, **HotSpot1**
+
+They are different quantities. TAMBO's has the solid angle folded in; GRAND's has been
+direction-*averaged*, so the solid angle is gone rather than included. They cannot be
+compared with one another without supplying a solid angle, and the GRAND file says so in
+its own header.
+
+**Each was produced by a simulation of one array at one site.** Oroscope changes both.
+Only one of those two differences can be corrected by arithmetic, and it is important to
+be exact about which.
+
+What is corrected: the size of the array
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An aperture scales with **instrumented ground**, so
+:func:`oroscope.aperture.array_scale_factor` applies
+
+.. math::
+
+   f = \frac{N_{\rm target}\, s_{\rm target}^2}{N_{\rm published}\, s_{\rm published}^2}
+
+Both terms are carried deliberately. Adding detectors at a fixed spacing adds ground and
+scales the aperture roughly linearly; adding them at a fixed footprint only makes the
+array denser, and past the point where it already samples the Cherenkov cone a denser
+array collects very little more. Scaling a densified array by its detector count alone
+would inflate the answer by exactly the factor by which it was densified — which is the
+error this project would have made, since ``antenna_spacing_km`` for TAMBO was 100 m
+against the published 150 m, a 2.25× density difference.
+
+**TAMBO now runs at 150 m to match the published simulation**, so the factor reduces to a
+plain ratio of detector counts. GRAND already matched at 1 km.
+
+The linearity is not assumed — it is checked against the source. The GRAND paper states
+that its 200 000-antenna curve is exactly 20× the 10 000-antenna one, and tracing both
+independently from the figure gives 19.9–20.1× across the resolved range. That is a
+direct confirmation, in the supplied data, that effective area is linear in array size at
+fixed spacing.
+
+What is **not** corrected: the site
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The published simulation carries its own terrain, and no operation on an integral curve
+can remove it. Folded into each curve and inseparable from it are that site's
+
+* distribution of **column depth** along accepted arrival directions,
+* distribution of **target distance** and **arrival elevation**,
+* **trigger geometry** — how the shower presents to that particular array on that
+  particular ground.
+
+For TAMBO that terrain is Colca's walls. For GRAND it is "HotSpot1", a prototypical
+site rather than a surveyed one.
+
+So a scaled curve answers: *"what this many detectors would have achieved on the ground
+the simulation assumed"* — **not** *"what they will achieve on this ground"*. Applying
+the TAMBO curve to a canyon in Ancash imports Colca's rock, not Ancash's.
+
+There is a second, subtler trap in going further. Dividing a published curve by our
+geometric model to recover a response (:func:`oroscope.aperture.infer_response`) leaves a
+residual containing the tau exit probability — which oroscope **already scores
+separately**, through the ``depth`` component and
+:func:`oroscope.physics.tau_exit_probability`. Multiplying that residual back in would
+count the same physics twice.
+
+Where the scaling does and does not enter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The distinction matters for reading any number in this project:
+
+* **In the score, it does not enter at all.**
+  :func:`oroscope.physics.spectrum_weighted_decay_probability` normalises its weights,
+  so any constant multiplying :math:`A(E)` cancels exactly — ``flux_times_acceptance``
+  with a flat response reproduces ``flux`` to twelve decimal places. Only the *shape* of
+  :math:`A(E)` in energy survives. Array size is therefore irrelevant to site ranking,
+  which is the reassuring half: **ranking does not depend on this scaling being right.**
+* **In an absolute aperture, it is the whole of the normalisation.** That is the only
+  place the array size, and hence the scaling, changes an answer.
+
+This is a workaround, not a simulation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stated plainly, because it would be easy to read a scaled curve as more than it is. The
+right calculation is a full detector simulation at the candidate site with the candidate
+layout, producing :math:`A(E)` — ideally differential in arrival elevation and distance
+as well as energy — for *that* geometry. Everything above is a stand-in for that, and it
+is defensible only for the array-size factor, only at fixed spacing, and only while the
+candidate terrain is not wildly unlike the simulated terrain.
+
+What oroscope contributes in the meantime is the part that *is* determined by terrain and
+needs no simulation: usable area, accepted solid angle, and the analytic decay
+probability. Section 4.10 of the roadmap is the decision to proceed on that basis, and it
+rests on a real argument — a factor that depends on energy but not on site cancels when
+two sites are compared for the same experiment. The rankings stand on that. The absolute
+apertures wait on a differential table.
 
 
 Physics that is not modelled

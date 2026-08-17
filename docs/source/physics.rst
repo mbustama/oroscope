@@ -391,11 +391,79 @@ is where the tau exits (≥25°, measured along the arrival azimuth at the point
 strikes). Without the second, the scan only asks that rock is present at the right
 range, which is true almost everywhere in the Andes.
 
-*And the array is a strip.* 100 m spacing along a wall, so ``min_width_km`` must be 0 —
+*And the array is a strip.* 150 m spacing along a wall, so ``min_width_km`` must be 0 —
 the opening step that prunes tendrils would otherwise delete exactly the shape TAMBO
 is. Looking across a canyon also accepts far more sky than looking to the horizon: 0.2–
-1.5 sr against GRAND's ~0.05, which is why ``solid_angle_half_sr`` has to be
+0.5 sr against GRAND's ~0.017, which is why the solid-angle half-value has to be
 experiment-specific or the term saturates and stops discriminating.
+
+What each signal tells you about the shower
+```````````````````````````````````````````
+
+The two channels do not measure the same quantity less or more well. They measure
+**different things**, and that is the whole argument for a joint site.
+
+*Radio measures the electromagnetic shower, calorimetrically.* The field amplitude
+scales with the energy in the electromagnetic cascade, and the atmosphere neither
+absorbs nor scatters at these frequencies — so what arrives at the antenna is what was
+emitted, with no attenuation correction to make and no dependence on how much shower
+happens to survive to the ground.
+
+Three further things come with it, and none has a particle-array equivalent:
+
+* **The direction**, from the arrival times of a nanosecond pulse across the array.
+* **The depth of shower maximum**, from the *shape* of the arriving wavefront and the
+  slope of the lateral distribution. :math:`X_{\rm max}` is the classic handle on how
+  deep the shower developed — and for a tau shower it constrains where the decay
+  happened, which is the geometry this whole search is about.
+* **The polarisation**, which identifies the emission mechanism: geomagnetic emission
+  is polarised along :math:`\vec{v} \times \vec{B}` and charge-excess emission radially
+  about the axis. That is a physical signature no anthropogenic pulse reproduces, and
+  it is the main defence against the radio-frequency interference the RFI criterion
+  otherwise has to exclude geometrically.
+
+What radio does *not* give is the particle content. It is nearly blind to muons, which
+carry little of the electromagnetic energy.
+
+*Particles measure the shower where it is, at one depth.* A water-Cherenkov array
+counts what physically arrives: the density and arrival times of particles at the
+ground. That is a sample of the longitudinal profile at a single slice — the ground —
+which is why TAMBO's grammage criterion is a band. Miss the slice and there is nothing
+to detect.
+
+In exchange it sees what radio cannot:
+
+* **The muon content.** Muons penetrate where the electromagnetic component is
+  absorbed, and a water-Cherenkov tank distinguishes them by the depth of light they
+  deposit. Muon number is the standard discriminator of shower composition, and it
+  separates a hadronic cascade from a purely electromagnetic one.
+* **A direct count**, with no emission geometry in the way. There is no Cherenkov cone
+  to sit inside and no magnetic-field angle to be unlucky in: if the particles arrive,
+  they are detected.
+
+*Both together give what neither gives alone.* Three things, in increasing order of
+what they are worth:
+
+1. **Two points on one longitudinal profile.** Radio gives :math:`X_{\rm max}`, where
+   the shower peaked; the array gives its content at the ground. Two depths on the same
+   cascade constrain the shower age — and therefore the altitude and distance at which
+   the tau decayed — far better than either does alone.
+2. **Energy and composition separately.** Radio measures the electromagnetic energy
+   calorimetrically and the array measures the muon number. Those are the two numbers
+   a shower measurement wants, and each channel supplies the one the other is blind to.
+   For a tau shower they also begin to separate the decay channel, since a hadronic
+   decay produces muons that an electromagnetic one does not.
+3. **Cross-calibration on the same event, which is the real prize.** Radio's systematics
+   are the antenna response, the electronics and the emission model. The array's are the
+   tank response and the hadronic interaction model. These are almost entirely
+   independent, so a shower measured by both constrains each in a way that neither can
+   constrain itself. Every energy scale in this field is limited by exactly that kind of
+   systematic, and coincident events are how it is attacked.
+
+There is a fourth, less glamorous and possibly more immediately useful: **a coincidence
+is essentially unfakeable**. A radio pulse with the right polarisation arriving at the
+same instant as particles on the ground is not something a power line, an aircraft or a
+mine does.
 
 Side by side
 ````````````
@@ -430,10 +498,19 @@ Side by side
      - 20–60° near wall, ≥25° far wall
    * - Array shape
      - compact blob, 1 km spacing
-     - strip, 100 m spacing
+     - strip, 150 m spacing
    * - Accepted solid angle
-     - ~0.05 sr
-     - 0.2–1.5 sr
+     - ~0.017 sr
+     - 0.07–0.5 sr
+   * - What it measures
+     - EM energy, calorimetrically; :math:`X_{\rm max}`; polarisation
+     - particle density at the ground; **muon content**
+   * - Blind to
+     - muons
+     - the shower above the ground
+   * - Design reference
+     - :cite:`GRAND:2018iaj`
+     - :cite:`Arguelles:2026btb`, :cite:`RomeroWolf:2020pzh`
 
 
 Joint particle + radio arrays
@@ -483,30 +560,38 @@ Over the full Arequipa DEM — 128.6 Mpx, a 117,430 km² footprint:
      - of its own ground in the joint
      - detectors
    * - GRAND alone
-     - 88,527.5
-     - 0.1%
-     - 101,948
+     - 88,208.2
+     - 0.7%
+     - 101,584
    * - TAMBO alone
-     - 111.9
-     - 44.9%
-     - 9,024
+     - 1,036.9
+     - 59.7%
+     - 49,271
    * - **joint**
-     - **50.2**
+     - **619.1**
      -
      -
    * - union
-     - 88,589.2
+     - 88,626.0
      -
      -
 
 The asymmetry is the whole story: essentially **all** of the joint is TAMBO's ground,
 and a rounding error of GRAND's. GRAND has so much deployable terrain that co-location
-costs it nothing; TAMBO has so little that nearly half of what it has is shared.
+costs it nothing; TAMBO has so little that three fifths of what it has is shared.
 
-And the joint barely moved with scale. The Colca crop alone gave 50.1 km²; the whole
-DEM, twenty-one times the area, gives 50.2. **Searching twenty-one times more ground
-found essentially no additional co-locatable ground.** The opportunity is at Colca, and
-the rest of the region's canyons do not offer it.
+**The claim that used to stand here — that the joint barely moved with scale — did not
+survive the re-run, and it is worth saying why rather than quietly restating it.** At
+TAMBO's old 100 m spacing the Colca crop gave 50.1 km² of joint and the whole DEM 50.2,
+which read as *searching twenty-one times more ground found no additional co-locatable
+ground*. At the published 150 m the crop gives 123.3 km² and the DEM 619.1, five times
+as much. The opportunity is not confined to Colca after all; the rest of the region's
+canyons do offer it, and the old conclusion was an artefact of an element too small to
+reconnect what striding had cut apart.
+
+One caveat holds in both versions and was never stated: the crop is measured at
+``downsample_factor`` 1 and the department at 4, so the two areas are not taken on the
+same grid. The comparison is indicative of scale, not a like-for-like ratio.
 
 Why one would want it
 `````````````````````
@@ -534,9 +619,9 @@ Every caveat on the individual runs applies here and compounds.
 
 * Both masks have already been morphologically closed, so the joint is the intersection
   of two inflated masks and is inflated twice over.
-* **TAMBO's area is a lower bound by 4.75×** — measured with a stride-1 control at its
-  own element size. Since the joint is almost entirely TAMBO's ground, the joint is a
-  floor too.
+* **TAMBO's area is a lower bound by 1.51×** — measured with a stride-1 control at its
+  own element size. It was 4.75× at the old 100 m spacing. Since the joint is almost
+  entirely TAMBO's ground, the joint is a floor too.
 * The overlay itself is exact: the masks are pixel-aligned and the alignment is checked
   rather than assumed. What it overlays is only as good as each run.
 * Co-location is a question about **ground**, not detectors. Two experiments sharing a
@@ -569,7 +654,7 @@ Three steps, each of which changes the answer and none of which is pure physics.
 **Morphological closing** fills gaps between accepted pixels so that a site is a
 deployable region rather than a scatter. It also inflates: measured with a stride-1
 control run at Colca, closing with a 1 km element more than doubles the accepted area
-(2.29×). The reported area is not the physics-accepted area, and the gap is now a
+(2.35×). The reported area is not the physics-accepted area, and the gap is now a
 parameter, ``gap_close_km``, rather than being tied to the detector spacing.
 
 .. warning::
@@ -582,10 +667,11 @@ parameter, ``gap_close_km``, rather than being tied to the detector spacing.
    and the area collapses.
 
    Measured with a stride-1 control at TAMBO's own settings: acceptance is unbiased
-   (17.494% against 17.491%) while the reported area is **4.75× too small** — 83.6 km²
-   against 396.9. Striding is fair about which pixels it *tests* and destructive about
+   (75.736% against 75.750%) while the reported area is **1.51× too small** — 203.0 km²
+   against 307.2. Striding is fair about which pixels it *tests* and destructive about
    which survive to be *measured*. Every run now warns when the element cannot bridge
-   the gap.
+   the gap. At the old 100 m element the same penalty was 4.75×, and the acceptance pair
+   read 17.49% because the funnel then counted geometry and the score cut as one stage.
 
 **Opening** prunes tendrils narrower than ``min_width_km``. This encodes a GRAND
 assumption — that an array is a compact blob — and it deletes exactly the long thin
@@ -610,8 +696,4 @@ asked — 7.4% high at 1 km spacing and 58% at 100 m.
    print(f"{n} detectors on {area_km2:.1f} km^2; analytic density gives {analytic:.1f}")
 
 
-References
-----------
-
-.. bibliography::
-   :filter: docname in docnames
+The papers behind these numbers are collected on the :doc:`references` page.

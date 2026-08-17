@@ -1888,7 +1888,7 @@ warning fires when the estimate exceeds 80% of available, so **the two are only 
 if the estimate is accurate** — a wrong estimate silently disarms the warning while the
 cap still bites, which is exactly the failure seen. And on a machine whose desktop
 already holds half of RAM, this run needs its ceiling set explicitly:
-`tools/run_arequipa_full.py` gained `--max-memory-gb` for that, since a memory ceiling is
+`tools/run_full_dem.py` (then `run_arequipa_full.py`) gained `--max-memory-gb` for that, since a memory ceiling is
 a property of the machine and not of the science, and the configs were left untouched.
 
 ### 6.27 Documentation drift, and a test for it
@@ -2158,7 +2158,7 @@ TAMBO's mask, so 50.1 km² at Colca is also a floor rather than an estimate.
 forgotten". It had already happened, and worse than forgetting.
 
 `main()` translated a configuration into pipeline keywords across sixty explicit lines.
-`sensitivity`'s child process splatted the payload straight in. `tools/run_arequipa_full.py`
+`sensitivity`'s child process splatted the payload straight in. `tools/run_full_dem.py`
 re-derived a third version. Only the first was complete.
 
 **The sweep child never resolved `rfi_zones`.** A preset name reached
@@ -2482,6 +2482,1463 @@ owner's call, not a refactor to be slipped in; §10 already lists `min_score` am
 TAMBO assumptions to check with the collaboration, and this is the table to check it
 against. If it is switched, `score_percentile: 22.8` reproduces the current selection
 most closely.
+
+### 6.44 `tau_exit_probability` under-resolves its own integral at large depth
+
+Found while building `tau_in_rock` (§6.45), not looked for. `physics.tau_exit_probability`
+integrates over the interaction depth with `x = np.linspace(0, X, samples)` — a fixed
+number of points spread over the **whole** depth. But only interactions within roughly
+one tau range of the far surface contribute anything, so as `X` grows the sample spacing
+outruns the only region that matters and the trapezoid rule reports the area of a spike
+it never resolved.
+
+Measured at 3 PeV, where the tau range is 3.1×10⁴ g/cm² so the effect starts early:
+
+| `samples` | X = 10⁷ | 10⁸ | 10⁹ |
+| --- | --- | --- | --- |
+| 2000 *(default)* | 2.335e−05 | 2.628e−05 | **8.884e−05** |
+| 20,000 | 2.330e−05 | 2.181e−05 | 1.328e−05 |
+| 200,000 | 2.330e−05 | 2.176e−05 | 1.103e−05 |
+| 2,000,000 | 2.330e−05 | 2.176e−05 | 1.100e−05 |
+
+At X = 10⁹ the default is **8× the converged value**, and worse than the magnitude: it
+inverts the sign of the trend. Converged, the exit probability *falls* with depth, as it
+must; at the default it *rises*, so the curve has a spurious maximum at the grid edge.
+
+**The knock-on is `depth_band_from_energy`,** which locates the band by the half-maximum
+of that curve. It returns (5.6×10⁷, 2.9×10⁸) for TAMBO's configured 3 PeV – 1 EeV range —
+a band that excludes the true 1 EeV optimum of 5.7×10⁶ by more than an order of
+magnitude, and whose low edge *rises* when the minimum energy is *lowered*
+(100 PeV – 10 EeV gives 5.2×10⁵; 3 PeV – 10 EeV gives 5.6×10⁷). The docstring's stated
+"roughly 5e5 to 2.6e8 across 100 PeV to 10 EeV" is the well-behaved case.
+
+**No published number is affected.** Every config leaves `depth_band_gcm2` null, so runs
+score against the default (10⁵, 10⁷) and never call this. `production_escape_optimum_gcm2`
+searches to 10⁹ but its answers are in the resolved regime at ≥100 PeV: 3.30×10⁶ at
+100 PeV, 5.71×10⁶ at 1 EeV, 6.23×10⁶ at 10 EeV, all reproducing published values.
+
+**Fixed in §6.56.** The substitution `u = X − x` on a log grid, with tests pinning the
+converged values. `tools/make_animations.py` scores against the default band and says so.
+
+*One correction to the numbers above.* The band quoted as "(5.6×10⁷, 2.9×10⁸) for
+TAMBO's configured 3 PeV – 1 EeV range" is the 3 PeV – **10 EeV** band. Over 3 PeV –
+1 EeV the shipped code gave (1.18×10⁸, 2.89×10⁸). The conclusion is unchanged and if
+anything understated: the low edge is 20× above the 1 EeV optimum either way.
+
+### 6.45 Four more animations, and the two things building them measured
+
+Added to `tools/make_animations.py`, taking it to eight: `the_azimuth_fan`,
+`product_collapse`, `slope_criterion`, `tau_in_rock`. Notebook 9 builds all of them.
+The filter was whether the *intermediate states carry the argument*; six candidates
+were rejected because a static figure does them better, and those reasons are in the
+handover rather than here.
+
+Three of the eight now read `input/dem/colca.tif` when it is present, because they are
+about what a criterion does to real ground, and fall back to synthetic terrain — saying
+so on the figure — when it is not. The fallback is honest but degenerate for
+`slope_criterion`: `synthetic.colca_like` has every wall at exactly 40.6°, so the
+criterion flips between 39° and 42° instead of eroding.
+
+**(a) The product collapse is real but is not evenly shared.** The premise was that each
+component multiplied in drags the whole population toward zero. Measured over the central
+40% of the Colca DEM, 119,788 candidates screened and 98,343 viable, against TAMBO's own
+`min_score` of 0.35:
+
+| after multiplying in | median score | above the cut |
+| --- | --- | --- |
+| *(nothing)* | 1.000 | 100.0% |
+| `depth` | 1.000 | 100.0% |
+| `solid_angle` | 0.233 | 35.9% |
+| `distance` | 0.233 | 35.9% |
+| `shower` | 0.228 | 34.3% |
+| `decay` | 0.218 | 32.3% |
+| `footprint` | 0.214 | 32.2% |
+
+The collapse happens — 100% to 32.2%, median 1.000 to 0.214 — but **one component does
+nine tenths of it** and two do nothing measurable. `depth` is ~1 everywhere because
+Colca's canyon walls sit inside the default band. `distance` is **provably** inert: the
+scan already applied the same 2–5 km window as a hard criterion, so every surviving
+candidate scores 1 on it by construction. Scoring a criterion the scan has already
+enforced is free, but it is also empty, and the funnel does not show it because the
+candidates were gone before scoring saw them.
+
+This does not weaken §6.43's case against thresholding a product — it sharpens it. The
+cut moves from harmless to decisive on the addition of a single term, and which term
+that is depends on the terrain, not on the configuration.
+
+**(b) Where the wall-slope criterion bites.** `min_target_slope_deg` swept over the same
+crop, against a wall-slope distribution whose quartiles are 22.2° / 29.7° / 34.6° and
+whose 95th percentile is 41.2°:
+
+| `min_target_slope_deg` | candidates accepting a direction | of no criterion at all |
+| --- | --- | --- |
+| unset | 106,926 | 100% |
+| 15 | 103,725 | 97% |
+| 25 *(TAMBO's value)* | 98,343 | 92% |
+| 30 | 93,465 | 87% |
+| 40 | 77,139 | 72% |
+| 45 | 66,586 | 62% |
+| 50 | 54,693 | 51% |
+| 60 | 27,773 | 26% |
+| 69 | 7,423 | 7% |
+
+**The mask outlives its own median by 20°.** Half the candidates see a mean wall slope
+below 29.7°, yet a 30° floor still keeps 87% of them, and the half-way point is not
+reached until 50°. The criterion is applied *per direction* while the observable is a
+mean over each candidate's accepted directions, so a candidate keeps its steepest
+directions long after its average has fallen below the cut. Read the reported
+`target_slope_deg` as a description of a candidate, never as a predictor of what a cut
+will do to it. TAMBO's configured 25° costs 8%, which is consistent with §10 calling it
+a deliberately permissive floor.
+
+### 6.46 Peru, all of it, in four minutes — and what `--max_memory_gb` actually caps
+
+The first search over a whole country. `config/grand_peru_survey.json`, GRAND's criteria
+copied unchanged from `grand_arequipa_full.json` so the two are comparable, over
+`input/dem/peru_SRTMGL3.tif` — 22,080 × 15,360 = **339.1 Mpx** at 3 arc-seconds, a
+92.17 × 91.57 m pixel.
+
+**3 arc-seconds is forced twice over, not chosen.** By memory: the same box is 3,052 Mpx
+at 1 arc-second, and `estimate_peak_memory_gb` puts even 3 arc-seconds at 12.4 GiB at
+`downsample_factor` 1 / `candidate_stride` 5. And by the API, which caps a request at
+4,050,000 km² for 90 m datasets and 450,000 km² for every 30 m one; this box is about
+2.86 million km², six times over the 30 m limit. Run at `downsample_factor` 4 and
+`candidate_stride` 15, estimated 4.77 GiB.
+
+| stage | time |
+| --- | --- |
+| load DEM | 4.6 s |
+| topographic screen | 14.7 s |
+| ray tracing | 200.1 s |
+| morphology | 20.6 s |
+| capacity | 8.3 s |
+
+**Four minutes for a country**, against 26.8 minutes for the Arequipa DEM at 30 m —
+2.6× the pixels but a ninth the candidates, and the candidates are the cost.
+
+| | DEM pixels | slope band | after stride | directions accepted | rate |
+| --- | --- | --- | --- | --- | --- |
+| Peru, 90 m, stride 15 | 339,148,800 | 112,156,858 | 7,477,157 | 3,221,209 | **43.1%** |
+| Arequipa, 30 m, stride 5 | 128,600,000 | — | — | — | 61.6% |
+
+**17 sites, 563,411 km², 633,655 antenna positions** at 1 km hexagonal spacing. That is
+43.8% of Peru's 1,285,216 km². One site holds 94.8% of it — 533,861 km² centred at
+−10.23, −75.03, on the eastern Andean flank — and the next largest is 4,834 km².
+
+**Read the area as a survey number, and here is the width of the bracket.** The 3,221,209
+accepted strided pixels each stand for 15, which is 48.3 Mpx or **407,805 km²**; the
+run reports 66.75 Mpx or 563,411 km² after closing, pruning and selection, a factor
+**1.38** higher. Some of that gap is closing doing its job — filling holes inside
+accepted ground, which the stride correction also does — and some is a 1.5 km element
+bridging ground that was genuinely rejected. Both estimates are approximations and the
+honest statement is **4–6 × 10⁵ km²**.
+
+**"17 sites" is the number to distrust, not the area.** The largest site's bounding box
+is the *entire DEM* — north −0.006, south −18.396, west −81.134, east −68.604 — so a
+1.5 km closing element applied to a strided scatter across 339 Mpx has merged the whole
+cordillera into one connected component, which `min_width_km: 2.0` then had no reason to
+break up. Its accepted candidates are Andean (mean altitude 2,446 m, p50 2,256, p90
+4,546) while the polygon enclosing them reaches the coast and the basin. Site *count*
+and site *extent* from this run are artefacts of the element; the accepted-candidate
+statistics inside them are not.
+
+**One thing that was checked and turned out fine.** The obvious worry is that 3
+arc-seconds changes the slope distribution itself — smoothing steep ground into the
+3–25° band and roughening flat ground into it — which would make the whole screen a
+resolution artefact. Measured on 20 Mpx of Arequipa, comparing the native grid against a
+3×3 block mean of the same ground:
+
+| grid | in 3–25° | slope quartiles |
+| --- | --- | --- |
+| 30 m | 67.6% | 5.2 / 11.7 / 21.4 |
+| 90 m | 67.4% | 4.4 / 10.4 / 19.2 |
+
+The quartiles do shift down, as smoothing must make them, but the *band fraction* moves
+by 0.2 points: what is lost at the 25° ceiling is regained at the 3° floor. So the
+screen's 74%-of-Peru is a fact about Peru and not about the grid. The prediction here
+was wrong and the measurement is the useful part.
+
+Peru accepts a *lower* fraction of its screened candidates than Arequipa does (43.1% vs
+61.6%), which is the expected direction: the national box adds coastal desert below the
+3° floor, high Andes above the 25° ceiling, and Amazon lowlands that are flat.
+
+**No TAMBO counterpart, deliberately.** A 90 m pixel cannot resolve the geometry TAMBO
+depends on — Colca's floor is ~1 km wide, so a canyon is ~11 pixels across and the wall
+the array stands on is a handful, with the 20–60° band measured on a slope the grid has
+already averaged. And TAMBO's 100 m closing element against this run's 1,382 m stride
+gap is a ratio of 13.8; raising `gap_close_km` to 1.5 km to survive that is fifteen times
+the array's own scale, so the mask would smear across the canyon instead of tracing the
+wall — wrong in the opposite direction from §6.34. A national TAMBO answer needs 1
+arc-second and tiling, and that is a different job.
+
+**`--max_memory_gb` caps virtual address space, not resident memory.** The first attempt
+ran the whole search successfully at `max_memory_gb 7.0` and then failed on the *map*
+with `Unable to allocate 40.8 MiB`. Nothing was near exhausting 7 GiB of RAM. The cap is
+`RLIMIT_AS`, which counts every mapping — including the 1.36 GB memory-mapped `.npy` and
+the ping-pong buffers, all of it file-backed and evictable — while
+`estimate_peak_memory_gb` deliberately estimates only *anonymous* memory and says so.
+On a 339 Mpx DEM those two quantities differ by more than 2 GiB, so a cap set from the
+estimate is tight by exactly the amount the estimate excludes. The run completed at 11.0.
+The failure mode is benign but late: the search finishes, the JSON and the GeoTIFF are
+written, and the picture is the thing you lose.
+
+**Then that advice, followed once more, took the machine down** — and the pair is the
+real lesson, so both halves are recorded here. A follow-up run at `candidate_stride` 10
+(estimate 6.74 GiB) with the cap raised again to 13.0 died in the labelling stage and
+killed the session with it. 13.0 was above the ~8.7 GiB the machine had available, and
+**a cap above available memory is not a cap**: RLIMIT_AS aborts the process only if it
+is reached before the kernel runs out of memory to give, and above that line the OOM
+killer always gets there first. The limit was set, reported, and could never fire.
+
+The two constraints pull opposite ways — clear the estimate by the mapped size of the
+DEM, *and* stay under what the machine has — and nothing in the pre-flight said when
+they could not both be met. `preflight_memory` now checks it, warns, and returns
+`cap_exceeds_available` so a library caller can act on it:
+
+```
+⚙️  Estimated peak memory: 6.7 GiB, available 8.7 GiB
+⚙️  Address space capped at 13.0 GiB (max_memory_gb=0 disables)
+⚠️  That cap is above the 8.7 GiB currently available, so it cannot protect this
+    machine: a runaway reaches the OOM killer before the limit fires.
+```
+
+Note that the *estimate* warning would not have fired: 6.74 against 8.71 available is
+77%, just under the 80% threshold. The cap check is the one that catches this.
+
+**When the two constraints cannot both be met, the configuration does not fit**, and the
+answer is a coarser search — `candidate_stride` is the memory lever (§6.26a) — not a
+bigger number in the cap. The committed config is now 8.0: above the measured ~7.0
+virtual high-water mark, below available. The stride-10 variant was not retried and its
+numbers are unknown; the committed survey is stride 15.
+
+### 6.47 A joint site is not one polygon, and an optimiser told to work inside it finds nothing
+
+The question asked was whether the code can lay out a *specific realization* at a
+combined site — roughly 100 TAMBO units with a few GRAND antennas among them. The
+answer is that it cannot yet, and the interesting part is not the missing placement
+routine. It is that **the region a placement routine would obviously be pointed at is
+the wrong region.**
+
+Measured on the stored Colca combination, per pixel, against each experiment's own
+deployable slope band:
+
+| ground inside the 50.1 km² joint mask | px | share | km² |
+| --- | --- | --- | --- |
+| GRAND's band 3–25° only | 596 | 1.1% | 0.55 |
+| both bands, 20–25° | 3,372 | 6.2% | 3.09 |
+| TAMBO's band 20–60° only | 50,565 | 92.4% | 46.27 |
+| neither | 195 | 0.4% | 0.18 |
+
+The joint mask's slope quartiles are 31.1° / 36.3° / 41.8°. It is canyon wall. **Only
+3.63 km² of it is ground a GRAND antenna could stand on**, and that 3.63 km² is
+**1,702 disconnected fragments whose largest is 0.038 km²** — against the 0.866 km² a
+single cell of a 1 km hexagonal lattice occupies. Not one fragment holds one antenna
+position. `count_grid_capacity` reports 1 for the whole joint mask, and for once that is
+not the anchored-not-fitted caveat understating things: the continuum limit is 4.2 and
+even a perfectly fitted lattice could not reach it.
+
+So an optimiser handed the intersection would report that a few GRAND antennas cannot be
+placed at all, and it would be answering the question it was asked rather than the
+question that was meant.
+
+**The realization is buildable; it is just not one polygon.** The two halves are
+unconstrained and adjacent rather than competing:
+
+- **TAMBO.** 100 units at 100 m hexagonal spacing need 0.87 km². There are 49.4 km² of
+  TAMBO-band ground inside the joint mask — 57× the room required. Siting them is not a
+  constraint, it is a choice.
+- **GRAND.** 10 antennas at 1 km need 8.66 km², which is not in the joint mask. It is
+  next door: of GRAND's 4,580 km² Colca-crop mask, 2,995 km² is in the 3–25° band and
+  2,744 km² of that lies in 48 patches large enough to hold a lattice cell. From joint
+  ground the nearest such patch is a **median 0.92 km away; 53% of the joint mask is
+  within 1 km of one and 84% within 3 km.**
+
+Under one kilometre is *inside a single GRAND cell*. From GRAND's point of view the two
+arrays are co-located; from the mask's point of view they never overlap. That is the
+whole content of the "joint" idea, and it is why the Jaccard index of 0.0006 reported in
+§6.26 reads as a failure and is not one.
+
+**What this says about building the thing.** The three gaps named in the handover are
+real and unchanged — the per-pixel score is aggregated to mean/median/p90 by
+`summarize_observables_by_site` and never rastered; there is no placement routine; and
+the score is a ranking proxy rather than an event rate, which still waits on `A(E)`
+(§9.1, and see §6.42 for why an inferred table is unsafe). But the *domain* matters
+before any of them:
+
+1. Optimise over the **union** with a per-role band constraint, never over the
+   intersection. The intersection is TAMBO ground that GRAND's region happens to
+   enclose.
+2. The coupling term is **shared line of sight**, not shared footprint. What makes a
+   pairing joint is that both arrays watch the same wall, and that is a property the
+   arrival scan already computes and the combination step currently discards.
+3. A GRAND antenna's constraint is **patch size**, not area. 3.63 km² that never
+   assembles 0.87 km² in one piece holds nothing, and a routine that reasons in total
+   area will not notice.
+
+Still analysis. Nothing here is implemented, and the placement routine remains unwritten
+by choice rather than by oversight.
+
+### 6.48 Ancash: the same question over steeper ground, and the terrain predicted the answer
+
+The Arequipa pair repeated over Ancash — the Cordillera Blanca and the Callejón de
+Huaylas — at the same 1 arc-second SRTMGL1 resolution, from the same source. 9,855 ×
+6,958 = **68.6 Mpx**, 64,684 km², bounds from OpenStreetMap's administrative boundary
+rather than eyeballed. Zero SRTM voids (OpenTopography serves the void-filled product,
+which matters here: the glaciated ground above 5,000 m is 1.16% of the DEM and would
+have been the first thing to drop out). Maximum elevation 6,744 m against Huascarán's
+6,768.
+
+**Every transferable criterion was held fixed**, and that is checkable rather than
+assertable — the notebook diffs the configurations. TAMBO differs in **2 of 60**
+settings, both bookkeeping: the file it reads and the name it prints. GRAND differs in
+**3 of 52**, the only real one being `rfi_zones`. Arequipa's run excludes five
+hand-curated circles and there is no Ancash preset; inventing one would have injected a
+new assumption into a run whose entire purpose is comparison, so Ancash excludes nothing
+and declares it. Arequipa's zones cover ~3,500 km² of a ~120,000 km² box, so read
+Ancash's GRAND area as **at most ~3% flattered** on that account.
+
+**The terrain made a prediction before any ray was traced.** Over land only:
+
+| | Arequipa | Ancash |
+| --- | --- | --- |
+| median slope | 11.1° | **23.0°** |
+| in GRAND's 3–25° band | 70.3% | **52.0%** |
+| in TAMBO's 20–60° band | 24.1% | **58.0%** |
+
+Ancash is twice as steep, so GRAND should do worse per unit area and TAMBO much better.
+Naively that is 0.74× for GRAND and 2.41× for TAMBO.
+
+**What the searches found.** Ancash is 0.533× Arequipa's pixel count, so that is the
+ratio everything is read against: near 0.53× means "the same ground, less of it".
+
+| | Arequipa | Ancash | ratio | per pixel |
+| --- | --- | --- | --- | --- |
+| GRAND, sites | 1 | 1 | | |
+| GRAND, area km² | 88,527.5 | 43,091.2 | 0.49× | **0.91×** |
+| GRAND, capacity | 101,948 | 49,447 | 0.49× | **0.91×** |
+| TAMBO, sites | 26 | 35 | 1.35× | |
+| TAMBO, area km² | 111.9 | 174.9 | 1.56× | **2.93×** |
+| TAMBO, capacity | 9,024 | 14,290 | 1.58× | **2.97×** |
+| joint, area km² | 50.20 | 75.25 | 1.50× | **2.81×** |
+| Jaccard | 0.000567 | 0.001742 | 3.07× | |
+
+**The prediction holds on both counts, and the direction is the whole result: Ancash is
+worse for GRAND and about three times better for TAMBO.** GRAND's loss is milder than
+the naive 0.74× because its 1 km closing element fills in around a fragmented mask;
+TAMBO's gain exceeds the naive 2.41× because *both* of its stages improve — the slope
+screen keeps 33.9M pixels against Arequipa's 26.8M **from a DEM half the size**, and
+acceptance among those rises from 9.7% to 15.1%. GRAND's acceptance falls, 61.6% to
+54.9%. (Compare those on the funnel rows `directions accepted / kept by stride 5`, not
+positionally: Arequipa's GRAND funnel carries an extra `outside RFI zones` stage that
+Ancash's does not.)
+
+**GRAND's binding constraint moved, and TAMBO's did not.** At Arequipa GRAND binds at
+`directions accepted` (61.6% kept) — plenty of deployable ground, and the arrival
+geometry decides. At Ancash it binds at `slope 3.0-25.0 deg` (44.4% kept): the mountains
+do not offer enough ground gentle enough to stand an array on, and the search never gets
+as far as asking what that ground can see. TAMBO binds at `directions accepted` in both,
+from opposite sides — 9.7% against 15.1%. **A criterion that binds is a statement about
+the ground rather than about the configuration**, and here it moved when only the ground
+moved, which is about as clean a demonstration as the funnel can give.
+
+**One invariant worth keeping.** The joint region is **44.9% of TAMBO's mask at Arequipa
+and 43.0% at Ancash** — essentially unchanged across two regions with very different
+terrain. That is §6.47's finding arriving independently: the joint is TAMBO-limited, and
+co-location costs GRAND almost nothing. The Jaccard index tripling is TAMBO's mask
+growing, not the two experiments agreeing more.
+
+**The best joint ground in the Ancash run is not in Ancash.** Asked where the joint
+patches in the south-east of the map are, the answer is worth recording because it
+generalises. The 91 joint patches were labelled and the largest reverse-geocoded:
+
+| km² | lat, lon | nearest village | reverse-geocodes to |
+| --- | --- | --- | --- |
+| **5.37** | −10.5866, −77.0729 | Gorgor, 5.1 km | **Gorgor, Cajatambo, Lima** |
+| 4.23 | −10.5345, −77.2167 | Aco, 5.0 km | Carhuapampa, Ocros, **Ancash** |
+| 3.24 | −10.5945, −77.1550 | Manás, 1.3 km | **Manás, Cajatambo, Lima** |
+
+The largest joint patch in the entire run — 3,442 m elevation, 3,539 m of relief within
+8 km, median slope 26° — sits in **Lima region, not Ancash**. Regions are downloaded as
+*bounding boxes* and departments are not rectangles, so Ancash's box reaches south past
+the border. **37% of the joint ground (27.5 km² of 75.2) lies south of −10.45°**, in
+that corner.
+
+Two consequences. **File results by box, read them by geography** — a site named for the
+run that found it may be administratively somewhere else, which matters for anything
+involving permits, access or a collaboration's national footprint. And the Ancash and
+Lima boxes overlap by **9,198 km²** (−10.79…−10.23 lat), so a Lima run will search this
+same ground again — with **AW3D30 rather than SRTMGL1**. That is an accidental but
+genuinely useful cross-check: the same terrain, two independent datasets, and a chance
+to see whether the joint patches survive a change of DEM. Nothing else in this project
+has had that test.
+
+`results/region_comparison.md` holds the cross-region table and is regenerated by
+`tools/compare_regions.py` from the stores, so it does not go stale when a region is
+added.
+
+Timing: GRAND 9.1 minutes, TAMBO under one, against Arequipa's 26.8 and ~1. Memory
+estimate 2.92 GiB at `downsample_factor` 4 / `candidate_stride` 5, run with
+`--max-memory-gb 5.0` against ~7 GiB available — comfortable, unlike Arequipa.
+
+All the TAMBO caveats carry over unchanged: ~4.75× low from striding against a 100 m
+closing element (§6.34) and ~30% again from downsampling. **Both regions are biased the
+same way, which is why the ratio is the trustworthy number and the absolute areas are
+not.**
+
+### 6.49 The striding penalty for TAMBO is not 4.75×. On the Callejón de Huaylas it is 291×
+
+A zoom-in over the Callejón de Huaylas and the Cañón del Pato — the Río Santa valley
+between the Cordillera Blanca and the Cordillera Negra, cropped out of the Ancash DEM at
+`−8.80…−9.90` lat, `−78.00…−77.20` lon, 3,961 × 2,881 = **11.4 Mpx**. Small enough to run
+at `downsample_factor` **1** and `candidate_stride` **1**: 2.64 GiB estimated against
+~7.8 GiB available. **The first unbiased run this project has done at scale.**
+
+| | GRAND | TAMBO |
+| --- | --- | --- |
+| sites | 1 | **109** |
+| area km² | 8,294.9 | **855.1** |
+| capacity | 9,609 | **98,696** |
+| joint | 637.1 km² | Jaccard 0.075, 74.5% of TAMBO |
+
+Then the control: **the same crop, the same criteria, changing only the sampling** to the
+`downsample_factor` 4 / `candidate_stride` 5 the department runs use.
+
+| | ds 1 / stride 1 | ds 4 / stride 5 | ratio |
+| --- | --- | --- | --- |
+| GRAND sites / area / capacity | 1 / 8,294.9 / 9,609 | 1 / 7,537.9 / 8,658 | **1.1×** |
+| TAMBO sites | 109 | 1 | **109×** |
+| TAMBO area km² | 855.1 | 2.9 | **291×** |
+| TAMBO capacity | 98,696 | 256 | **386×** |
+
+**§6.34's 4.75× is not the size of this effect.** That measurement was taken on Colca,
+varying the stride alone at `downsample_factor` 1. Here both levers move together, on
+terrain whose accepted strips are numerous and individually small, and TAMBO loses
+**two and a half orders of magnitude**.
+
+**The mechanism is not the area measurement.** The funnels say exactly where it goes:
+
+| stage | ds 1 / stride 1 | ds 4 / stride 5 |
+| --- | --- | --- |
+| slope 20–60° | 7,081,749 | 7,081,749 |
+| directions accepted | 991,099 | 198,353 |
+| after gap closing | 1,248,669 | 477,816 |
+| **pixels in selected sites** | **912,320** | **3,136** |
+
+Acceptance is **identical**: 991,099/7,081,749 = 14.0% at stride 1, and 198,353/1,416,351
+= 14.0% at stride 5. Striding really is unbiased in acceptance, exactly as §6.34 says.
+Closing differs by only 2.6×. **All 291× of the loss happens between closing and
+selection**, in the region thresholds: at stride 5 the mask fragments into 7,954 labelled
+regions of which 5 clear the area threshold and **1** clears `min_sub_array_size` (250
+detectors). At stride 1 the mask is contiguous and 109 regions survive. The under-report
+is fragmentation meeting a minimum-array-size cut, not pixels being miscounted.
+
+GRAND is untouched for the reason it always was: a 1 km closing element bridges a 154 m
+stride gap without noticing, so its mask never fragments.
+
+**What this changes.** Every TAMBO number this project has published from a strided,
+downsampled run is a lower bound by a factor that is **terrain-dependent and unbounded in
+practice** — 4.75× at Colca, ~291× here. The honest reading is that strided TAMBO area
+and capacity are *not* estimates of the true values at all; they are a different quantity
+that happens to correlate. **Quote TAMBO numbers only from unbiased runs, or quote them
+as "at least".** The Ancash and Arequipa department TAMBO figures (174.9 km² / 14,290 and
+111.9 km² / 9,024) should be read in that light, and the ratio between them survives
+better than either absolute.
+
+It also means the Callejón de Huaylas was effectively invisible to the department run:
+the ancash_full TAMBO mask contributes **1.2 km² inside this crop window** against the
+crop's own 855.1 km².
+
+Stored in `results/huaylas_full/`, controls included, with
+`config/{grand,tambo}_huaylas.json` and their `_control` counterparts.
+
+### 6.50 The memory pre-flight modelled the search and not the map, and the map is what kept dying
+
+Three runs in one session finished their searches and then died drawing the picture,
+having already written the JSON and the GeoTIFF — Peru at a 7.0 GiB cap, the Huaylas
+combination at 5.5, the Huaylas TAMBO run at 5.5 and again at 6.0 and 7.0. A fourth,
+given `max_memory_gb 0`, took the machine down.
+
+`estimate_peak_memory_gb` models the candidate and scoring arrays, which is what §6.26a
+calibrated it on and what a *search* allocates. The map is a separate peak landing on top
+of them at the very end. It renders at `viz_ds = downsample_factor * 2`, so its raster is
+`rows/(2d) × cols/(2d)` — at `downsample_factor` 1 on the Huaylas crop that is
+1,981 × 1,441, exactly the array in the failure message.
+
+Measured, shading through `LightSource.shade` and saving at 150 dpi:
+
+| viz raster | peak RSS above idle |
+| --- | --- |
+| 700 × 500 (0.35 Mpx) | 126 MB |
+| 1400 × 1000 (1.4 Mpx) | 263 MB |
+| 1981 × 1441 (2.85 Mpx) | 539 MB |
+| 2800 × 2000 (5.6 Mpx) | 959 MB |
+
+**~190 bytes per viz pixel**, plus ~130 MB of matplotlib import and canvas.
+`estimate_visualisation_memory_gb` carries both, `preflight_memory` adds it to the search
+term and reports the split, and `preflight_memory(refuse=True)` now **raises rather than
+warns** above `REFUSE_FRACTION` (0.8) of available. `tools/run_full_dem.py` passes
+`refuse=True` on a real run and **rejects `--max-memory-gb 0` outright**.
+
+**And the estimator is about 2× optimistic at `candidate_stride` 1.** Measured on the
+Huaylas TAMBO run by polling `/proc/<pid>/status`:
+
+| | estimate | measured |
+| --- | --- | --- |
+| search + map | 3.27 GiB | — |
+| peak RSS | — | **5.31 GiB** |
+| peak virtual (what `RLIMIT_AS` caps) | — | **6.51 GiB** |
+
+So a cap set from the estimate is roughly half what the run needs at stride 1, which is
+why 5.5, 6.0 and 7.0 all failed on the map while the search itself completed every time.
+§6.26a calibrated the estimator on a *strided* run; nothing has calibrated it at stride 1,
+and this is the one data point. **Treat the estimate as a lower bound, and size a cap
+from measurement when the sampling is unusual.** The proper fix is a second calibration
+point at stride 1 and a corrected `n_scoring_arrays`; not done.
+
+The map for that run was never produced. It is not needed: `--reveal` on the combination
+already renders TAMBO alone for the same crop, which is what notebook 10 shows.
+
+### 6.51 Three departments, one question: the answer tracks median slope, and the joint share does not move
+
+Lima completes the set. **Re-downloaded as SRTMGL1**, replacing the AW3D30 file that had
+been there: the three department runs are compared against one another, and a dataset
+difference would have sat inside every comparison as a confound indistinguishable from
+a difference in the ground. 10,886 × 9,638 = **104.9 Mpx**, same 1 arc-second grid,
+same `downsample_factor` 4 / `candidate_stride` 5, every transferable criterion copied.
+
+| | Arequipa | Ancash | Lima |
+| --- | --- | --- | --- |
+| Mpx | 128.6 | 68.6 | 104.9 |
+| **median slope** | **11.1°** | **23.0°** | **20.4°** |
+| in GRAND's 3–25° | 70.3% | 52.0% | 54.6% |
+| in TAMBO's 20–60° | 24.1% | 58.0% | 50.8% |
+| GRAND area km² | 88,527.5 | 43,091.2 | 51,677.6 |
+| GRAND capacity | 101,948 | 49,447 | 59,270 |
+| GRAND acceptance | 61.6% | 54.9% | 49.6% |
+| **GRAND per pixel** | 1.00× | **0.91×** | **0.72×** |
+| TAMBO sites | 26 | 35 | 40 |
+| TAMBO area km² | 111.9 | 174.9 | 190.9 |
+| TAMBO capacity | 9,024 | 14,290 | 15,775 |
+| **TAMBO per pixel** | 1.00× | **2.93×** | **2.09×** |
+| joint km² | 50.2 | 75.2 | 88.3 |
+| **joint as share of TAMBO's mask** | **44.9%** | **43.0%** | **46.2%** |
+
+**Two results, and the second is the more interesting.**
+
+**(1) The answer tracks median slope, in opposite directions for the two experiments.**
+Order the regions by steepness — Arequipa 11.1°, Lima 20.4°, Ancash 23.0° — and GRAND
+falls monotonically per pixel (1.00, 0.72, 0.91… not quite monotone, and Lima's dip below
+Ancash is worth a look) while TAMBO rises (1.00, 2.09, 2.93). Two regions could be a
+coincidence; three make it a property of the terrain rather than of the run. GRAND wants
+ground gentle enough to stand an array on and steep country keeps giving it cliffs;
+TAMBO wants exactly those cliffs.
+
+**(2) The joint region is a near-constant share of TAMBO's mask — but the constant
+depends on the sampling, and the strided value is not the real one.** Across the three
+department runs it is 44.9%, 43.0%, 46.2%, on terrain that could hardly differ more. That
+looks like a property, and §6.47 predicted it: the joint region is TAMBO-limited, so
+co-location costs GRAND almost nothing.
+
+**Then the two unbiased crops gave 74.5% (Huaylas) and 71.9% (Cajatambo).** Both at
+`downsample_factor` 1 / `candidate_stride` 1, both on ground inside one of the department
+boxes. So there are two constants, not one:
+
+| sampling | joint as share of TAMBO's mask |
+| --- | --- |
+| 4 / 5 — Arequipa, Ancash, Lima | 44.9%, 43.0%, **46.2%** |
+| 1 / 1 — Huaylas, Cajatambo | 74.5%, **71.9%** |
+
+**The unbiased number is the true one.** Striding fragments TAMBO's mask and leaves
+GRAND's untouched (§6.49), so the strided runs shrink the denominator's *quality* — what
+survives is the scattered remainder, which overlaps GRAND's blob less. Roughly **three
+quarters of TAMBO-viable ground is also GRAND-viable**, not four ninths.
+
+The invariance itself survives, and is the finding worth carrying: at fixed sampling the
+share barely moves across radically different terrain. But **quote ~72–75%, from the
+unbiased runs, and never mix the two rows.** A Jaccard index that moves while the share
+does not — 0.00057, 0.00174, 0.00170 for the departments against 0.075 and 0.138 for the
+crops — is TAMBO's mask growing, not the two experiments agreeing more.
+
+The full table is `results/region_comparison.md`, regenerated from the stores by
+`tools/compare_regions.py`, and notebook 11 computes the whole comparison live.
+
+**Caveats carried, unchanged.** All three department runs are strided and downsampled, so
+every TAMBO area and capacity above is a lower bound by a terrain-dependent factor —
+4.75× at Colca, **291× on the Huaylas crop** (§6.49). The ratios survive because all three
+carry the bias equally; the absolute TAMBO numbers do not. Arequipa alone applies RFI
+zones, worth ~2.9% of its box, which is why Ancash and Lima are both held at `none`.
+
+### 6.52 A specific joint realization: what the code can answer today, and what it cannot
+
+The question, asked again and worth answering properly: **can the code lay out ~100 TAMBO
+units and ~10 GRAND antennas, co-located, at a chosen site?**
+
+**It can already answer the feasibility half, unchanged.** Three things exist today:
+
+1. :func:`~oroscope.site_searcher.count_grid_capacity` counts how many detectors of a
+   given spacing and lattice fit on any boolean mask. So *"does this ground hold 100 TAMBO
+   units?"* is a call, not a project.
+2. The per-role slope bands are already computed, so *"where could each experiment
+   stand?"* is a mask operation.
+3. `oroscope-combine` gives the joint, union and membership rasters the masks come from.
+
+So a **proposed** realization can be tested now. What cannot be done is **proposing** one:
+there is no routine that places N detectors well.
+
+**§6.47 measured this on the strided Colca joint mask. Repeated on the unbiased Cajatambo
+crop — 805.1 km² of joint ground, sixteen times Colca's — the conclusion survives and
+sharpens:**
+
+| ground inside the 805.1 km² joint mask | share | km² |
+| --- | --- | --- |
+| GRAND's band 3–25° only | 3.9% | 31.5 |
+| both bands, 20–25° | 10.9% | 87.8 |
+| **TAMBO's band 20–60° only** | **84.7%** | **682.1** |
+
+So **119.3 km² is GRAND-standable** — against Colca's 3.63 km², a very different number.
+The continuum limit is 138 antennas at 1 km hexagonal spacing. And yet:
+
+- The GRAND-standable ground inside the joint mask is **22,577 disconnected patches**.
+- The largest is **1.252 km²**, against the 0.866 km² one lattice cell occupies.
+- **Exactly one patch is large enough to hold a single antenna.**
+
+**The binding constraint is patch size, not area**, and it survives removing the sampling
+bias. A routine that reasons in total area would report 138 antennas where the ground
+holds one. This is the single most important thing to know before writing an optimiser.
+
+**What it would take, in order of difficulty.**
+
+1. **Retain the score raster.** :func:`~oroscope.scoring.score_candidates` computes a score
+   per candidate and only per-site aggregates reach the results file. Writing it out as a
+   raster aligned with the mask is a small change and unlocks everything below.
+2. **A placement routine.** With a score raster, greedy or blue-noise placement of N
+   detectors maximising summed score subject to a minimum spacing is straightforward —
+   **provided it is given a patch-aware feasibility test rather than an area budget.**
+3. **A real objective.** The score is a *ranking proxy*, not an event rate. Optimising it
+   is defensible but it is not maximising detected neutrinos, which needs the differential
+   acceptance `A(E)` — still the outstanding physics ask (§9.1), and still unsafe to infer
+   (§6.42).
+
+**Two design points worth settling before any of that.**
+
+**Optimise over the union, never the intersection.** The joint mask is TAMBO ground that
+GRAND's region happens to enclose. An optimiser pointed at it will place the TAMBO units
+easily and then report that the GRAND antennas cannot be placed at all — which is true of
+the intersection and false of the site. At Colca the GRAND-deployable ground sat a median
+0.92 km away, well inside one GRAND cell.
+
+**The coupling term is shared line of sight, not shared footprint.** What makes a pairing
+joint is that both arrays watch the same wall. That is a property the arrival scan already
+computes per candidate and the combination step currently discards. Recovering it is
+probably a better first move than the optimiser itself, because it is what an optimiser
+would need as its objective.
+
+Not implemented, and deliberately so: the measurement above says a naive formulation
+would give a confidently wrong answer.
+
+### 6.53 The score cut was invisible in its own funnel, and `--explain` blamed the geometry ✅ delivered
+
+Found by audit, not by a failure. `run_arrival_scan` applies the score cut *before*
+counting, and the pipeline then wrote that one post-cut number under **both** funnel
+names:
+
+```python
+funnel.add("directions accepted", n_hits)
+if min_score > 0:
+    funnel.add(f"score >= {min_score:g}", n_hits)   # the same number
+```
+
+All twelve stored runs confirm it — the two rows are byte-identical wherever both
+appear. TAMBO Arequipa: `directions accepted` 517,312, `score >= 0.35` 517,312.
+
+**Three consequences, of rising severity.**
+
+*The score row carries no information.* It is 100.000% of the stage above it by
+construction, in every run that has one.
+
+*The geometric acceptance is unrecorded whenever a cut is in force.* `directions
+accepted` named the geometry and held the geometry-and-score product. Only runs with a
+cut are affected: `min_score` 0 accepts every viable candidate, so `viable & (total >=
+0)` is `viable` and every GRAND run in the store already held the right number.
+
+*`--explain` gives advice that cannot work.* `binding_constraint` compares each stage
+against the one before it, so a stage keeping exactly 100% can never be named however
+much it removed. The `STAGE_KNOBS` entry pointing at `min_score` was unreachable code.
+Driven with a funnel that `min_score` had emptied, the summary named `directions
+accepted` and told the reader to change *the arrival window, the distance window,
+`min_column_depth_gcm2` and `min_target_slope_deg`* — four knobs, none of them the one
+that emptied the search. Under `score_percentile` it was worse: no row was written at
+all, so a percentile keeping the top 22.8% made the arrival geometry look four times
+less accepting than it is.
+
+**Fixed.** `run_arrival_scan` takes the funnel and records the two counts it actually
+decides: `directions accepted` from `viable` alone, and — only when a cut applies — a
+row named for the cut that made it, `score >= 0.35` or `score in top 25%`. `STAGE_KNOBS`
+gains the percentile label, so the binding constraint now names `score_percentile` when
+that is what bound. Four tests pin it, including the two misdiagnoses above.
+
+**A published figure was asserting the defect.** `figures.pipeline_stages` — the
+schematic in `howitworks.rst` — hardcodes that Ancash run, so it drew *Arrival scan
+1,022,530* above *Scoring 1,022,530*: two bars of identical width, the lower one
+captioned "cut at `min_score`". The picture said the cut removed nothing; it removed a
+great deal. The stored run cannot separate them and re-running it was not in scope, so
+the two stages are drawn as one honestly-labelled bar rather than given an invented
+number. A run made after this fix can be drawn as seven stages again.
+
+**Stored results are not regenerated.** They carry the old meaning under `directions
+accepted`, and `results/*/manifest.json` records the commit that produced them.
+`tools/compare_regions.py` reads that key for its acceptance column, so a regeneration
+against new runs would mix the two meanings — that column compares geometry-and-score
+for TAMBO and geometry alone for GRAND, both before and after this change.
+
+### 6.54 A mistyped score weight was accepted, dropped, and never mentioned ✅ delivered
+
+Found by audit. `compose` merged the caller's weights with `if n in w` and nothing
+behind it, so a key naming no component was discarded in silence. `parse_score_weights`
+checked the *syntax* of `name=value` and never the name. Between them, a misspelling was
+a request the tool accepted and ignored:
+
+```
+--score_weights geomag=0        # one character short of `geomagnetic`
+```
+
+Measured on a two-component product with `geomagnetic` 0.2 and `depth` 0.9: **0.18 with
+the typo, 0.9 with the correct spelling.** The component the user had switched off ran
+at full weight through the entire search. Nothing in the results, the funnel, the
+explanation or the console recorded that the request had been dropped.
+
+This is the same shape as §6.31 — a component that appeared when it had been switched
+off — arriving by a different route, and it is the worst-behaved kind of input error in
+this tool: the run completes, every number moves, and the output looks exactly like a
+correct one. There is no downstream check that could catch it, because the score is not
+independently predictable.
+
+**Fixed at the choke point.** `parse_score_weights` handles both the CLI string and the
+config mapping, so the name check goes there and covers both; it raises `SystemExit`
+naming the offender and offering the nearest real component via `difflib`.
+`scoring.SCORE_COMPONENTS` is the canonical set of ten, and a test asserts it agrees
+with `explain.COMPONENT_MEANING` so the gate cannot drift into refusing legitimate
+weights.
+
+**And the quieter half.** A weight naming a *real* component that this run does not
+have — `muon_shielding` on a run with shielding off — is equally inert and was equally
+silent. `compose` now warns, because "that component is not in this composition" is a
+different message from "that is not a component" and the user needs to hear it.
+
+**A contradiction in the same docstring, resolved.** It claimed both "a weight of 0
+excludes a component" and "ignored by `min`", and `min` did ignore weights entirely: a
+component switched off by weight could still be the smallest, and so still decide the
+score — the one outcome switching it off was meant to prevent. Zero now excludes in
+every mode. `min` still ignores relative weights, which is correct rather than lazy: the
+smallest component is the smallest however it is scaled. Excluding every component is
+now an error rather than an empty `np.stack`.
+
+613 → 622 tests.
+
+### 6.55 The pre-flight was sized against the cheaper of the two searches ✅ delivered
+
+Found by audit; latent, not live. `run_full_dem.py` runs one pre-flight and then two
+searches, so the estimate has to cover whichever costs more. It read:
+
+```python
+downsample = max(int(c.get("downsample_factor") or 1) for c in sampling)
+stride     = max(int(c.get("candidate_stride")  or 1) for c in sampling)
+```
+
+Both knobs scale memory **inversely** — a larger stride means fewer candidates, a
+larger `downsample_factor` means smaller labelling arrays — so the costliest
+configuration is the one with the *smallest* values and the answer is a `min`. As
+written, a GRAND config at 4/5 beside a TAMBO config at 1/1 would have been pre-flighted
+at 4/5 and the 1/1 run waved through unchecked.
+
+It sits directly beneath a comment describing the same failure — the sampling hard-coded
+at 4 and 5, "silently wrong for the huaylas crop, which runs at 1 and 1" — so the fix for
+that bug reintroduced it in a new form. Every config pair in `config/` matches today, so
+`min` and `max` agree on all of them and nothing has actually been mis-sized.
+
+**Fixed**, and made testable: the choice is now `costliest_sampling`, a pure function
+with its own examples. `tools/` had **no tests at all** before this, which is why a
+regression in the one number standing between a run that does not fit and the OOM killer
+went unnoticed. `tests/test_tools.py` adds nine, including one that asserts the property
+rather than the implementation — no shipped config may run at a sampling finer than the
+one estimated for it — and three that pin the monotonicity of
+`estimate_peak_memory_gb` and `estimate_visualisation_memory_gb` in both knobs, since
+`min` is only the right answer while those hold.
+
+622 → 631 tests.
+
+### 6.56 The exit integral, resolved: the grid belongs in `X − x` ✅ delivered
+
+§6.44 diagnosed this and left it to the owner. Fixed now, with the substitution it
+called obvious.
+
+The integrand of
+
+    P(X) = ∫₀^X (dx/λ) exp(−x/λ) S(X − x)
+
+is a spike against the far surface: `S` kills everything produced more than a few tau
+ranges deep, and `X` can be five decades wide. Sampled uniformly in `x`, the spacing
+outran the spike. Substituting `u = X − x` and spacing logarithmically in `u` puts the
+points where the weight is. Measured at 3 PeV, `X` = 10⁹ g/cm²:
+
+| grid | P(X) |
+| --- | --- |
+| uniform, 2000 *(the old default)* | 8.884e−05 |
+| uniform, 20,000 | 1.328e−05 |
+| uniform, 200,000 | 1.103e−05 |
+| uniform, 2,000,000 | 1.100e−05 |
+| **log in `u`, 500** | **1.1009e−05** |
+| **log in `u`, 2000** *(the new default)* | **1.1004e−05** |
+
+**Converged at a thousandth of the points**, and converged at 500 — the default of 2000
+now sits 0.003% from the 200,000-point answer. Cost: 0.016 s per 200 evaluations against
+0.012 s, which is 33% for three orders of magnitude of accuracy.
+
+**Nothing that was already right moved.** At 100 PeV and above the old grid was within
+3%, and the resolved values reproduce to 1 part in 10⁴: 1.6255e−03, 1.6274e−02,
+1.5870e−02 at the three checkpoints. `production_escape_optimum_gcm2` is unchanged at
+3.302e6, 5.713e6, 6.230e6 g/cm² — the 12 km rising to 23 km of rock — so the published
+optima stand.
+
+**What did move is the band, and it is the part that mattered.**
+`depth_band_from_energy` takes its low edge at the *lowest* energy asked for, and
+TAMBO's configured range starts at 3 PeV — precisely where the integral failed. So the
+defect reached the band in full even though the integral was fine at every energy the
+band's other edge came from:
+
+| range | before | after |
+| --- | --- | --- |
+| 3 PeV – 1 EeV | (1.18e8, 2.89e8) | **(2.18e4, 1.18e8)** |
+| 3 PeV – 10 EeV | (5.58e7, 2.89e8) | **(2.18e4, 5.58e7)** |
+| 100 PeV – 10 EeV | (5.21e5, 5.58e7) | (5.21e5, 5.58e7) |
+
+The published 1 EeV optimum, 5.7×10⁶ g/cm², lies **inside** the corrected 3 PeV – 1 EeV
+band and 20× **below** the old one: the band excluded the depth it exists to find.
+Lowering the minimum energy also used to *raise* the low edge, which a band cannot do —
+asking for a wider range gave a narrower answer. Both are now tests.
+
+**Still no published number moves.** Every config leaves `depth_band_gcm2` null, so no
+search has ever called either function; searches score against the default (10⁵, 10⁷).
+
+631 → 638 tests.
+
+### 6.57 The combination was outside the memory model that exists because of it ✅ delivered
+
+§6.50 added a pre-flight after three runs died drawing their maps. It models the search
+and the search's own map. It does not model the **combination**, which is the larger
+figure and the one that failed twice this session and was re-run standalone both times.
+
+`combine_experiments` renders at the mask's own resolution, where a search's map renders
+at `downsample_factor * 2` — so **four times the pixels** — and it drew each of the three
+classes as its own `float64` RGBA raster, each held alive by its own `imshow` until the
+figure closed. Measured at the Arequipa mask's 2551×3151:
+
+| | peak RSS |
+| --- | --- |
+| three float64 rasters *(as shipped)* | 1.96 GiB |
+| three float32 rasters | 1.50 GiB |
+| **composited, float32** | **1.31 GiB** |
+| what the pre-flight budgeted for "the map" | 0.48 GiB |
+
+**0.65 GiB back for the identical picture**, and the picture really is identical: the
+classes are disjoint, so compositing cannot reorder them — but a *contour* drawn between
+two fills can be reordered, and compositing everything unconditionally changed the image
+in **2 of 32** combinations of visible and outlined classes. Flushing the accumulated
+raster whenever an outlined class intervenes is pixel-identical in all 32, which is how
+this is asserted rather than assumed.
+
+**And it is now modelled.** `estimate_visualisation_memory_gb(..., combine=True)`,
+fitted to four measured sizes rather than the one the search estimator has:
+
+| combine raster | measured | model |
+| --- | --- | --- |
+| 1276 × 1576 (2.0 Mpx) | 0.46 GiB | 0.46 |
+| 1806 × 1740 (3.1 Mpx) | 0.63 GiB | 0.62 |
+| 2551 × 3151 (8.0 Mpx) | 1.31 GiB | 1.32 |
+| 3200 × 3900 (12.5 Mpx) | 1.95 GiB | 1.95 |
+
+182 MB + 145 bytes/pixel, within 1.1% everywhere. `preflight_memory(combine=True)`
+reports it and judges `max(search + map, combine)` — the stages are sequential, so what
+must fit is the largest, not the total; the map is added to the search because it is
+drawn while the search's arrays are still live. `run_full_dem.py` passes it unless
+`--only` was given, so a region that cannot survive its own combination is now refused
+*before* an hour of searching rather than after. The huaylas dry run reads:
+
+```
+estimate:  3.27 GiB at downsample_factor 1, candidate_stride 1
+           2.64 search + 0.63 map, then 1.72 to combine
+```
+
+**The render had no test coverage whatever** — every combine test passed `--no_image` —
+which is why a stage that was failing repeatedly could also be quietly the most expensive
+thing in the pipeline. Four tests now draw it, covering the filled branch, the outlined
+branch, the `--reveal` frames and an empty class.
+
+638 → 644 tests.
+
+### 6.58 The Numba kernels can be measured after all ✅ delivered
+
+`[tool.coverage.report]` excludes `^\s*@jit`, and rightly: `@jit` compiles to machine
+code and `coverage.py` traces bytecode, so a compiled body can never be recorded as
+executed. The consequence is that the seven kernels — which include `scan_candidates`,
+the whole arrival scan — sit permanently outside the coverage number, and a regression
+in them is invisible to it.
+
+There is a route the comment did not mention. `NUMBA_DISABLE_JIT=1` makes the kernels
+ordinary Python and `coverage.py` sees straight into them: **`arrival_scan.py` reports
+90%** that way, against a figure that excludes its four kernels entirely otherwise.
+
+One test stood in the way. `test_nearest_sampling_blocks_more_than_bilinear` asserted
+`>=` between two horizon angles that agree to seven digits — 3.795908212661743 against
+3.7959089087334905. Compiled with `fastmath`, the nearest form came out 7×10⁻⁷ deg the
+larger; interpreted, the bilinear one did. So the only route to kernel coverage looked
+like a failing test. The claim the test exists to make is that nearest never sees
+*further*, not that it differs at the eighth digit, so it now carries a 10⁻⁵ tolerance
+and passes both ways.
+
+Not made the default and not added to CI: interpreted, the suite does not finish in ten
+minutes. The recipe is in `pyproject.toml` beside the exclusion, to be run by hand after
+touching a kernel.
+
+*Correction to §0 of the handover:* `_rfi_exposure` is driven by `tests/test_physics.py`,
+not `test_arrival_scan.py`, and `count_grid_capacity` by `tests/test_capacity.py`.
+
+### 6.59 Two in the sensitivity sweep, one of them made by §6.53 ✅ delivered
+
+**A hanging point ended the sweep.** `run_once` passes `timeout` to `subprocess.run`
+and never caught `TimeoutExpired`, so it raised through `main()` and discarded every row
+already computed. Both the docstring ("the point reported as failed") and the design
+("one point that fails ... reports a failed row rather than ending the sweep" — the
+whole reason each point gets its own process) said otherwise. It is also the likeliest
+failure there is: the parameter being swept is usually the one deciding how much work
+the search does, so the slow point is the one at the end of the range.
+
+**And a column this session's own change would have flattened.** `summarise` read
+`funnel["directions accepted"]` for its `accepted` figure. After §6.53 that key holds
+the *geometry*, so a `--sweep min_score` — the first example in this module's own
+docstring, and a sweep whose entire subject is the cut — would have reported an
+identical acceptance at every threshold, with no error and a perfectly plausible table.
+It now reads whatever reached closing: the score row where a cut is in force, the
+geometry otherwise, which is what it always meant.
+
+Worth recording as a shape rather than a bug: changing the meaning of a funnel key was
+correct, and it silently broke a reader three modules away that the tests did not cover.
+`sensitivity.py` had no tests of its own. It has six now.
+
+644 → 649 tests.
+
+### 6.60 Checked and clean
+
+Recorded so the same ground is not covered twice.
+
+- **`count_grid_capacity` is called once per site**, on that site's own bounding box —
+  not per tile — so there is no lattice discontinuity across chunk boundaries. Nothing
+  treats it as an optimum. One property is undocumented: `cumulative_capacity` sums
+  independently anchored lattices, 109 of them at Huaylas, which is not a realizable
+  single array.
+- **`_min_clearance_ratio` samples with `int()` and has no bilinear path**, unlike
+  `_scan_one_direction`, which documents at length why truncation toward zero biases
+  the sample. Suspected an azimuthal bias in the `clearance` component; measured, there
+  is none. Truncation is symmetric about the candidate, so mirroring the terrain and
+  looking the other way is exact to the last digit (60 profiles, 0.00%); and `int()`
+  differs from `floor()` only for negative coordinates, which the bounds check rejects
+  before they are used (800 rays across four azimuths, 100% identical). What remains is
+  a fidelity difference — nearest against sub-pixel — not a bias.
+- **`check_alignment` does refuse** mismatched shape, pixel size and corner, so two runs
+  at different `downsample_factor` cannot silently produce a misaligned overlay.
+- **Unknown config keys are dropped but named** in the warning, which is the right
+  treatment and the one `--score_weights` lacked (§6.54).
+- **No API key is committed, printed, or written to any artefact.** It is passed as a
+  URL query parameter, so it can reach shell history and proxy logs, and no error path
+  redacts it — worth knowing, not a defect in this code.
+
+### 6.61 The comparison table put an all-sites area beside a selected-sites count ✅ delivered
+
+Latent, found by audit. `compare_regions.summarise` took its site count from
+`total_sites` — the selection — and its area from `sum(s["area_km2"] for s in sites)`,
+the whole qualifying list. With `stop_at_target` those differ, and
+`explain.selected_sites` exists precisely to keep them apart; its docstring warns that
+"summing the list over-reports area and site count against every other number in the
+file". This module summed the list.
+
+Nothing has moved yet: every stored run selected every site it found, so the two are
+equal in all ten. Regenerating `results/region_comparison.md` after the fix is
+byte-identical, which is the check. Fixed now rather than after the first
+`stop_at_target` run lands, since by then the wrong number would already be published
+and would look exactly like the right one.
+
+### 6.62 TAMBO at the published 150 m, and the published curves made usable ✅ delivered
+
+**Why.** `data/` holds two curves the collaborations produced: TAMBO's aperture (Fig. 3,
+5,000 units at **150 m**, Colca) and GRAND's direction-averaged effective area (Fig. 25,
+10,000 antennas at 1 km, "HotSpot1"). Neither was consumed by any config, module or doc —
+only by tests. Using them requires matching the array they were simulated for, and
+TAMBO ran at **100 m** per §1.1 against a published 150 m: a 2.25× density difference.
+
+**The scaling, and what it can and cannot fix.** `aperture.array_scale_factor` applies
+
+    f = (N_target · s_target²) / (N_published · s_published²)
+
+Both terms are needed. Detectors added at fixed spacing add ground and scale the
+aperture; added at fixed ground they only densify, and past the point where the array
+already samples the Cherenkov cone that buys almost nothing. Scaling by count alone
+would have inflated TAMBO by exactly its 2.25× density excess. The linearity is checked
+rather than assumed: the GRAND paper states its 200k curve is exactly 20× the 10k one,
+and the digitization note records 19.9–20.1× from tracing both.
+
+**What cannot be corrected is the site.** Each curve carries its own terrain — Colca's
+column depths, target distances, arrival elevations, trigger geometry — and no operation
+on an integral curve separates them. A scaled curve reads *"what this many detectors
+would have achieved on the ground the simulation assumed"*. `absolute_from_published`
+returns that with the caveat embedded in the artefact, not only in the docs. Documented
+at length in `assumptions.rst` and notebook 09.
+
+**Where it matters, and where it does not.** In the score it does not enter at all:
+`spectrum_weighted_decay_probability` normalises its weights, so any constant on `A(E)`
+cancels and only the shape survives. **Site ranking does not depend on this scaling.**
+Only an absolute aperture does.
+
+**The rerun moved two things, not one — and this is the part to read carefully.**
+`gap_close_km` is null in every TAMBO config, so the closing element *defaults to the
+detector spacing*. Changing 100 → 150 m therefore changed the morphology as well as the
+array. The two effects pull in opposite directions and the split falls exactly along the
+striding line:
+
+| | sites | area km² | capacity |
+| --- | --- | --- | --- |
+| Arequipa (4/5) | 26 → **85** | 111.9 → **991.6** | 9,024 → **47,136** |
+| Ancash (4/5) | 35 → **58** | 174.9 → **673.1** | 14,290 → **31,249** |
+| Lima (4/5) | 40 → **73** | 190.9 → **842.7** | 15,775 → **39,115** |
+| **Huaylas (1/1)** | 109 → **23** | 855.1 → **218.8** | 98,696 → **11,280** |
+| **Cajatambo (1/1)** | 97 → **42** | 1,119.2 → **735.4** | 129,359 → **37,749** |
+
+**The crops fell and the departments rose, and only the crops are physical.** Two
+mechanisms, both visible in the funnels:
+
+1. *The score cut tightened everywhere*, which is correct physics. `spacing_m` enters the
+   `footprint` component, so a sparser array samples the Cherenkov footprint worse and
+   fewer candidates clear `min_score`: Arequipa 517,312 → 370,200 (0.72×), Huaylas
+   991,099 → 438,138 (0.44×).
+2. *The closing element grew by half*, and a larger element does far more to a **sparse**
+   mask than a dense one. At stride 5 the mask is a lattice of isolated marks and a 1.5×
+   element inflates it: Arequipa's closed count rose 1.32× on 0.72× the input, and the
+   merging of fragments that follows took selected pixels up **8.86×**. At stride 1 the
+   mask is already contiguous, so closing merely tracks its input: Huaylas 0.51× on
+   0.44×.
+
+§6.49 measured that a strided TAMBO mask fragments into 7,954 regions of which one
+clears `min_sub_array_size`. Widening the closing element merges those fragments, so the
+department numbers rose for a reason that is entirely an artefact of striding.
+
+**So: quote the crops, never the departments, for TAMBO** — the standing instruction,
+now with a second independent reason. And note the coupling itself, which is the general
+lesson: `antenna_spacing_km` is not one knob. It sets the lattice, the `footprint` score
+*and* the closing element, and a reader changing it to match a published design will
+move all three. Setting `gap_close_km` explicitly decouples the third.
+
+**The joint share moved, and it is less of a constant than §6.51 concluded.** TAMBO's
+mask that GRAND can also stand on:
+
+| | sampling | 100 m | 150 m |
+| --- | --- | --- | --- |
+| Arequipa | 4/5 | 44.9% | 60.3% |
+| Ancash | 4/5 | 43.0% | 54.4% |
+| Lima | 4/5 | 46.2% | 55.0% |
+| **Huaylas** | **1/1** | **74.5%** | **81.3%** |
+| **Cajatambo** | **1/1** | **71.9%** | **72.7%** |
+
+§6.51 found ~44–46% strided and ~72–75% unbiased, and read the second as a constant of
+the two experiments. It is not that stable: Cajatambo barely moved (71.9 → 72.7%) but
+Huaylas moved seven points. **Quote ~73–81%, not ~72–75%**, and quote it as a range that
+depends on the array design rather than as a property of the two experiments alone. The
+strided figures remain artefacts and should not be quoted at all.
+
+**Still to redo at 150 m:** the §6.51 three-department comparison, the §6.49 striding
+control, and every notebook that quotes a TAMBO number.
+
+### 6.63 The reported solid angle was the whole circle, whatever the fan ✅ delivered
+
+Found by audit, in the observable the project calls "the closest thing to a single
+measure of how good a site is". `azimuth_fan` returns a wedge spanning
+`2 × half_width_deg`; the kernel computed the azimuthal cell width as `2π / n_az` — the
+**whole circle** — regardless. Measured on terrain where every direction is accepted,
+against the analytic arc:
+
+| fan | reported | analytic | ratio |
+| --- | --- | --- | --- |
+| full 360° | 3.0565 sr | 3.0563 | **1.00×** |
+| wedge ±60° *(every shipped config)* | 3.0565 sr | 1.0188 | **3.00×** |
+| wedge ±30° | 3.0565 sr | 0.5094 | 6.00× |
+| wedge ±90° | 3.0565 sr | 1.5281 | 2.00× |
+
+**The reported figure was identical for every fan width.** It was exact for a full sweep
+and wrong by `360 / (2·half_width)` for every wedge, so `azimuth_half_width_deg` — the
+knob that says how much sky a slope-mounted array can see — changed the observable it
+most affects **not at all**. Every shipped config uses ±60°, so every reported solid
+angle was exactly 3× the arc the scan had looked at, including the "1.08 sr of usable
+sky" in `explain`'s site summaries. The true figure there is ~0.36 sr.
+
+**Fixed** by passing the fan's span from `scan()`, where `half_width_deg` is known,
+rather than inferring it inside the kernel. Every wedge now recovers its own arc to
+three decimal places.
+
+**And nothing downstream moved.** The factor is uniform across candidates and
+`saturating_score` is `x / (x + h)`, so dividing `solid_angle_half_sr` by the same 3
+(0.05 → 0.0167 in the defaults, 0.8 → 0.267 in the TAMBO configs) leaves every score
+where it was. Checked twice: the component agrees to 1.1e-16, and a real Huaylas run
+before and after gives **identical** sites, capacity, area and funnel, with the solid
+angle exactly ⅓. Site rankings never depended on this and still do not; what was wrong
+was the number reported for the sky, and any absolute aperture built on it.
+
+Two tests pin the arc against closed form, one asserts the knob now does something, and
+one asserts the retune is invariant. Two existing geomagnetic tests scanned with
+`half_width_deg=0.0`, a zero-width fan that now correctly integrates to zero sky; they
+test a *ratio*, so they ask for a 1° pencil instead.
+
+669 tests.
+
+### 6.64 The morphology halo was half what closing needs ✅ delivered
+
+Closing and opening are each a dilation followed by an erosion. Each of those reaches
+half the structuring element, so the **pair reaches a whole one**: a pixel's result
+depends on the input up to `max(structure.shape)` away. `apply_morphology_pingpong`
+padded its tiles by `// 2` of that — the radius of one operation rather than of the
+pair — so the erosion ran into the edge of its own chunk and ate the core's border.
+
+Measured on a 5000×5000 mask at the shipped 2048 tile:
+
+| element | pixels differing from the untiled result |
+| --- | --- |
+| GRAND, 33 px (1 km) | **27,990 lost** — 0.132% of the closed mask |
+| TAMBO, 5 px (150 m) | 1 lost |
+
+Every one a loss, never a gain, aligned to the tile grid. With the halo widened the
+tiled result is **bit-identical** to the untiled one for both operations at every tile
+size tried, which is what `separable_closing`'s docstring had claimed all along — true
+of the factorisation, not of the tiling. The cost is about 3% more work per tile.
+
+This is the one change in this pass that moves a number, and the golden regression
+caught it: `tests/golden/arequipa_crop.json` gains 371 closed pixels and 1.02 km² of
+site area. Everything upstream of the morphology — DEM pixels, the slope screen, the
+stride, the accepted directions — is byte-identical, which independently confirms that
+§6.63 is score-neutral.
+
+### 6.65 Six smaller ones, found in the same pass ✅ delivered
+
+**A degree of latitude had two lengths inside one module.** `pixel_area_km2` used 110.6
+km; `colocation_capacity` used 111.32 — the *longitude* constant at the equator. The
+north–south scale ran 0.651% long, so the co-location disc was too tall and its pixel
+area and lattice row pitch carried the same error, and the two functions disagreed with
+each other. Both now use `ss.KM_PER_DEG_LAT`.
+
+**Colca was not in the region table.** The crop most of this project's *reasoning* rests
+on — the 2.29× closing inflation, the `min_score`-to-percentile equivalence, the `A(E)`
+weighting comparison, "`solid_angle` is the weakest component at every TAMBO site" —
+could not be re-run by `run_full_dem.py` at all. So its configs were changed to 150 m
+while its numbers went on being quoted from runs made at 100 m, with nothing to notice.
+It has an entry and a store now, for the same reason the others do.
+
+**The geomagnetic field was resolved at a point on no part of the DEM** — the centre
+*latitude* paired with the west-edge *longitude*. `MapGrid` gains `center_lon`, and
+`read_dem_geometry` returns the column count it needs. Worth 0.03° of inclination across
+a department and 0.20° across the Peru box.
+
+**`constraint_overlap` treated aspect as linear.** The screen handles a compass band
+that wraps — `min_aspect_deg > max_aspect_deg` means an arc through north — and this did
+not, so a 350°–10° window was compared as though it ran backwards and reported *no
+overlap* with 0°–90° when they plainly share 0°–10°. Latent, since no shipped config
+sets aspect bounds, and conservative in the direction it failed.
+
+**Per-site statistics were taken over the wrong set.** A site's extent comes from the
+*scored* candidates, grown by closing; the summary aggregated over the *geometric* ones,
+so candidates the cut had rejected re-entered a site's own medians wherever closing had
+grown the mask over them. Bounded in practice — all 85 Arequipa TAMBO site medians sit
+above the 0.35 cut — but the two sets are now the same set.
+
+**Provenance recorded no module-level physics state.** `physics.set_declination_model()`
+changes the geomagnetic score and is recommended by the run's own summary;
+`set_tau_energy_loss` changes β. Neither is a parameter, neither appears in `command`
+when set from a notebook, and a run made under either was indistinguishable from a
+default one. Both are in `provenance.json` now.
+
+**And `fresnel_buffer`, a flag removed months ago**, was still set in two shipped
+configs, where `config_to_pipeline_kwargs` dropped it on every run. There is a test
+guarding `cli.rst` against exactly this — added when the same flag outlived the code in
+the documentation — and none guarding `config/`. Now there is.
+
+669 → 672 tests.
+
+### 6.66 What a max-effort review found in the audit's own work ✅ mostly delivered
+
+Ten finder angles over `994fa62..3121e1a`. Fifteen findings survived verification; the
+sharpest were in code this audit had just written.
+
+**Two put wrong numbers in committed artefacts.**
+
+`compare_regions.summarise` read `directions accepted` for its acceptance column. §6.53
+had redefined that stage to hold the *geometry*, and `sensitivity.summarise` was given
+the matching fix while this twin was missed — so the committed
+`results/region_comparison.md` showed TAMBO acceptance at **63.0 / 82.9 / 85.5 / 82.9 /
+81.0%** beside post-cut sites, area and capacity, where the runs kept 9.7 / 15.1 / 21.0 /
+14.0 / 12.9%. Fixed the same way.
+
+The combination legend printed each experiment's **total** area against the label
+"X only", while colouring only the exclusive class and listing "Both" separately — so
+the three numbers double-counted the intersection. At Arequipa: "TAMBO only — 992 km²"
+where the orange it labels is 393.6 km², beside "Both — 597.9 km²".
+
+**One was severe and entirely mine.** `absolute_from_published` read the run's spacing
+from `antenna_spacing_km`. That is the *config* spelling; a results file records
+`spacing_km`. The key was therefore always absent, `target_spacing_km` stayed `None`,
+and it fell back to the *published* spacing — a **44× under-report** on a real 1 km GRAND
+run, which is exactly the density error the argument exists to prevent. The doctest
+passed because it was built from a hand-written dict using the config spelling.
+
+**And the retune reached the values but not what explains them.** `make_notebooks.py` and
+`make_animations.py` still *execute* searches at `solid_angle_half_sr=0.8` against the
+corrected `d_phi`; the CLI help and all eight `_comment_scoring` blocks still quoted
+0.05 and 0.8, the latter sitting two lines above a value of 0.267 — a config
+contradicting itself. `_comment_layout` still said "5000 units at 100 m" beside
+`antenna_spacing_km: 0.15`.
+
+Also fixed: `COMBINE_BYTES_PER_PIXEL` was 145 where the fit gave 145.1 **MiB per Mpx** =
+152.2 bytes/px, so the model under-predicted its own table by 2.3–4.5% — the wrong
+direction for a pre-flight; `array_scale_factor` ignored `grid_type`, under-scaling a
+square lattice by 15.5% since sin60 cancels only when both lattices match; a capacity of
+`'N/A'` (any non-distributed run) crashed on `int()`; `units` was sniffed from the file
+path, so moving a curve into a directory named "aperture" relabelled cm² as m² sr;
+`min_target_slope_deg=0` was read as unbounded by a falsy test rather than as the floor
+it is; `azimuth_half_width_deg=0` silently zeroed every score, now refused by
+`validate_parameters` (the library call stays permissive — several tests fire a single
+ray to check `cells`); provenance stored a closure's `repr()`, a memory address that
+changes every process; three test classes sat *below* the `__main__` guard and never ran
+under direct execution; and `absolute_from_published` was missing from `__all__` while
+none of the four new aperture names were re-exported by the package.
+
+**Both of the two left open were then fixed — see §6.67.**
+
+672 → 676 tests.
+
+### 6.67 The solid-angle score is scale-free, and the fan tiles its own arc ✅ delivered
+
+The two the review left open, both closed. Together they end a coupling that had already
+forced one hand-retune and would have forced another.
+
+**The fan now samples cell centres.** `azimuth_fan` was endpoint-inclusive
+(`linspace(-hw, hw, n)`), which puts two samples on the fan's edges and then weights
+them like the interior ones. For `azimuth_fan(9, 60)` the true arcs are 7.5°, 15°×7,
+7.5° against a uniform 13.333°, so the solid angle was right **only when every azimuth
+accepted** — which is exactly what §6.63's test asserted, so it could not see this. A
+candidate open only at the two edges reported **1.78×** the sky it saw; one open
+everywhere but the edges, 0.89×. Centred sampling makes `span / n` the exact arc for
+every sample, matching the convention the full sweep already used, and an odd
+`n_azimuths` still lands one sample exactly on the aspect.
+
+**And the score is now taken on the fraction of available sky.** The scan reports
+`available_sky_sr` — the integral of cos θ over the fan and the arrival window — and
+`solid_angle_half_fraction` is dimensionless. The steradian form could not work: it
+silently encoded the fan width *and* the elevation window, so §6.63's `/3` retune was
+exact for a ±60° wedge and wrong for anything else. Measured before the fix, a full
+sweep scored **×1.5** at Ω = 0.05 sr and **×2.5** at 0.005, because its Ω was unchanged
+by the correction while the half-value had fallen threefold. Now a ±60° wedge and a full
+sweep return the same score on the same ground.
+
+The defaults were chosen to preserve the shipped scores exactly: 0.076026 is the old
+0.05 sr against GRAND's own 120° × ±3° sky, 0.186135 the TAMBO equivalent.
+`solid_angle_half_sr` still works and still means steradians, for a caller who wants an
+absolute scale and accepts that it is not portable across fans.
+
+Scores move only where acceptance is *partial*, which is the point: that is where the
+old cell weights were wrong. The golden regression records it — `directions accepted`
+78,527 → 76,114, capacity 745 → 746.
+
+676 → 677 tests.
+
+### 6.68 The documentation pass, and the 39 numbers waiting on a re-run
+
+Structure and API first, because those are wrong *now* rather than wrong pending a run.
+
+**Fixed.** The README's option table documented `--solid_angle_half_sr` with a default
+of 0.05; that knob now defaults to `None` and the portable one beside it is
+`--solid_angle_half_fraction`. `physics.rst` still described TAMBO as a 100 m strip
+seeing 0.2–1.5 sr against GRAND's 0.05 — the spacing is 150 m and, with the azimuthal
+cell width corrected, those solid angles are 0.07–0.5 sr and ~0.017 sr. The glossary
+defined **acceptance** as `directions accepted / kept by stride`, which since §6.53 is
+the *geometry* alone: quoting it beside post-cut sites and capacity is exactly the error
+that put 63% in the comparison table where the run kept 9.7%, so the entry now names
+both rows and says which belongs where. The funnel entry gained the score row it had
+been missing. And `assumptions.rst` claimed `decay_weight_by="acceptance"` carries no
+spectral assumption; it carries γ = 0, the hardest there is, which puts 97.4% of the
+weight above 100 PeV against 31.3% for `flux`.
+
+**Not fixed, deliberately: 39 run-derived references across the README and eight pages.**
+Inventing replacements before the searches run would be worse than leaving them. They
+fall into eight groups:
+
+| what | where | why it moves |
+| --- | --- | --- |
+| TAMBO Colca area and capacity (83.6 km², 9,717, 396.9, 45,856) | `assumptions` ×8 | 100 m spacing; Colca had no store at all until §6.65 |
+| TAMBO department figures (111.9, 9,024, 174.9, 14,290, 190.9, 15,775) | `assumptions`, `physics` | 100 m spacing |
+| joint share and joint area (44.9/43.0/46.2%, 50.2 km²) | `physics` ×3 | §6.62 measured ~73–81%, and it is a range not a constant |
+| closing inflation, 2.29× at Colca | README, `assumptions`, `cli`, `physics` ×5 | a 100 m element; also a module constant, `explain.AREA_INFLATION_AT_COLCA` |
+| the 4.75× striding penalty | `assumptions`, `howitworks` ×7 | the element is 150 m now, and §6.62 showed the coupling |
+| acceptance percentages (17.491/17.494%, 60.1%, 61.6%) | `assumptions` ×7 | the funnel rows changed meaning |
+| the `min_score` sweep and the 22.8 percentile | README, `assumptions` ×6 | scores moved where acceptance is partial |
+| "weakest component at 15 of 15 / 26 of 26 sites" | `assumptions`, notebooks | the solid-angle term is scored differently |
+
+`assumptions.rst` carries a warning admitting this at the top, which is the honest
+holding position: the mechanisms it describes are unchanged and still worth reading, and
+the figures are indicative until the re-run lands.
+
+### 6.69 The re-run, and the constant that had to be measured before it
+
+The re-run of §6.68. Six regions, both experiments and the combine, on the audited code.
+
+**The order was wrong as planned, and the reason is worth recording.**
+`AREA_INFLATION_AT_COLCA` is quoted in the *prose of every run's* `explanation.txt`,
+which `run_full_dem.py` copies into the store and the region notebooks print verbatim.
+Recomputing it *after* the six runs — the obvious order, since it is derived from a
+Colca run — leaves all six stored explanations carrying the superseded figure. The
+constant feeds no computation, only prose, so there is no circularity in settling it
+first: Colca's measured funnel is the same either way. So Colca ran, the constant was
+re-measured from it, and only then did the sweep start. Caught after three regions had
+already been launched; they were stopped and re-run rather than stored stale.
+
+**The measurement.** `config/grand_colca_stride1.json` is the diagnostic that produced
+the original 2.29×, and it still exists, so the re-measurement has the same provenance
+rather than a new one:
+
+| | closed / accepted | ratio |
+| --- | --- | --- |
+| stride-1 control, post-audit | 5,278,338 / 2,250,827 | **2.35×** |
+| stride-1 control, pre-audit | — | 2.29× |
+| production config, stride 5, corrected | — | 2.25× (was 2.19×) |
+
+Two runs that sample the terrain differently agree to 4%, which is the cross-check that
+makes the number worth quoting. The constant is **2.35**.
+
+**TAMBO's Colca closing moved much further: 0.53× → 0.97×.** That is §6.62 and §6.64
+arriving together — the element is 150 m rather than 100 m, and `gap_close_km` defaults
+to the detector spacing. A 100 m element could not bridge the gaps stride 5 leaves, so
+the mask *understated* the accepted set by half; at 150 m it very nearly breaks even.
+The sign of that correction is the point: TAMBO's reported areas were a lower bound for
+a reason that has now largely gone away.
+
+**The test that pinned it was itself the defect.** `test_it_warns_that_reported_area_is_
+not_accepted_area` asserted the literal `"2.29"` — a copy of a measurement kept in a
+second place. Re-measuring the control would have failed that test for exactly the right
+reason, and the cheap fix is to paste the new number in beside the old mistake. It now
+asserts against `explain.AREA_INFLATION_AT_COLCA`, so the constant is the only place the
+figure lives.
+
+Five further literals in `src/` carried 2.29 and are now 2.35, one of them the
+`--gap_close_km` help text — which is what generates `cli.rst`, so that page is fixed at
+the source rather than edited.
+
+### 6.70 What the six regions now say
+
+| region | sampling | GRAND sites / capacity / km² | TAMBO sites / capacity / km² | joint km² | share of TAMBO |
+| --- | --- | --- | --- | --- | --- |
+| colca | 1 / 5 | 1 / 5,315 / 4,569.4 | 16 / 10,437 / 203.0 | 123.3 | 60.7% |
+| huaylas | 1 / 1 | 1 / 9,559 / 8,249.5 | 32 / 14,925 / 291.3 | 228.7 | **78.5%** |
+| cajatambo | 1 / 1 | 1 / 6,457 / 5,573.8 | 44 / 39,658 / 774.5 | 591.7 | **76.4%** |
+| ancash | 4 / 5 | 1 / 49,059 / 42,791.9 | 62 / 34,275 / 740.0 | 411.1 | 55.6% |
+| lima | 4 / 5 | 1 / 58,669 / 51,209.0 | 84 / 42,549 / 915.4 | 509.8 | 55.7% |
+| arequipa | 4 / 5 | 1 / 101,584 / 88,208.2 | 85 / 49,271 / 1,036.9 | 619.1 | 59.7% |
+
+GRAND barely moved. TAMBO moved everywhere, and Arequipa's department area moved by 9.3×
+(111.9 → 1,036.9 km²). **The joint share splits cleanly in two rows**: 55.6 / 55.7 /
+59.7% strided, 76.4 / 78.5% unbiased. The talk's "~73–81% from the unbiased crops" holds.
+
+**`solid_angle` is the weakest component at every selected site in every region** —
+16/16, 62/62, 84/84, 85/85. That was "15 of 15" from one crop; it is now a property of
+the criterion at national scale, not an observation about Colca.
+
+**One published conclusion did not survive.** `physics.rst` said the joint "barely moved
+with scale" — Colca 50.1 km², the whole Arequipa DEM 50.2. At 150 m it is 123.3 against
+619.1, five times rather than equal. The old invariance was an artefact of a closing
+element too small to reconnect what striding cut apart. Rewritten rather than renumbered.
+
+### 6.71 The striding penalties, re-measured at 150 m
+
+Open item 8 from the previous handover. Both were measured at 100 m and both collapse:
+
+| | 100 m | 150 m |
+| --- | --- | --- |
+| Colca, stride alone (§6.34) | 4.75× | **1.51×** |
+| Huaylas, both levers (§6.49) | 291× | **23.0×** |
+| Huaylas TAMBO sites | 109× | 16.0× |
+| Huaylas TAMBO capacity | 386× | 26.8× |
+| Huaylas GRAND area | 1.1× | 1.11× |
+
+The mechanism is the cliff in `figures.striding_and_closing`: a 3-pixel element recovers
+0.04× of the accepted set and a 5-pixel one recovers 0.68×, seventeen times more for two
+pixels. At 30.7 m/px, 100 m is three pixels against a five-pixel gap and 150 m is five.
+The spacing change moved TAMBO from the wrong side of that cliff to the right one. It is
+also why Colca's closing factor went 0.53× → 0.97×.
+
+**§6.49's "acceptance is identical at 14.0%" cannot be quoted as it stood.** That was
+991,099/7,081,749, and 991,099 sat under the label `directions accepted` while actually
+being the post-cut count — the §6.53 defect. Separated, striding is unbiased at *both*
+stages independently: geometry 81.640% against 81.612%, score cut 8.59% against 8.60%.
+The claim survives; the number that demonstrated it was measuring two things at once.
+
+Colca's TAMBO pair moves the same way, 17.491/17.494% → 75.750/75.736%. All of the loss
+is downstream: 2,928 labelled regions of which 2 clear the size threshold at 4/5, against
+6,408 of which 32 do at 1/1.
+
+The sensitivity table now runs on **one** baseline. It had quoted 9717 on one row and
+2056 on the other two — three rows, two runs, which a column makes invisible.
+`min_score` 0.35 is `score_percentile` **17.8** (was 22.8), the median candidate score is
+**0.13**, and area runs 6.7 → 525.0 km² across percentiles 5 → 40 with no knee.
+
+### 6.72 The Arequipa cap, and why RSS is the wrong number to size it from
+
+`--max-memory-gb` is `RLIMIT_AS` and bounds **address space**; `estimate_peak_memory_gb`
+estimates **anonymous memory**. The docs recorded 5.68 GiB peak RSS and left the virtual
+column blank, and a blank there invites exactly one mistake. Sized from the RSS figure:
+
+| cap | outcome |
+| --- | --- |
+| 6.5 GiB | died at `[5/6] Final Analysis`, `np.searchsorted` refusing **69 MiB**, after a 25-minute ray trace |
+| 7.5 GiB | GRAND completed; **TAMBO's map** died of `std::bad_alloc` in the AGG backend |
+| 8.0 GiB | completed. Measured **VmHWM 6.59 GiB, VmPeak 7.80 GiB** |
+
+The 7.5 GiB outcome is the dangerous one: the search results were correct and stored, and
+only the *map* failed — leaving a PNG from the previous day beside fresh numbers, in a
+directory whose every other file was current. It exits 0. `implementation.rst`'s table
+now carries both columns for Arequipa, and the 1.2 GiB between them is the point.
+
+The estimator is left uncalibrated at 5.08 GiB against a 6.59 GiB truth. Re-fitting
+`n_scoring_arrays` to chase one region is how the pre-flight came to be sized against the
+cheaper of two configurations in the first place (§6.55); the honest fix is the second
+column, not a new constant.
+
+### 6.73 Two zombie stores, and a manifest that hid them
+
+**`results/huaylas_full/` held three committed files no run produces** —
+`{grand,tambo}_control_ds4_stride5.json` and `tambo_control_explanation.txt` — stale at
+100 m, and the source of the 291× table hardcoded in `compare_regions.py`. Nothing named
+them, so nothing marked them.
+
+**`results/arequipa_full/manifest.json` listed three files while the store held nine.**
+The `grand_*` artefacts were four hours and one invocation older than the `tambo_*` ones,
+and the manifest named only the later set: a reader following its own "Read this first"
+would conclude GRAND had never run. Cause: `--only` writes a manifest of what *that*
+invocation stored, so a partial re-run silently narrows the record.
+
+`write_manifest` now separates `files` (what the store holds) from `written_by_this_run`,
+and dates everything else under `also_present`, printing it at the end of a run. Four
+tests, and both failure modes are covered. `tests/test_tools.py` also gained `colca` to
+its `STORES` tuple — the store created by this re-run was not checked by anything.
+
+Not fixed, deliberately: `output/arequipa_full/` is a dead directory holding two orphan
+`buffer_*.npy` from a killed run under the superseded `run_arequipa_full.py` naming. It
+is gitignored, sparse, and 20K on disk. Noted rather than deleted.
+
+**`make_notebooks.py` tracks code, not data.** It reported notebook 11 unchanged — its
+source is — while the five stores it reads had all been replaced. Anything reading a
+store must be re-executed whether or not the generator rewrote it.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

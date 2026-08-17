@@ -320,7 +320,7 @@ def _min_clearance_ratio(elevation, r0, c0, z0, azimuth_deg,
 
 @jit(nopython=True, nogil=True, parallel=True)
 def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
-                    azimuth_offsets_deg, use_aspect,
+                    azimuth_offsets_deg, use_aspect, azimuth_span_deg,
                     elev_min_deg, elev_max_deg, n_bins,
                     step_m, max_range_m,
                     min_dist_m, max_dist_m,
@@ -373,7 +373,15 @@ def scan_candidates(candidates, elevation, cell_size_y, cell_size_x, rows, cols,
     radio_inv_2R = 1.0 / (2.0 * radio_earth_radius_m)
 
     # Solid angle of one (azimuth, elevation) cell: dOmega = cos(theta) dtheta dphi
-    d_phi = 2.0 * np.pi / n_az if n_az > 0 else 0.0
+    #
+    # dphi is the arc each sampled azimuth stands for, so it comes from the span the fan
+    # actually covers -- not from the whole circle. This read 2*pi/n_az unconditionally,
+    # which is right only for a full sweep: with the shipped +/-60 degree fan it made
+    # every reported solid angle exactly 3x the arc the scan had looked at, and made
+    # `azimuth_half_width_deg` change nothing at all in the observable it most affects.
+    # Measured on terrain where every direction accepts, the reported value was
+    # identical -- 3.0565 sr -- for fans of 360, 180, 120 and 60 degrees.
+    d_phi = np.radians(azimuth_span_deg) / n_az if n_az > 0 else 0.0
     d_theta = np.radians(elev_bin_deg)
     depth_scale = rock_density * KGM2_TO_GCM2
 
@@ -672,17 +680,31 @@ def azimuth_fan(n_azimuths: int, half_width_deg: float | None = None) -> np.ndar
 
     Examples
     --------
+    Samples sit at **cell centres**, so each stands for the same arc and the arcs tile
+    the fan exactly. The wedge used to be endpoint-inclusive -- ``linspace(-hw, hw, n)``
+    -- which places two samples on the fan's edges and gives them the same weight as the
+    interior ones. The solid angle then only came out right when *every* azimuth
+    accepted: for ``azimuth_fan(9, 60)`` the true arcs are 7.5, 15x7, 7.5 degrees
+    against a uniform 13.333, so a candidate open only at the two edges reported 1.78x
+    the sky it saw, and one open everywhere but the edges reported 0.89x. Centring the
+    samples makes ``span / n`` the exact arc for every one of them, which is the same
+    convention the full sweep already used.
+
+    With an odd ``n_azimuths`` the centre sample still lands exactly on the aspect.
+
     >>> from oroscope import arrival_scan
     >>> arrival_scan.azimuth_fan(4, None)
     array([  0.,  90., 180., 270.])
     >>> arrival_scan.azimuth_fan(3, 60.0)
-    array([-60.,   0.,  60.])
+    array([-40.,   0.,  40.])
     """
     if half_width_deg is None:
         return np.linspace(0.0, 360.0, n_azimuths, endpoint=False)
     if n_azimuths == 1:
         return np.zeros(1)
-    return np.linspace(-half_width_deg, half_width_deg, n_azimuths)
+    half_cell = float(half_width_deg) / n_azimuths
+    return np.linspace(-half_width_deg + half_cell, half_width_deg - half_cell,
+                       n_azimuths)
 
 
 def balanced_order(n_candidates: int, n_threads: int,
@@ -838,6 +860,15 @@ def scan(candidates, elevation, map_grid, *,
         step_m = min(map_grid.cell_size_y, map_grid.cell_size_x)
 
     offsets = azimuth_fan(n_azimuths, half_width_deg)
+    # The arc the fan covers, which sets how much sky each sampled azimuth stands for.
+    # A full sweep covers the circle; a wedge covers twice its half-width and no more.
+    # A zero-width fan subtends no sky, so `solid_angle_sr` is exactly 0 for every
+    # candidate while `cells` stays positive. That is arithmetically right and it is a
+    # legitimate thing to ask of this function -- several tests fire a single ray along
+    # the aspect and check what it hits -- but it makes every score zero under a product
+    # composition, so a *search* must not be configured that way. `validate_parameters`
+    # rejects it there; here it is left to the caller.
+    azimuth_span_deg = 360.0 if half_width_deg is None else 2.0 * float(half_width_deg)
     # Fresnel clearance is measured only when a band is given; 0 disables the second pass
     wavelength_m = 0.0 if not frequency_mhz else SPEED_OF_LIGHT / (frequency_mhz * 1.0e6)
 
@@ -863,7 +894,10 @@ def scan(candidates, elevation, map_grid, *,
     }
     # A target-slope band, when requested. Tangents, because the walk works in slope;
     # None means unbounded, and the vertical is a limit tan cannot represent.
-    min_target_tan = (-1.0e30 if not min_target_slope_deg
+    # `is None`, not falsiness: 0 degrees is a real floor -- reject targets sloping
+    # away from the observer -- and reading it as "unbounded" accepted every downhill
+    # target silently. max_target_slope_deg two lines below already tests `is None`.
+    min_target_tan = (-1.0e30 if min_target_slope_deg is None
                       else math.tan(math.radians(min_target_slope_deg)))
     max_target_tan = (1.0e30 if (max_target_slope_deg is None
                                  or max_target_slope_deg >= 90.0)
@@ -885,7 +919,7 @@ def scan(candidates, elevation, map_grid, *,
 
     scan_candidates(
         candidates, elevation, map_grid.cell_size_y, map_grid.cell_size_x, rows, cols,
-        offsets, use_aspect,
+        offsets, use_aspect, float(azimuth_span_deg),
         elev_min_deg, elev_max_deg, n_elev_bins,
         float(step_m), float(max_range_m),
         min_dist_km * 1000.0, max_dist_km * 1000.0,
@@ -908,6 +942,15 @@ def scan(candidates, elevation, map_grid, *,
         inverse[order] = np.arange(len(order))
         for key in out:
             out[key] = out[key][inverse]
+
+    # The sky this fan could accept at all: the arc it covers times the elevation band,
+    # integral of cos(theta) dtheta dphi. A run-level constant, not a per-candidate
+    # array, and the denominator that makes the solid-angle score scale-free -- without
+    # it a calibration constant in steradians silently encodes the fan width and the
+    # elevation window, and has to be retuned whenever either moves.
+    out["available_sky_sr"] = float(
+        np.radians(azimuth_span_deg)
+        * (np.sin(np.radians(elev_max_deg)) - np.sin(np.radians(elev_min_deg))))
     return out
 
 
