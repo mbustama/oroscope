@@ -106,7 +106,8 @@ prototype that number described.
   to `0.0`, a *valid* coordinate in the Gulf of Guinea, so a forgotten placeholder
   georeferenced a run to the wrong continent instead of failing. They are `null` now,
   meaning "read the DEM's own tiepoint". The bundled configurations set every
-  parameter explicitly and are unaffected: Colca is still 15 sites and 9717 detectors.
+  parameter explicitly and are unaffected: Colca was 15 sites and 9717 detectors before
+  and after that change (it is 16 and 10 437 now, at the 150 m re-run below).
 - **`import oroscope` forced the matplotlib backend.** `combine_experiments` called
   `matplotlib.use("Agg")` at module level — harmless for a standalone module, not for a
   package front door: it reached into every caller's session and overrode the inline
