@@ -2,6 +2,30 @@
 
 Notable changes, newest first. Measured deltas are quoted where a change moved a number.
 
+## Unreleased
+
+### Added
+- **`oroscope-combine --dpi`**, defaulting to the 140 it has always used. The three
+  `--reveal` frames were wanted at 300 for a talk, and 300 cannot be extracted from a
+  140 DPI PNG — those pixels were never rendered, and upscaling is resampling rather
+  than resolution. The redraw is cheap because `load_run` reads each experiment's mask
+  from its run directory: eighteen frames across six regions took four minutes, against
+  about ninety for the searches behind them.
+
+### Fixed
+- **Five stale figure captions** in notebooks 9, 10 and 11 — TAMBO's Arequipa area as
+  "112 km²" against 1,037, the Huaylas crop as "8,295 km²" and "109 sites" against 8,249
+  and 32, and the Cajatambo crop as "97 sites" and "805 km², 71.9%" against 44 and
+  591.7 km², 76.4%. Also the GRAND-ground-within-20 km figure, corrected in
+  `howitworks.rst` at the time and not in the notebook that says the same thing.
+
+  They survived the notebook audit that went looking for exactly this because **they
+  live in code cells, not markdown**: a figure title inside a `show_figure(...)` call is
+  invisible to a sweep over prose. The "112 km²" one escaped a second time by being the
+  rounded form of a figure the sweep searched for as `111.9`. The check that found them
+  compares every `N km²` in the generator against each fresh store value at both
+  precisions.
+
 ## 0.5.0 — 2026-08-17
 
 First published release. The version jumps from the unreleased 0.1.0 because what is

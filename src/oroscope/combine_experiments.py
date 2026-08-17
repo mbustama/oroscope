@@ -565,6 +565,12 @@ def main():
                     help="labels that must all be satisfied for the joint mask. Defaults to "
                          "every run, but allows a joint of a subset when combining three or more.")
     ap.add_argument("--no_image", action="store_true", help="skip the overview PNG")
+    ap.add_argument("--dpi", type=int, default=140,
+                    help="Resolution of the overview PNGs (default: 140). Raise it for "
+                         "print or a projector -- 300 is the usual ask. Nothing about "
+                         "the result changes, only how finely it is drawn, and the "
+                         "masks are read from the runs on disk, so a re-render at a "
+                         "higher DPI costs a redraw rather than a search.")
     ap.add_argument("--reveal", action="store_true",
                     help="Also write the overlay as three frames -- first experiment, "
                          "second experiment, both -- for uncovering a result "
@@ -841,7 +847,7 @@ def main():
             ax.legend(handles=handles, framealpha=0.9, fontsize="small", ncol=4,
                       loc="lower left", bbox_to_anchor=(0.0, 1.01), borderaxespad=0.0,
                       columnspacing=1.6)
-            fig.savefig(path, dpi=140, bbox_inches="tight")
+            fig.savefig(path, dpi=args.dpi, bbox_inches="tight")
             plt.close(fig)
             written.append(path)
 
