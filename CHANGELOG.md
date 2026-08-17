@@ -2,7 +2,11 @@
 
 Notable changes, newest first. Measured deltas are quoted where a change moved a number.
 
-## Unreleased
+## 0.5.0 — 2026-08-17
+
+First published release. The version jumps from the unreleased 0.1.0 because what is
+being released is the audited pipeline and a set of results measured on it, not the
+prototype that number described.
 
 ### Added
 - **One import: `import oroscope`.** The modules moved from flat top-level names into a
@@ -22,8 +26,9 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   rather than only ranked — both ways round. The summary reports **why each site is
   good**: the criteria it satisfies, each with the measurement that earned it ("1.08 sr
   of accepted sky, targets at 3,137 m, striking 39° terrain"), and the one that held it
-  back. On the Colca configs `solid_angle` is the weakest component at 15 of 15 TAMBO
-  sites.
+  back. On the Colca configs `solid_angle` is the weakest component at 16 of 16 TAMBO
+  sites — and at every selected site in every region searched: 62 of 62 in Ancash, 84 of
+  84 in Lima, 85 of 85 in Arequipa.
 - **Site records carry coordinates**: centre latitude/longitude and a bounding box, so
   a reader can find the ground without opening the raster in a GIS.
 - **The combination explains itself too.** `oroscope-combine` prints and saves an
@@ -68,6 +73,30 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   the full DEM are in `config/`.
 
 ### Fixed
+- **The funnel blamed the arrival window for cuts `min_score` made.** It recorded the
+  post-cut count under the name `directions accepted`, so geometry and the score cut
+  were one row. Separated on the Ancash TAMBO run, the scan keeps **82%** of what
+  striding hands it and `min_score` takes **8.4×**. Every ratio derived from that row
+  was measuring two things at once — including the "acceptance is identical at 14.0%"
+  that demonstrated striding was unbiased. It still is, at both stages independently:
+  geometry 81.640% against 81.612%, score cut 8.59% against 8.60%.
+- **A store could be half-refreshed and look current.** `results/huaylas_full/` held
+  three committed control files no run produces, four months stale at the old spacing,
+  and `results/arequipa_full/manifest.json` listed three files while the store held
+  nine — because `--only` wrote a manifest of what *that* invocation stored. A reader
+  following the manifest's own "read this first" would have concluded GRAND had never
+  run. The manifest now separates what the store holds from what the run wrote, and
+  dates everything else under `also_present`.
+- **An animation was broken by a guard added in the same release, and CI could not see
+  it.** Teaching `scoring.compose` to refuse an all-zero weighting broke
+  `product_collapse`, whose first frame *is* an all-zero weighting — the empty product
+  before any criterion applies. Notebook 07 is excluded from CI because the runner has
+  no ffmpeg. Fixed in the animation, where the empty product is meaningful, with a test
+  that builds every animation's first frame and needs no ffmpeg.
+- **A figure was published twice.** `howitworks.rst` was the only page without a
+  `%matplotlib inline` setup block, so its first block rendered once as the cell's
+  result and once more as the backend flushed — the seven-stage funnel appeared twice
+  in a row on the live site.
 - **A parameter's default depended on which door you came in by.** The pipeline's
   signature, the argparse parser and `default_config()` disagreed on **ten**
   parameters — `search_mode` was `single` from Python and `distributed` from a shell,
@@ -125,7 +154,9 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
   a run directory, and the pre-rename `grand_search_results_*` prefix sorts before
   `oroscope_results_*` — so a re-run directory was overlaid using its superseded mask,
   silently. Corrected Colca figures: TAMBO 44.5 → **83.6 km²**, joint 26.4 → **50.1
-  km²**, union 4598.3 → **4613.7 km²**. GRAND's own numbers are unchanged.
+  km²**, union 4598.3 → **4613.7 km²**. GRAND's own numbers are unchanged. *Those
+  absolute values are the size of this fix, not the figures this release ships: the
+  150 m re-run below moved Colca's TAMBO area to 203.0 km² and its joint to 123.3.*
 - **Capacity was over-counted twice.** Integer pixel stamping inflated it by 7.4% at
   1 km spacing and 58% at 100 m; and capacity was counted over each site's *bounding
   box*, which also contains other sites — 38% on a canyon network, 2.07× on a synthetic
@@ -142,6 +173,42 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 - Documentation figures rendered as text, not images.
 
 ### Changed
+- **Every published number comes from the audited pipeline.** All six regions were
+  re-searched and every derived figure regenerated from them, so `results/`, the
+  notebooks and the documentation agree. GRAND barely moved; TAMBO moved everywhere.
+  Arequipa's TAMBO area went 111.9 → **1,036.9 km²** and its capacity 9,024 → **49,271**;
+  GRAND's area 88,527.5 → 88,208.2 km².
+
+  | region | sampling | GRAND km² | TAMBO sites / km² | joint km² | share of TAMBO |
+  | --- | --- | --- | --- | --- | --- |
+  | colca | 1 / 5 | 4,569.4 | 16 / 203.0 | 123.3 | 60.7% |
+  | huaylas | 1 / 1 | 8,249.5 | 32 / 291.3 | 228.7 | **78.5%** |
+  | cajatambo | 1 / 1 | 5,573.8 | 44 / 774.5 | 591.7 | **76.4%** |
+  | ancash | 4 / 5 | 42,791.9 | 62 / 740.0 | 411.1 | 55.6% |
+  | lima | 4 / 5 | 51,209.0 | 84 / 915.4 | 509.8 | 55.7% |
+  | arequipa | 4 / 5 | 88,208.2 | 85 / 1,036.9 | 619.1 | 59.7% |
+
+  **Quote the crops, never the departments, for TAMBO** — department figures are
+  striding artefacts. The joint share is two rows and never one: ~56–60% strided,
+  ~76–79% unbiased.
+- **TAMBO runs at the published 150 m detector spacing**, not 100 m, and
+  `gap_close_km` defaults to that spacing. Both striding penalties collapse as a result:
+  Colca **4.75× → 1.51×**, the Callejón de Huaylas **291× → 23.0×**. A 3-pixel closing
+  element recovers 0.04× of the accepted set and a 5-pixel one 0.68×, so 100 m sat on
+  the wrong side of that cliff and 150 m does not.
+- **The solid-angle score is scale-free.** `solid_angle_half_fraction` is a fraction of
+  the sky the fan and the arrival window actually make available; the steradian form
+  silently encoded the fan width, so a value tuned for one fan was wrong for any other.
+  `solid_angle_half_sr` still works and still means steradians.
+- **Closing inflation at Colca re-measured, 2.29× → 2.35×**, from the same stride-1
+  control that produced the original. `explain.AREA_INFLATION_AT_COLCA` is the only
+  place the figure lives, and a test asserts against the constant rather than a literal.
+- **A conclusion was withdrawn.** The joint no longer "barely moves with scale": at
+  100 m the Colca crop gave 50.1 km² and the whole Arequipa DEM 50.2; at 150 m it is
+  123.3 against 619.1. The old invariance was an artefact of an element too small to
+  reconnect what striding cut apart.
+- **Documentation figures render as SVG and carry a zoom control** — a magnifier on
+  each figure and an overlay, as static assets rather than an extension.
 - **Figure labels capitalise their first word** — axis labels, titles, legend entries
   and annotations, everywhere. Stated at the top of `figures.py` so it holds.
 - Renamed to **oroscope**; outputs are `oroscope_results_*` (the old prefix still reads).
@@ -151,6 +218,6 @@ Notable changes, newest first. Measured deltas are quoted where a change moved a
 
 ### Known limitations
 See [assumptions and limitations](https://mbustama.github.io/oroscope/assumptions.html).
-The short version: reported area is ~2.3× the physics-accepted area because of
-morphological closing, the detector acceptance *A(E)* is not modelled, and nothing has
-been checked against an external simulation.
+The short version: reported area is ~2.35× the physics-accepted area because of
+morphological closing, the detector acceptance *A(E)* is not modelled, Askaryan
+emission is not modelled, and nothing has been checked against an external simulation.

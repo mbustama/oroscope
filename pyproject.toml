@@ -7,7 +7,11 @@ build-backend = "setuptools.build_meta"
 # it searches terrain against per-experiment criteria, and TAMBO is served by the same
 # engine, so the name deliberately privileges neither.
 name = "oroscope"
-version = "0.1.0"
+# Kept in step with `oroscope.__version__` by a test, because two copies of one string
+# is the same shape of defect as a measurement kept in two places -- and this pair has
+# the added trap that `docs/source/conf.py` reads *this* one while the runtime reports
+# the other, so a mismatch would publish one version and install a different one.
+version = "0.5.0"
 description = "Terrain site search for particle-astrophysics observatories, from digital elevation models"
 readme = "README.md"
 requires-python = ">=3.9"
