@@ -1,7 +1,7 @@
 # Stored results — the full Arequipa DEM
 
 This directory holds the *small* artefacts of the three full-DEM searches, so that
-[notebook 7](../../notebooks/07_running_a_search.ipynb) can **read** them instead of
+[notebook 9](../../notebooks/09_arequipa_dem.ipynb) can **read** them instead of
 running them.
 
 That split is the point. Each of these searches takes about half an hour, and CI
@@ -14,21 +14,27 @@ that opens instantly and needs no DEM at all. That is possible because
 ## Producing it
 
 ```bash
-python tools/run_full_dem.py --dry-run   # report the cost, then stop
-python tools/run_full_dem.py             # GRAND, TAMBO, then the combination
-python tools/run_full_dem.py --only grand
+python tools/run_full_dem.py --region arequipa --dry-run              # the cost, then stop
+python tools/run_full_dem.py --region arequipa --max-memory-gb 8.0    # both, then combine
+python tools/run_full_dem.py --region arequipa --max-memory-gb 8.0 --only grand
 ```
+
+The cap is spelled out rather than left to the default for the reason given under
+[The configurations](#the-configurations): 80% of available lands *below* what this
+search needs.
 
 `--dry-run` **starts nothing** — no search, no file, no change to this directory. It
 prints the five things worth knowing before committing an hour of a machine:
 
 ```text
-DEM:       input/dem/arequipa_SRTMGL1.tif     which file, and whether it is even there
-estimate:  5.08 GiB at downsample_factor 4    the pre-flight memory estimate
-available: 6.4 GiB                            against what the system reports free
-would run: grand, tambo, then combine         honouring --only
-expected:  ~25 min for grand, ~1 min for tambo  so you do not start it before you need the machine
-store:     results/arequipa_full              where the artefacts land
+region:    arequipa
+DEM:       input/dem/arequipa_SRTMGL1.tif              which file, and whether it is there
+estimate:  5.56 GiB at downsample_factor 4, candidate_stride 5
+           5.08 search + 0.48 map, then 1.32 to combine   where the estimate goes
+available: 7.0 GiB                                     against what the system reports
+would run: grand, tambo, then combine                  honouring --only
+expected:  ~25 min for grand, ~1 min for tambo         so you do not start it blind
+store:     results/arequipa_full                       where the artefacts land
 ```
 
 The estimate is what decides `downsample_factor` and `candidate_stride`: the same DEM
@@ -55,6 +61,7 @@ premise of storing rather than recomputing is that nobody looks again.
 | `grand_explanation.txt` | The run in plain language. |
 | `tambo_*` | The same three, for TAMBO. |
 | `combined_report.json` | Joint, union and co-location over the two masks. |
+| `combination_explanation.txt` | The combination in plain language. Copied beside the report rather than left behind: when it was not, a re-combine refreshed the numbers while the prose beside them kept the old ones, and the region notebooks print this file verbatim. |
 
 **Not** the rasters. A GeoTIFF mask of a 129 Mpx DEM is far too large for a repository,
 and the notebook does not need one. The full outputs — GeoTIFF, world file, KML, PNG,
@@ -67,8 +74,10 @@ Colca crop configs with three changes: the full DEM, the origin read from the fi
 tiepoint rather than the crop's corner, and `downsample_factor: 4` instead of 1 — the
 estimator puts this DEM at 7.2 GiB of anonymous memory at 1 against ~6-7 GiB typically
 free, and 5.1 GiB at 4. Even at 4 it needs a machine whose desktop is not holding half
-of RAM: the run measured **5.68 GiB peak RSS**, and wants `--max-memory-gb` set
-explicitly rather than the default 80%-of-available cap.
+of RAM: the run measured **6.59 GiB peak RSS against 7.80 GiB of address space**, and
+wants `--max-memory-gb` set explicitly rather than the default 80%-of-available cap.
+Size it from the virtual figure — that is what `RLIMIT_AS` bounds. A 6.5 GiB cap, above
+the resident peak and below the virtual one, still died in the final analysis.
 
 Every criterion is otherwise unchanged from the crop, deliberately: the point of this
 run is **scale**, not a different question. A crop is chosen because it is interesting,

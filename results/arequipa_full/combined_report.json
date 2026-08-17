@@ -2,23 +2,23 @@
   "runs": [
     {
       "label": "GRAND",
-      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/arequipa_full_grand",
-      "pixels": 6058056,
-      "area_km2": 88527.5073264185,
-      "reported_capacity": 101948,
+      "dir": "output/arequipa_full_grand",
+      "pixels": 6036206,
+      "area_km2": 88208.20918274301,
+      "reported_capacity": 101584,
       "reported_sites": 1,
-      "area_in_joint_km2": 597.9424001333749,
-      "fraction_of_own_area_in_joint": 0.006754311944293681
+      "area_in_joint_km2": 619.1169086086977,
+      "fraction_of_own_area_in_joint": 0.007018812810563457
     },
     {
       "label": "TAMBO",
-      "dir": "/home/mbustamante/Research/GRAND/oroscope/output/arequipa_full_tambo",
-      "pixels": 67853,
-      "area_km2": 991.5486015017813,
-      "reported_capacity": 47136,
+      "dir": "output/arequipa_full_tambo",
+      "pixels": 70956,
+      "area_km2": 1036.8933218599088,
+      "reported_capacity": 49271,
       "reported_sites": 85,
-      "area_in_joint_km2": 597.9424001333749,
-      "fraction_of_own_area_in_joint": 0.6030389223763135
+      "area_in_joint_km2": 619.1169086086977,
+      "fraction_of_own_area_in_joint": 0.5970883364338463
     }
   ],
   "pixel_area_km2": 0.014613187353569942,
@@ -27,19 +27,19 @@
     "TAMBO"
   ],
   "joint": {
-    "pixels": 40918,
-    "area_km2": 597.9424001333749
+    "pixels": 42367,
+    "area_km2": 619.1169086086977
   },
   "union": {
-    "pixels": 6084991,
-    "area_km2": 88921.11352778692
+    "pixels": 6064795,
+    "area_km2": 88625.98559599422
   },
   "pairwise_overlap": {
     "GRAND & TAMBO": {
-      "area_km2": 597.9424001333749,
-      "jaccard": 0.006724414218525549,
-      "fraction_of_GRAND": 0.006754311944293681,
-      "fraction_of_TAMBO": 0.6030389223763135
+      "area_km2": 619.1169086086977,
+      "jaccard": 0.006985726640389329,
+      "fraction_of_GRAND": 0.007018812810563457,
+      "fraction_of_TAMBO": 0.5970883364338463
     }
   },
   "membership_encoding": {

@@ -1,5 +1,5 @@
 {
-    "generated": "2026-08-16T22:22:14",
+    "generated": "2026-08-17T04:23:21",
     "generated_by": "tools/run_full_dem.py",
     "region": "cajatambo",
     "dem": "input/dem/cajatambo.tif",
@@ -8,6 +8,11 @@
         "tambo": "config/tambo_cajatambo.json"
     },
     "files": [
+        "combination_explanation.txt",
+        "combined_report.json",
+        "grand_explanation.txt",
+        "grand_provenance.json",
+        "grand_results.json",
         "tambo_explanation.txt",
         "tambo_provenance.json",
         "tambo_results.json"

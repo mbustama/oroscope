@@ -694,7 +694,7 @@ option below exists and that every option that exists appears below.
    * - ``--gap_close_km``
      - float
      - ``—``
-     - Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.
+     - Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.35x at Colca), so this is worth setting deliberately; 0 disables it.
    * - ``--min_target_slope_deg``
      - float
      - ``—``

@@ -3790,6 +3790,156 @@ fall into eight groups:
 holding position: the mechanisms it describes are unchanged and still worth reading, and
 the figures are indicative until the re-run lands.
 
+### 6.69 The re-run, and the constant that had to be measured before it
+
+The re-run of §6.68. Six regions, both experiments and the combine, on the audited code.
+
+**The order was wrong as planned, and the reason is worth recording.**
+`AREA_INFLATION_AT_COLCA` is quoted in the *prose of every run's* `explanation.txt`,
+which `run_full_dem.py` copies into the store and the region notebooks print verbatim.
+Recomputing it *after* the six runs — the obvious order, since it is derived from a
+Colca run — leaves all six stored explanations carrying the superseded figure. The
+constant feeds no computation, only prose, so there is no circularity in settling it
+first: Colca's measured funnel is the same either way. So Colca ran, the constant was
+re-measured from it, and only then did the sweep start. Caught after three regions had
+already been launched; they were stopped and re-run rather than stored stale.
+
+**The measurement.** `config/grand_colca_stride1.json` is the diagnostic that produced
+the original 2.29×, and it still exists, so the re-measurement has the same provenance
+rather than a new one:
+
+| | closed / accepted | ratio |
+| --- | --- | --- |
+| stride-1 control, post-audit | 5,278,338 / 2,250,827 | **2.35×** |
+| stride-1 control, pre-audit | — | 2.29× |
+| production config, stride 5, corrected | — | 2.25× (was 2.19×) |
+
+Two runs that sample the terrain differently agree to 4%, which is the cross-check that
+makes the number worth quoting. The constant is **2.35**.
+
+**TAMBO's Colca closing moved much further: 0.53× → 0.97×.** That is §6.62 and §6.64
+arriving together — the element is 150 m rather than 100 m, and `gap_close_km` defaults
+to the detector spacing. A 100 m element could not bridge the gaps stride 5 leaves, so
+the mask *understated* the accepted set by half; at 150 m it very nearly breaks even.
+The sign of that correction is the point: TAMBO's reported areas were a lower bound for
+a reason that has now largely gone away.
+
+**The test that pinned it was itself the defect.** `test_it_warns_that_reported_area_is_
+not_accepted_area` asserted the literal `"2.29"` — a copy of a measurement kept in a
+second place. Re-measuring the control would have failed that test for exactly the right
+reason, and the cheap fix is to paste the new number in beside the old mistake. It now
+asserts against `explain.AREA_INFLATION_AT_COLCA`, so the constant is the only place the
+figure lives.
+
+Five further literals in `src/` carried 2.29 and are now 2.35, one of them the
+`--gap_close_km` help text — which is what generates `cli.rst`, so that page is fixed at
+the source rather than edited.
+
+### 6.70 What the six regions now say
+
+| region | sampling | GRAND sites / capacity / km² | TAMBO sites / capacity / km² | joint km² | share of TAMBO |
+| --- | --- | --- | --- | --- | --- |
+| colca | 1 / 5 | 1 / 5,315 / 4,569.4 | 16 / 10,437 / 203.0 | 123.3 | 60.7% |
+| huaylas | 1 / 1 | 1 / 9,559 / 8,249.5 | 32 / 14,925 / 291.3 | 228.7 | **78.5%** |
+| cajatambo | 1 / 1 | 1 / 6,457 / 5,573.8 | 44 / 39,658 / 774.5 | 591.7 | **76.4%** |
+| ancash | 4 / 5 | 1 / 49,059 / 42,791.9 | 62 / 34,275 / 740.0 | 411.1 | 55.6% |
+| lima | 4 / 5 | 1 / 58,669 / 51,209.0 | 84 / 42,549 / 915.4 | 509.8 | 55.7% |
+| arequipa | 4 / 5 | 1 / 101,584 / 88,208.2 | 85 / 49,271 / 1,036.9 | 619.1 | 59.7% |
+
+GRAND barely moved. TAMBO moved everywhere, and Arequipa's department area moved by 9.3×
+(111.9 → 1,036.9 km²). **The joint share splits cleanly in two rows**: 55.6 / 55.7 /
+59.7% strided, 76.4 / 78.5% unbiased. The talk's "~73–81% from the unbiased crops" holds.
+
+**`solid_angle` is the weakest component at every selected site in every region** —
+16/16, 62/62, 84/84, 85/85. That was "15 of 15" from one crop; it is now a property of
+the criterion at national scale, not an observation about Colca.
+
+**One published conclusion did not survive.** `physics.rst` said the joint "barely moved
+with scale" — Colca 50.1 km², the whole Arequipa DEM 50.2. At 150 m it is 123.3 against
+619.1, five times rather than equal. The old invariance was an artefact of a closing
+element too small to reconnect what striding cut apart. Rewritten rather than renumbered.
+
+### 6.71 The striding penalties, re-measured at 150 m
+
+Open item 8 from the previous handover. Both were measured at 100 m and both collapse:
+
+| | 100 m | 150 m |
+| --- | --- | --- |
+| Colca, stride alone (§6.34) | 4.75× | **1.51×** |
+| Huaylas, both levers (§6.49) | 291× | **23.0×** |
+| Huaylas TAMBO sites | 109× | 16.0× |
+| Huaylas TAMBO capacity | 386× | 26.8× |
+| Huaylas GRAND area | 1.1× | 1.11× |
+
+The mechanism is the cliff in `figures.striding_and_closing`: a 3-pixel element recovers
+0.04× of the accepted set and a 5-pixel one recovers 0.68×, seventeen times more for two
+pixels. At 30.7 m/px, 100 m is three pixels against a five-pixel gap and 150 m is five.
+The spacing change moved TAMBO from the wrong side of that cliff to the right one. It is
+also why Colca's closing factor went 0.53× → 0.97×.
+
+**§6.49's "acceptance is identical at 14.0%" cannot be quoted as it stood.** That was
+991,099/7,081,749, and 991,099 sat under the label `directions accepted` while actually
+being the post-cut count — the §6.53 defect. Separated, striding is unbiased at *both*
+stages independently: geometry 81.640% against 81.612%, score cut 8.59% against 8.60%.
+The claim survives; the number that demonstrated it was measuring two things at once.
+
+Colca's TAMBO pair moves the same way, 17.491/17.494% → 75.750/75.736%. All of the loss
+is downstream: 2,928 labelled regions of which 2 clear the size threshold at 4/5, against
+6,408 of which 32 do at 1/1.
+
+The sensitivity table now runs on **one** baseline. It had quoted 9717 on one row and
+2056 on the other two — three rows, two runs, which a column makes invisible.
+`min_score` 0.35 is `score_percentile` **17.8** (was 22.8), the median candidate score is
+**0.13**, and area runs 6.7 → 525.0 km² across percentiles 5 → 40 with no knee.
+
+### 6.72 The Arequipa cap, and why RSS is the wrong number to size it from
+
+`--max-memory-gb` is `RLIMIT_AS` and bounds **address space**; `estimate_peak_memory_gb`
+estimates **anonymous memory**. The docs recorded 5.68 GiB peak RSS and left the virtual
+column blank, and a blank there invites exactly one mistake. Sized from the RSS figure:
+
+| cap | outcome |
+| --- | --- |
+| 6.5 GiB | died at `[5/6] Final Analysis`, `np.searchsorted` refusing **69 MiB**, after a 25-minute ray trace |
+| 7.5 GiB | GRAND completed; **TAMBO's map** died of `std::bad_alloc` in the AGG backend |
+| 8.0 GiB | completed. Measured **VmHWM 6.59 GiB, VmPeak 7.80 GiB** |
+
+The 7.5 GiB outcome is the dangerous one: the search results were correct and stored, and
+only the *map* failed — leaving a PNG from the previous day beside fresh numbers, in a
+directory whose every other file was current. It exits 0. `implementation.rst`'s table
+now carries both columns for Arequipa, and the 1.2 GiB between them is the point.
+
+The estimator is left uncalibrated at 5.08 GiB against a 6.59 GiB truth. Re-fitting
+`n_scoring_arrays` to chase one region is how the pre-flight came to be sized against the
+cheaper of two configurations in the first place (§6.55); the honest fix is the second
+column, not a new constant.
+
+### 6.73 Two zombie stores, and a manifest that hid them
+
+**`results/huaylas_full/` held three committed files no run produces** —
+`{grand,tambo}_control_ds4_stride5.json` and `tambo_control_explanation.txt` — stale at
+100 m, and the source of the 291× table hardcoded in `compare_regions.py`. Nothing named
+them, so nothing marked them.
+
+**`results/arequipa_full/manifest.json` listed three files while the store held nine.**
+The `grand_*` artefacts were four hours and one invocation older than the `tambo_*` ones,
+and the manifest named only the later set: a reader following its own "Read this first"
+would conclude GRAND had never run. Cause: `--only` writes a manifest of what *that*
+invocation stored, so a partial re-run silently narrows the record.
+
+`write_manifest` now separates `files` (what the store holds) from `written_by_this_run`,
+and dates everything else under `also_present`, printing it at the end of a run. Four
+tests, and both failure modes are covered. `tests/test_tools.py` also gained `colca` to
+its `STORES` tuple — the store created by this re-run was not checked by anything.
+
+Not fixed, deliberately: `output/arequipa_full/` is a dead directory holding two orphan
+`buffer_*.npy` from a killed run under the superseded `run_arequipa_full.py` naming. It
+is gitignored, sparse, and 20K on disk. Noted rather than deleted.
+
+**`make_notebooks.py` tracks code, not data.** It reported notebook 11 unchanged — its
+source is — while the five stores it reads had all been replaced. Anything reading a
+store must be re-executed whether or not the generator rewrote it.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

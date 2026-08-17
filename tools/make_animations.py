@@ -564,6 +564,17 @@ def product_collapse():
         active = names[: k + 1]
         w = {nm: 1.0 for nm in active}
         w[active[-1]] = t / (hold - 1) if k or hold > 1 else 1.0
+        # The very first frame has the only active component at weight 0, which under a
+        # product is the empty product -- 1 everywhere, the state before any criterion
+        # has been applied, and exactly what this animation opens on.
+        #
+        # `compose` refuses an all-zero weighting, and should: for a real search it
+        # means every criterion was switched off, which 6.54 added the guard to catch.
+        # So the empty product is spelled out here, where it is meaningful, rather than
+        # by loosening a guard elsewhere. This is the frame the guard broke -- silently,
+        # because CI cannot execute notebook 07 without an ffmpeg the runner lacks.
+        if not any(v > 0 for v in w.values()):
+            return k, active, np.ones(n)
         return k, active, scoring.compose({nm: parts[nm] for nm in active}, "product", w)
 
     # Where each component leaves the population. Kept as a running tally because the

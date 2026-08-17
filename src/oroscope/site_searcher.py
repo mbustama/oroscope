@@ -1631,7 +1631,7 @@ def clean_shape_artifacts(path_A, path_B, rows, cols, cell_size_y, cell_size_x, 
     # Gap closing is its own criterion, not a consequence of detector spacing. It used
     # to be tied to antenna_spacing_km, which coupled two unrelated things and hid how
     # much of the reported area it creates: measured at Colca, closing with a 1 km
-    # element more than doubles the accepted area (2.29x, §6.17). 0 disables it.
+    # element more than doubles the accepted area (2.35x, §6.17 and §6.69). 0 disables it.
     close_km = antenna_spacing_km if gap_close_km is None else gap_close_km
     close_r = max(1, int(close_km * 1000 / cell_size_y))
     close_c = max(1, int(close_km * 1000 / cell_size_x))
@@ -2344,7 +2344,7 @@ separate code paths: adding an experiment means writing a JSON file.
 {C.BOLD}Two things worth knowing before reading the numbers:{C.RESET}
 - The funnel is the diagnostic. When a search returns little or nothing, the stage
   where the survivor count collapses IS the constraint responsible.
-- Reported area is not physics-accepted area. Morphological closing inflated it 2.29x
+- Reported area is not physics-accepted area. Morphological closing inflated it 2.35x
   at Colca, measured against a stride-1 control. The run summary reports the factor
   for the run in front of you.
 
@@ -2559,6 +2559,16 @@ def estimate_peak_memory_gb(rows, cols, downsample_factor=1, candidate_stride=5,
     own cap 23 minutes in. ``n_scoring_arrays`` is calibrated on that run -- 15.1M
     candidates, 7 components -- where the anonymous share of the peak implies ~36
     live per-candidate arrays against the 12 this modelled.
+
+    **Re-measured after the audit, the same run peaks at 6.59 GiB resident and 7.80 GiB
+    virtual**, against an estimate of 5.08. So this remains optimistic by ~1.5 GiB on
+    the run it was calibrated against, and the calibration above is left as it was
+    rather than quietly re-fitted: ``n_scoring_arrays`` moves the pre-flight for every
+    region, and changing it to chase one number is how the estimate came to be sized
+    against the cheaper of two configurations in the first place. What matters for a
+    caller is the *other* column -- what this function estimates is anonymous memory,
+    and what ``--max-memory-gb`` caps is address space, 1.2 GiB larger here. Do not set
+    one from the other.
 
     Note also which knob moves it. ``downsample_factor`` scales only the labelling and
     gradient terms, because candidates are taken on the *native* grid; at full-DEM
@@ -5071,7 +5081,7 @@ def main():
     parser.add_argument("--decay_energy_max_pev", type=float, default=None, help="Upper end of that range, in PeV.")
     parser.add_argument("--decay_spectral_index", type=float, nargs="+", default=None, metavar="GAMMA", help="Spectral index gamma in dN/dE ~ E^-gamma for the folded decay term (default: 2.0). Give one value to pin the spectrum, or two to marginalise uniformly over that range when the index is not known -- a flat prior says so rather than pretending to a value. A softer spectrum weights low energies, where the tau decays readily, so it drives the term toward 1.")
     parser.add_argument("--shower_development_m", type=float, default=3000.0, help="Path the shower needs after the tau decays, in metres (default: 3000). Used both by the decay term and as the far endpoint of the Fresnel clearance measurement.")
-    parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.29x at Colca), so this is worth setting deliberately; 0 disables it.")
+    parser.add_argument("--gap_close_km", type=float, default=None, help="Size of the morphological closing element that fills gaps between accepted pixels, in km. Defaults to antenna_spacing_km, which couples two unrelated things. Closing more than doubles the reported area on real terrain (measured 2.35x at Colca), so this is worth setting deliberately; 0 disables it.")
     parser.add_argument("--min_target_slope_deg", type=float, default=None, help="Require the terrain a ray strikes to be at least this steep, measured along the arrival azimuth. Unset by default, which asks only that rock is present -- true almost everywhere in the Andes. TAMBO's tau exits a canyon *wall*, so this is what separates a canyon from a hillside.")
     parser.add_argument("--max_target_slope_deg", type=float, default=None, help="Upper bound on the struck terrain's slope along the arrival azimuth. Unset by default. Note a ceiling does not empty the result: a flat valley floor passes any ceiling, so this removes walls rather than everything.")
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")

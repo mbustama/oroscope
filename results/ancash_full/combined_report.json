@@ -3,22 +3,22 @@
     {
       "label": "GRAND",
       "dir": "/home/mbustamante/Research/GRAND/oroscope/output/ancash_full_grand",
-      "pixels": 2873686,
-      "area_km2": 43091.167718561235,
-      "reported_capacity": 49447,
+      "pixels": 2853727,
+      "area_km2": 42791.88080395234,
+      "reported_capacity": 49059,
       "reported_sites": 1,
-      "area_in_joint_km2": 366.135006463514,
-      "fraction_of_own_area_in_joint": 0.00849675295073992
+      "area_in_joint_km2": 411.07527817466405,
+      "fraction_of_own_area_in_joint": 0.009606384913483316
     },
     {
       "label": "TAMBO",
       "dir": "/home/mbustamante/Research/GRAND/oroscope/output/ancash_full_tambo",
-      "pixels": 44883,
-      "area_km2": 673.0244295000163,
-      "reported_capacity": 31249,
-      "reported_sites": 58,
-      "area_in_joint_km2": 366.135006463514,
-      "fraction_of_own_area_in_joint": 0.5440144375375977
+      "pixels": 49347,
+      "area_km2": 739.9624918685762,
+      "reported_capacity": 34275,
+      "reported_sites": 62,
+      "area_in_joint_km2": 411.07527817466405,
+      "fraction_of_own_area_in_joint": 0.5555352908991428
     }
   ],
   "pixel_area_km2": 0.014995085656039398,
@@ -27,19 +27,19 @@
     "TAMBO"
   ],
   "joint": {
-    "pixels": 24417,
-    "area_km2": 366.135006463514
+    "pixels": 27414,
+    "area_km2": 411.07527817466405
   },
   "union": {
-    "pixels": 2894152,
-    "area_km2": 43398.05714159774
+    "pixels": 2875660,
+    "area_km2": 43120.76801764625
   },
   "pairwise_overlap": {
     "GRAND & TAMBO": {
-      "area_km2": 366.135006463514,
-      "jaccard": 0.008436668150117893,
-      "fraction_of_GRAND": 0.00849675295073992,
-      "fraction_of_TAMBO": 0.5440144375375977
+      "area_km2": 411.07527817466405,
+      "jaccard": 0.009533115876007595,
+      "fraction_of_GRAND": 0.009606384913483316,
+      "fraction_of_TAMBO": 0.5555352908991428
     }
   },
   "membership_encoding": {

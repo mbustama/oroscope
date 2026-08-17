@@ -94,12 +94,21 @@ Two calibration points, both measured rather than assumed:
      - Peak virtual
    * - Arequipa, 129 Mpx, ``4 / 5``
      - 5.08 GiB
-     - 5.68 GiB
-     - —
+     - **6.59 GiB**
+     - **7.80 GiB**
    * - Huaylas crop, 11.4 Mpx, ``1 / 1``
      - 3.27 GiB
      - **5.31 GiB**
      - **6.51 GiB**
+
+Arequipa's pair was re-measured on the post-audit code, sampling ``VmHWM`` and ``VmPeak``
+from ``/proc`` once a second across the process tree. It had read 5.68 GiB RSS with the
+virtual column blank, and a blank there is the dangerous kind of gap: a cap sized from
+the RSS figure is sized from the wrong quantity. Three attempts settled it — a 6.5 GiB
+cap died in the final analysis refusing 69 MiB, a 7.5 GiB cap carried GRAND but lost
+TAMBO's map to ``std::bad_alloc`` in the AGG backend, and 8.0 GiB completed. **The gap
+between the two columns is 1.2 GiB, and that gap is the whole reason the estimate must
+not be used to set the cap.**
 
 The estimator is calibrated on a *strided* run and is roughly **2× optimistic at
 candidate_stride 1**. Treat it as a lower bound and size a cap from measurement when the
@@ -158,7 +167,7 @@ expensive.
   readers still accept the old prefix, so older runs load.
 - **Funnel rows read by position.** A run with :term:`RFI zones` carries an extra stage,
   so index 4 means different things in two regions. Reading positionally made GRAND's
-  acceptance at Arequipa look like 20% when it is 61.6%. Read by **name**.
+  acceptance at Arequipa look like 20% when it is 60.1%. Read by **name**.
 
 
 Conventions worth keeping

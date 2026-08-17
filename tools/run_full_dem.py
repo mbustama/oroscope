@@ -285,7 +285,27 @@ def write_manifest(paths, region, kept):
 
     Without this a stale store is indistinguishable from a current one, and the whole
     point of storing rather than recomputing is that nobody looks again.
+
+    ``files`` is everything the store *holds*, not everything this invocation *wrote*.
+    Those differ, and the difference is where stale data hides. Two ways it happened:
+
+    * ``--only tambo`` wrote a manifest naming three ``tambo_*`` files while the store
+      held nine, so the next reader of ``results/arequipa_full/`` was told GRAND had
+      never been run. A partial re-run silently *narrowed* the record.
+    * ``results/huaylas_full/`` carries three ``*_control_*`` files that no run of this
+      tool produces. They are committed, they were four months stale, and because no
+      manifest ever named them nothing marked them so.
+
+    So the two are now separate keys, and anything present but unwritten is listed under
+    ``also_present`` with its age. A file that is *supposed* to sit there permanently --
+    a README, a hand-made control -- shows up in that list as a matter of course; the
+    point is not that it is wrong, but that it is visible and dated.
     """
+    store = paths["store"]
+    written = sorted(set(kept))
+    present = sorted(f for f in os.listdir(store) if f != "manifest.json")
+    strays = [f for f in present if f not in written]
+
     manifest = {
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "generated_by": "tools/run_full_dem.py",
@@ -293,16 +313,28 @@ def write_manifest(paths, region, kept):
         "dem": os.path.relpath(paths["dem"], REPO),
         "configs": {k: os.path.relpath(v, REPO)
                     for k, v in paths["configs"].items()},
-        "files": sorted(kept),
+        "files": present,
+        "written_by_this_run": written,
+        "also_present": {
+            name: time.strftime("%Y-%m-%dT%H:%M:%S",
+                                time.localtime(os.path.getmtime(
+                                    os.path.join(store, name))))
+            for name in strays
+        },
         "note": ("Regenerate when a configuration changes. Notebook 8 reads these and "
                  "does not run the searches itself: grand takes about 25 minutes, "
                  "tambo about 1 (its targets are 2-5 km away against grand's 10-40, "
-                 "so the profile walks are far shorter)."),
+                 "so the profile walks are far shorter). `also_present` is what this "
+                 "run did not write: check its dates before quoting it."),
     }
-    path = os.path.join(paths["store"], "manifest.json")
+    path = os.path.join(store, "manifest.json")
     with open(path, "w") as f:
         json.dump(manifest, f, indent=4)
     print(f"\nmanifest: {os.path.relpath(path, REPO)}")
+    if strays:
+        print(f"  {len(strays)} file(s) in the store this run did not write:")
+        for name in strays:
+            print(f"      {manifest['also_present'][name]}  {name}")
 
 
 def main():

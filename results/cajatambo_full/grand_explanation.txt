@@ -8,20 +8,20 @@ THE RUN
   Origin           -10.299861, -77.600139  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 30.4 m E-W
   Layout           distributed search, hex grid, 1.0 km spacing
-  Finished         2026-08-16 18:33:52
-  Code             commit da54705 on dev (dirty tree)
+  Finished         2026-08-17 04:21:52
+  Code             commit 8c73445 on dev (dirty tree)
   DEM checksum     sha256 e42ee5e18d480581…
   Command          tools/run_full_dem.py --region cajatambo --max-memory-gb 6.0
 
 THE HEADLINE
 ------------
-  1 site covering 5,541.1 km², 6,424 detectors against a target of 10,000.
+  1 site covering 5,573.8 km², 6,457 detectors against a target of 10,000.
 
-  Largest by capacity: site 3, 5,541.13 km², 6,424 detectors, facing S,
-  centred -10.7062, -77.1921 — paste that into a map.
+  Largest by capacity: site 1, 5,573.84 km², 6,457 detectors, facing S,
+  centred -10.7049, -77.1941 — paste that into a map.
 
   The target of 10,000 was not reached. The funnel below says why; the
-  shortfall is 3,576 detectors, 36% of the target.
+  shortfall is 3,543 detectors, 35% of the target.
 
 WHERE THE CANDIDATES WENT
 -------------------------
@@ -31,12 +31,12 @@ WHERE THE CANDIDATES WENT
   finite elevation                |      8,300,161 | 100.000% | 100.000%
   slope 3.0-25.0 deg              |      3,570,931 |  43.022% |  43.022%
   kept by stride 1                |      3,570,931 |  43.022% | 100.000%
-  directions accepted             |      1,522,498 |  18.343% |  42.636%
-  after gap closing               |      6,254,519 |  75.354% | 410.806%
-  after pruning (< 2.0 km wide)   |      6,089,573 |  73.367% |  97.363%
-  pixels in selected sites (est.) |      5,935,984 |  71.516% |  97.478%
+  directions accepted             |      1,476,561 |  17.790% |  41.349%
+  after gap closing               |      6,225,981 |  75.010% | 421.654%
+  after pruning (< 2.0 km wide)   |      6,078,600 |  73.235% |  97.633%
+  pixels in selected sites (est.) |      5,971,023 |  71.939% |  98.230%
 
-  The binding constraint is “directions accepted”. It kept 42.6% of the
+  The binding constraint is “directions accepted”. It kept 41.3% of the
   3,570,931 pixels that reached it, a larger cut than any other stage made —
   so it, not the stages around it, is what set the size of this result.
 
@@ -58,7 +58,7 @@ THE SITES
 ---------
       id |  area km² |  capacity | facing |  score | weakest component
   --------------------------------------------------------------------
-       3 |   5541.13 |     6,424 |      S |  0.122 | solid_angle (0.46)
+       1 |   5573.84 |     6,457 |      S |  0.124 | solid_angle (0.46)
 
   “solid_angle” is the weakest component at 1 of 1 sites (100%). Under a
   product composition the weakest component bounds the total from above, so
@@ -70,14 +70,14 @@ WHY THESE SITES QUALIFY
   named criteria, so a site can be described rather than merely ranked —
   these are the criteria it satisfies, with the measurement that earned each.
 
-  Site 3 — 5,541.13 km², 6,424 detectors, facing S, centred -10.7062, -77.1921
-      Measured: 0.04 sr of accepted sky, targets at 15,066 m, striking 26°
-      terrain, 3,345,396 g/cm² of rock behind, at 3,636 m altitude.
+  Site 1 — 5,573.84 km², 6,457 detectors, facing S, centred -10.7049, -77.1941
+      Measured: 0.01 sr of accepted sky, targets at 15,010 m, striking 26°
+      terrain, 3,328,005 g/cm² of rock behind, at 3,624 m altitude.
       Satisfies 4 of 7 criteria:
-        • Fresnel clearance (1.64 F1) — 1.00
-        • column depth (3,345,396 g/cm²) — 1.00
-        • exit distance (15,066 m) — 1.00
-        • shower development (1,313 g/cm²) — 1.00
+        • Fresnel clearance (1.65 F1) — 1.00
+        • column depth (3,328,005 g/cm²) — 1.00
+        • exit distance (15,010 m) — 1.00
+        • shower development (1,310 g/cm²) — 1.00
       Held back by accepted sky at 0.46, which under a product composition is
       what bounds the total.
 
@@ -90,17 +90,17 @@ WHAT ENERGY THIS GEOMETRY FAVOURS
 ---------------------------------
   Folding each site's accepted solid angle and area against the tau decay
   length gives a geometric aperture that peaks near 398 PeV (analytically 443
-  PeV), at 1.11e+08 m² sr.
+  PeV), at 3.73e+07 m² sr.
 
-           1 PeV    5.07e-81  
-           4 PeV    1.26e-14  
-          16 PeV         601  
-          63 PeV    9.29e+06  ###
-         251 PeV    9.56e+07  ##################################
-       1,000 PeV    8.82e+07  ################################
-       3,981 PeV     3.2e+07  ############
-      15,849 PeV    8.84e+06  ###
-      63,096 PeV    2.27e+06  #
+           1 PeV     1.7e-81  
+           4 PeV    4.23e-15  
+          16 PeV         201  
+          63 PeV    3.12e+06  ###
+         251 PeV    3.21e+07  ##################################
+       1,000 PeV    2.96e+07  ################################
+       3,981 PeV    1.07e+07  ############
+      15,849 PeV    2.96e+06  ###
+      63,096 PeV    7.63e+05  #
 
   Relative, not absolute: this is geometry and an analytic decay factor, with
   no flux, no cross-section and no detector response. The detector acceptance
@@ -113,10 +113,10 @@ HOW TO READ THESE NUMBERS
   morphologically with a 1.0 km element before areas are measured. Closing is
   not wrong — a site has to be a deployable region rather than a scatter of
   pixels — but it moves the number, and at Colca with a 1 km element it
-  inflated the reported area by 2.29× against a stride-1 control. Set
+  inflated the reported area by 2.35× against a stride-1 control. Set
   gap_close_km to 0 to see the accepted area directly.
 
-  This run's own funnel puts that factor at 4.11×: closing turned the
+  This run's own funnel puts that factor at 4.22×: closing turned the
   stride-corrected accepted set into a mask that much larger. Divide the
   areas above by it for what the physics accepted.
 

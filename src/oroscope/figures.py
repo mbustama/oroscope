@@ -387,13 +387,13 @@ def pipeline_stages(figsize=(9.2, 5.4)):
     closing. Confusing those two halves is the single commonest way to misread a funnel
     table.
 
-    The arrival scan and the scoring share one bar because that run cannot separate
-    them. Its funnel recorded the post-cut count under both names --- the defect fixed
-    in :func:`~oroscope.site_searcher.run_arrival_scan` --- so drawing them as two
-    stages showed a scoring bar exactly as wide as the one above it, which asserts that
-    the ``min_score`` cut removed nothing. It removed a great deal. A run made after the
-    fix records the two counts separately and can be drawn as separate stages; this one
-    is quoted as stored rather than re-run, so it is drawn as what it actually measured.
+    The arrival scan and the scoring are **two** bars, which they could not be before.
+    The pre-fix funnel recorded the post-cut count under both names --- the defect fixed
+    in :func:`~oroscope.site_searcher.run_arrival_scan` --- so the two were drawn merged,
+    as a single bar reading 1,022,530, and the arrival window carried the blame for a cut
+    it had not made. Separated on a post-fix run, the scan keeps **82%** of what striding
+    hands it and ``min_score`` takes **8.4x**. That is the reverse of what the merged bar
+    implied, and it is the whole reason the stage is worth drawing on its own.
 
     Parameters
     ----------
@@ -417,16 +417,22 @@ def pipeline_stages(figsize=(9.2, 5.4)):
                                      "and not so steep it cannot be built."),
         ("Striding", 6_788_807, "One surviving pixel in N is kept as a candidate.\n"
                                 "Cost control, not a criterion."),
-        ("Arrival scan\n+ scoring", 1_022_530,
-         "Walk outward along several bearings: is there a\n"
-         "target at the right range? Score what there is on\n"
-         "named components in [0, 1], and cut at min_score."),
-        ("Closing", 2_543_406, "Morphology fills the holes striding left.\n"
+        ("Arrival scan", 5_540_555, "Walk outward along several bearings: is there a\n"
+                                    "target at the right range and elevation?\n"
+                                    "Geometry alone, and it keeps 82%."),
+        ("Scoring", 663_209, "Score what the scan found on named components\n"
+                             "in [0, 1], and cut at min_score. An 8.4x cut —\n"
+                             "the one the arrival window used to be blamed for."),
+        ("Closing", 2_612_764, "Morphology fills the holes striding left.\n"
                                "The count RISES here."),
-        ("Pruning + selection", 186_704, "Regions too small or too poor in detectors\n"
+        ("Pruning + selection", 789_552, "Regions too small or too poor in detectors\n"
                                          "are dropped."),
     ]
-    colours = [MUTED, ROCK_EDGE, ROCK_EDGE, WINDOW, DETECTOR, DETECTOR]
+    # Scoring gets its own colour rather than sharing the arrival scan's. It is neither
+    # a property of the ground (ROCK_EDGE) nor of the view (WINDOW) but a cut on the
+    # criteria, and it is the stage that actually binds -- drawing it in the window
+    # colour is what let the two be conflated in the first place.
+    colours = [MUTED, ROCK_EDGE, ROCK_EDGE, WINDOW, SEQUENCE[2], DETECTOR, DETECTOR]
 
     with _styled():
         fig, ax = plt.subplots(figsize=figsize)
@@ -447,17 +453,17 @@ def pipeline_stages(figsize=(9.2, 5.4)):
 
         # Which half of the pipeline each stage belongs to.
         bracket = centre - span - 0.78
-        ax.plot([bracket, bracket], [-0.35, -3.35], color=ROCK_EDGE, lw=2.0, alpha=0.6)
-        ax.text(bracket - 0.05, -1.85, "Removes\ncandidates", ha="right", va="center",
+        ax.plot([bracket, bracket], [-0.35, -4.35], color=ROCK_EDGE, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -2.35, "Removes\ncandidates", ha="right", va="center",
                 fontsize=9, color=ROCK_EDGE, weight="bold", linespacing=1.35)
-        ax.plot([bracket, bracket], [-3.65, -5.35], color=DETECTOR, lw=2.0, alpha=0.6)
-        ax.text(bracket - 0.05, -4.5, "Rebuilds\na map", ha="right", va="center",
+        ax.plot([bracket, bracket], [-4.65, -6.35], color=DETECTOR, lw=2.0, alpha=0.6)
+        ax.text(bracket - 0.05, -5.5, "Rebuilds\na map", ha="right", va="center",
                 fontsize=9, color=DETECTOR, weight="bold", linespacing=1.35)
 
         ax.set_xlim(bracket - 0.95, centre + span + 2.05)
-        ax.set_ylim(-6.0, 0.55)
+        ax.set_ylim(-7.0, 0.55)
         ax.axis("off")
-        ax.text(centre, -5.85, "TAMBO over the full Ancash DEM. Bar widths are "
+        ax.text(centre, -6.85, "TAMBO over the full Ancash DEM. Bar widths are "
                                "logarithmic in the survivor count.",
                 ha="center", va="center", fontsize=8.5, color=MUTED)
         fig.tight_layout()

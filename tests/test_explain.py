@@ -298,7 +298,7 @@ class TestExplainCombination(unittest.TestCase):
 class TestClosingInflation(unittest.TestCase):
     """
     The gap between accepted pixels and reported area, measured from the run rather
-    than quoted from Colca. On the GRAND Colca config it gives 2.19x against the 2.29x
+    than quoted from Colca. On the GRAND Colca config it gives 2.25x against the 2.35x
     a stride-1 control measured, which is the cross-check that makes it worth printing.
     """
 
@@ -393,9 +393,15 @@ class TestExplainText(unittest.TestCase):
     def test_it_warns_that_reported_area_is_not_accepted_area(self):
         """
         The error a reader makes unaided, and the reason the warning defaults to on:
-        morphological closing inflated the reported area 2.29x at Colca.
+        morphological closing inflated the reported area 2.35x at Colca.
+
+        Asserted against the constant rather than a literal. The literal was "2.29"
+        here, which is a copy of a measurement kept in a second place: re-measuring the
+        control moves the constant and leaves this test asserting the old value still
+        appears, so the one test guarding the warning would have failed for the right
+        reason and been "fixed" by pasting the new number in beside the old mistake.
         """
-        self.assertIn("2.29", self.text)
+        self.assertIn(f"{explain.AREA_INFLATION_AT_COLCA:.2f}", self.text)
 
     def test_it_attributes_the_sites_to_a_component(self):
         self.assertIn("shower", self.text)

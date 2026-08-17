@@ -8,17 +8,17 @@ THE RUN
   Origin           -14.555139, -73.586250  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 29.7 m E-W
   Layout           distributed search, hex grid, 1.0 km spacing
-  Finished         2026-08-16 07:46:53
-  Code             commit ea5fd94 on dev (clean tree)
+  Finished         2026-08-17 05:48:01
+  Code             commit 8c73445 on dev (dirty tree)
   DEM checksum     sha256 f2831c9f69e54d21…
-  Command          tools/run_arequipa_full.py --max-memory-gb 7.0
+  Command          tools/run_full_dem.py --region arequipa --max-memory-gb 7.5
 
 THE HEADLINE
 ------------
-  1 site covering 88,527.5 km², 101,948 detectors against a target of 10,000.
+  1 site covering 88,208.2 km², 101,584 detectors against a target of 10,000.
 
-  Largest by capacity: site 1, 88,527.51 km², 101,948 detectors, facing S,
-  centred -15.7886, -71.6611 — paste that into a map.
+  Largest by capacity: site 1, 88,208.21 km², 101,584 detectors, facing S,
+  centred -15.7895, -71.6598 — paste that into a map.
 
 WHERE THE CANDIDATES WENT
 -------------------------
@@ -29,12 +29,12 @@ WHERE THE CANDIDATES WENT
   slope 3.0-25.0 deg              |     78,071,872 |  60.709% |  62.138%
   outside RFI zones               |     75,691,703 |  58.858% |  96.951%
   kept by stride 5                |     15,138,353 |  11.772% |  20.000%
-  directions accepted             |      9,330,944 |   7.256% |  61.638%
-  after gap closing               |     97,901,698 |  76.128% | 1049.215%
-  after pruning (< 2.0 km wide)   |     97,192,770 |  75.577% |  99.276%
-  pixels in selected sites (est.) |     96,928,896 |  75.372% |  99.729%
+  directions accepted             |      9,096,472 |   7.073% |  60.089%
+  after gap closing               |     97,581,833 |  75.880% | 1072.744%
+  after pruning (< 2.0 km wide)   |     96,869,397 |  75.326% |  99.270%
+  pixels in selected sites (est.) |     96,579,296 |  75.100% |  99.701%
 
-  The binding constraint is “directions accepted”. It kept 61.6% of the
+  The binding constraint is “directions accepted”. It kept 60.1% of the
   15,138,353 pixels that reached it, a larger cut than any other stage made —
   so it, not the stages around it, is what set the size of this result.
 
@@ -49,14 +49,14 @@ WHERE THE CANDIDATES WENT
 
 FROM PIXELS TO SITES
 --------------------
-  48 connected regions were labelled. 1 were large enough (at least 34,215
+  53 connected regions were labelled. 1 were large enough (at least 34,215
   pixels), 1 then held enough detectors (at least 500), and 1 were selected.
 
 THE SITES
 ---------
       id |  area km² |  capacity | facing |  score | weakest component
   --------------------------------------------------------------------
-       1 |  88527.51 |   101,948 |      S |  0.128 | solid_angle (0.42)
+       1 |  88208.21 |   101,584 |      S |  0.131 | solid_angle (0.42)
 
   “solid_angle” is the weakest component at 1 of 1 sites (100%). Under a
   product composition the weakest component bounds the total from above, so
@@ -68,13 +68,13 @@ WHY THESE SITES QUALIFY
   named criteria, so a site can be described rather than merely ranked —
   these are the criteria it satisfies, with the measurement that earned each.
 
-  Site 1 — 88,527.51 km², 101,948 detectors, facing S, centred -15.7886, -71.6611
-      Measured: 0.04 sr of accepted sky, targets at 17,254 m, striking 15°
-      terrain, 4,735,830 g/cm² of rock behind, at 4,334 m altitude.
+  Site 1 — 88,208.21 km², 101,584 detectors, facing S, centred -15.7895, -71.6598
+      Measured: 0.01 sr of accepted sky, targets at 17,228 m, striking 15°
+      terrain, 4,734,748 g/cm² of rock behind, at 4,335 m altitude.
       Satisfies 4 of 7 criteria:
-        • column depth (4,735,830 g/cm²) — 1.00
-        • exit distance (17,254 m) — 1.00
-        • shower development (1,307 g/cm²) — 1.00
+        • column depth (4,734,748 g/cm²) — 1.00
+        • exit distance (17,228 m) — 1.00
+        • shower development (1,305 g/cm²) — 1.00
         • Fresnel clearance (0.82 F1) — 0.82
       Held back by accepted sky at 0.42, which under a product composition is
       what bounds the total.
@@ -88,17 +88,17 @@ WHAT ENERGY THIS GEOMETRY FAVOURS
 ---------------------------------
   Folding each site's accepted solid angle and area against the tau decay
   length gives a geometric aperture that peaks near 398 PeV (analytically 443
-  PeV), at 1.52e+09 m² sr.
+  PeV), at 5.05e+08 m² sr.
 
-           1 PeV    6.94e-80  
-           4 PeV    1.73e-13  
-          16 PeV    8.23e+03  
-          63 PeV    1.27e+08  ###
-         251 PeV    1.31e+09  ##################################
-       1,000 PeV    1.21e+09  ################################
-       3,981 PeV    4.38e+08  ############
-      15,849 PeV    1.21e+08  ###
-      63,096 PeV    3.12e+07  #
+           1 PeV    2.31e-80  
+           4 PeV    5.74e-14  
+          16 PeV    2.73e+03  
+          63 PeV    4.23e+07  ###
+         251 PeV    4.35e+08  ##################################
+       1,000 PeV    4.01e+08  ################################
+       3,981 PeV    1.46e+08  ############
+      15,849 PeV    4.02e+07  ###
+      63,096 PeV    1.03e+07  #
 
   Relative, not absolute: this is geometry and an analytic decay factor, with
   no flux, no cross-section and no detector response. The detector acceptance
@@ -111,10 +111,10 @@ HOW TO READ THESE NUMBERS
   morphologically with a 1.0 km element before areas are measured. Closing is
   not wrong — a site has to be a deployable region rather than a scatter of
   pixels — but it moves the number, and at Colca with a 1 km element it
-  inflated the reported area by 2.29× against a stride-1 control. Set
+  inflated the reported area by 2.35× against a stride-1 control. Set
   gap_close_km to 0 to see the accepted area directly.
 
-  This run's own funnel puts that factor at 2.10×: closing turned the
+  This run's own funnel puts that factor at 2.15×: closing turned the
   stride-corrected accepted set into a mask that much larger. Divide the
   areas above by it for what the physics accepted.
 

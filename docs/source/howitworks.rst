@@ -103,10 +103,14 @@ region reappears almost intact.
 recovers 0.04× of the accepted set and a 5-pixel one recovers 0.68× — seventeen times
 more, for two pixels of element.
 
-This is not a hypothetical. It is the mechanism behind a real **4.75× under-report** of
-TAMBO's area at Colca, and a **291× one** on the steeper ground of the Callejón de
+This is not a hypothetical. It is the mechanism behind a real **1.51× under-report** of
+TAMBO's area at Colca, and a **23.0× one** on the steeper ground of the Callejón de
 Huaylas, where the accepted strips are narrower still. GRAND never suffers it: its 1 km
 closing element bridges a 154 m stride gap without noticing.
+
+Both figures were far larger — 4.75× and 291× — when TAMBO's element was 100 m rather
+than the published 150 m. Two extra pixels of element is the whole difference, which is
+the point of the arithmetic above rather than a footnote to it.
 
 .. warning::
 

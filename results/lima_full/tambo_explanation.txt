@@ -8,18 +8,18 @@ THE RUN
   Origin           -10.228472, -78.076806  (auto-detected from the GeoTIFF tiepoint)
   Resolution       0.00027778°/px  =  30.7 m N-S x 30.3 m E-W
   Layout           distributed search, hex grid, 0.15 km spacing
-  Finished         2026-08-16 22:27:37
-  Code             commit 84d4d3e on dev (dirty tree)
+  Finished         2026-08-17 04:49:04
+  Code             commit 8c73445 on dev (dirty tree)
   DEM checksum     sha256 6c0950eee998af6b…
-  Command          tools/run_full_dem.py --region lima --only tambo
+  Command          tools/run_full_dem.py --region lima --max-memory-gb 6.0
 
 THE HEADLINE
 ------------
-  73 sites covering 842.7 km² between them, 39,115 detectors against a target
+  84 sites covering 915.4 km² between them, 42,549 detectors against a target
   of 5,000.
 
-  Largest by capacity: site 2015, 35.61 km², 1,707 detectors, facing S,
-  centred -10.5777, -77.2181 — paste that into a map.
+  Largest by capacity: site 2250, 36.10 km², 1,731 detectors, facing S,
+  centred -10.5783, -77.2178 — paste that into a map.
 
 WHERE THE CANDIDATES WENT
 -------------------------
@@ -29,13 +29,13 @@ WHERE THE CANDIDATES WENT
   finite elevation                |     99,412,660 |  94.752% |  94.752%
   slope 20.0-60.0 deg             |     36,385,517 |  34.680% |  36.600%
   kept by stride 5                |      7,277,115 |   6.936% |  20.000%
-  directions accepted             |      5,891,504 |   5.615% |  80.959%
-  score >= 0.35                   |        591,390 |   0.564% |  10.038%
-  after gap closing               |      2,391,809 |   2.280% | 404.439%
-  after pruning (< 0.0 km wide)   |      2,391,809 |   2.280% | 100.000%
-  pixels in selected sites (est.) |        905,984 |   0.864% |  37.879%
+  directions accepted             |      5,791,116 |   5.520% |  79.580%
+  score >= 0.35                   |        639,517 |   0.610% |  11.043%
+  after gap closing               |      2,576,744 |   2.456% | 402.920%
+  after pruning (< 0.0 km wide)   |      2,576,744 |   2.456% | 100.000%
+  pixels in selected sites (est.) |        984,144 |   0.938% |  38.193%
 
-  The binding constraint is “score >= 0.35”. It kept 10.0% of the 5,891,504
+  The binding constraint is “score >= 0.35”. It kept 11.0% of the 5,791,116
   pixels that reached it, a larger cut than any other stage made — so it, not
   the stages around it, is what set the size of this result.
 
@@ -49,8 +49,8 @@ WHERE THE CANDIDATES WENT
 
 FROM PIXELS TO SITES
 --------------------
-  11,789 connected regions were labelled. 74 were large enough (at least 377
-  pixels), 73 then held enough detectors (at least 250), and 73 were
+  12,907 connected regions were labelled. 84 were large enough (at least 377
+  pixels), 84 then held enough detectors (at least 250), and 84 were
   selected.
 
   Almost every region was too small. That is the signature of an accepted set
@@ -61,34 +61,34 @@ THE SITES
 ---------
       id |  area km² |  capacity | facing |  score | weakest component
   --------------------------------------------------------------------
-    2015 |     35.61 |     1,707 |      S |  0.462 | solid_angle (0.55)
-    1596 |     30.03 |     1,430 |      S |  0.481 | solid_angle (0.55)
-    2060 |     29.53 |     1,384 |      S |  0.470 | solid_angle (0.55)
-    1694 |     23.69 |     1,122 |      S |  0.490 | solid_angle (0.57)
-   10466 |     23.92 |     1,097 |      S |  0.459 | solid_angle (0.54)
-    5601 |     22.07 |     1,024 |     SW |  0.457 | solid_angle (0.55)
-    1956 |     21.80 |     1,017 |     SE |  0.478 | solid_angle (0.54)
-   10114 |     20.24 |       949 |     SW |  0.461 | solid_angle (0.53)
-   10771 |     19.66 |       919 |     SW |  0.478 | solid_angle (0.56)
-   10898 |     18.02 |       846 |      S |  0.456 | solid_angle (0.53)
-    9747 |     16.33 |       772 |     SE |  0.432 | solid_angle (0.53)
-   10724 |     16.00 |       759 |     SE |  0.474 | solid_angle (0.53)
-    1821 |     16.13 |       757 |      W |  0.453 | solid_angle (0.53)
-    3781 |     15.25 |       736 |     SW |  0.462 | solid_angle (0.55)
-   11519 |     15.63 |       719 |      W |  0.464 | solid_angle (0.57)
-   10844 |     15.13 |       688 |     SW |  0.456 | solid_angle (0.53)
-   10733 |     14.76 |       674 |      S |  0.463 | solid_angle (0.57)
-   10022 |     14.29 |       656 |     SW |  0.445 | solid_angle (0.53)
-    3738 |     13.29 |       628 |     SE |  0.475 | solid_angle (0.55)
-    9777 |     12.80 |       582 |      W |  0.453 | solid_angle (0.55)
-    8680 |     12.55 |       579 |      W |  0.432 | solid_angle (0.51)
-    2074 |     12.77 |       576 |     SW |  0.432 | solid_angle (0.51)
-   10343 |     11.38 |       554 |      W |  0.479 | solid_angle (0.55)
-     464 |     12.13 |       551 |     SE |  0.441 | solid_angle (0.57)
-    8915 |     12.23 |       550 |     SW |  0.424 | solid_angle (0.49)
-  … and 48 more, in the results JSON.
+    2250 |     36.10 |     1,731 |      S |  0.476 | solid_angle (0.57)
+    1784 |     30.73 |     1,483 |      S |  0.494 | solid_angle (0.57)
+    2301 |     29.76 |     1,396 |      S |  0.483 | solid_angle (0.56)
+    6018 |     25.36 |     1,160 |     SW |  0.463 | solid_angle (0.56)
+    1890 |     23.53 |     1,121 |      S |  0.502 | solid_angle (0.58)
+   11065 |     22.29 |     1,043 |      S |  0.470 | solid_angle (0.55)
+   11435 |     22.61 |     1,033 |      S |  0.477 | solid_angle (0.55)
+    2191 |     21.76 |     1,026 |     SE |  0.492 | solid_angle (0.56)
+   11764 |     19.85 |       943 |     SW |  0.493 | solid_angle (0.58)
+   11696 |     18.74 |       898 |     SE |  0.470 | solid_angle (0.54)
+    4095 |     19.14 |       897 |     SW |  0.465 | solid_angle (0.55)
+   11927 |     18.86 |       886 |      S |  0.467 | solid_angle (0.55)
+   10646 |     17.10 |       802 |     SE |  0.441 | solid_angle (0.54)
+    2016 |     16.44 |       767 |      W |  0.466 | solid_angle (0.55)
+   11856 |     15.30 |       705 |     SW |  0.473 | solid_angle (0.55)
+   10961 |     14.51 |       678 |     SW |  0.459 | solid_angle (0.54)
+   11705 |     14.84 |       667 |      S |  0.479 | solid_angle (0.59)
+    4081 |     13.47 |       624 |     SE |  0.485 | solid_angle (0.56)
+    2302 |     13.60 |       601 |     SW |  0.447 | solid_angle (0.53)
+    9756 |     12.17 |       550 |     SW |  0.440 | solid_angle (0.51)
+   10953 |     11.49 |       550 |     SE |  0.440 | solid_angle (0.53)
+    3297 |     10.97 |       535 |     SE |  0.471 | solid_angle (0.56)
+    3669 |     11.58 |       524 |     SW |  0.434 | solid_angle (0.52)
+   11303 |     10.51 |       517 |      W |  0.492 | solid_angle (0.55)
+   10682 |     10.94 |       512 |      W |  0.480 | solid_angle (0.58)
+  … and 59 more, in the results JSON.
 
-  “solid_angle” is the weakest component at 73 of 73 sites (100%). Under a
+  “solid_angle” is the weakest component at 84 of 84 sites (100%). Under a
   product composition the weakest component bounds the total from above, so
   that is where a better site would have to come from.
 
@@ -98,79 +98,79 @@ WHY THESE SITES QUALIFY
   named criteria, so a site can be described rather than merely ranked —
   these are the criteria it satisfies, with the measurement that earned each.
 
-  Site 2015 — 35.61 km², 1,707 detectors, facing S, centred -10.5777, -77.2181
-      Measured: 0.98 sr of accepted sky, targets at 3,194 m, striking 37°
-      terrain, 789,253 g/cm² of rock behind, at 2,486 m altitude.
+  Site 2250 — 36.10 km², 1,731 detectors, facing S, centred -10.5783, -77.2178
+      Measured: 0.35 sr of accepted sky, targets at 3,191 m, striking 37°
+      terrain, 792,155 g/cm² of rock behind, at 2,489 m altitude.
       Satisfies 5 of 6 criteria:
-        • column depth (789,253 g/cm²) — 1.00
-        • exit distance (3,194 m) — 1.00
-        • shower development (298 g/cm²) — 1.00
+        • column depth (792,155 g/cm²) — 1.00
+        • exit distance (3,191 m) — 1.00
+        • shower development (297 g/cm²) — 1.00
         • tau decay — 0.96
-        • footprint sampling (2,486 m) — 0.88
-      Held back by accepted sky at 0.55, which under a product composition is
-      what bounds the total.
-
-  Site 1596 — 30.03 km², 1,430 detectors, facing S, centred -10.5137, -77.2083
-      Measured: 0.98 sr of accepted sky, targets at 3,284 m, striking 37°
-      terrain, 789,128 g/cm² of rock behind, at 2,397 m altitude.
-      Satisfies 5 of 6 criteria:
-        • column depth (789,128 g/cm²) — 1.00
-        • exit distance (3,284 m) — 1.00
-        • shower development (309 g/cm²) — 1.00
-        • tau decay — 0.96
-        • footprint sampling (2,397 m) — 0.92
-      Held back by accepted sky at 0.55, which under a product composition is
-      what bounds the total.
-
-  Site 2060 — 29.53 km², 1,384 detectors, facing S, centred -10.6039, -77.2674
-      Measured: 0.97 sr of accepted sky, targets at 3,255 m, striking 38°
-      terrain, 794,394 g/cm² of rock behind, at 2,446 m altitude.
-      Satisfies 5 of 6 criteria:
-        • column depth (794,394 g/cm²) — 1.00
-        • exit distance (3,255 m) — 1.00
-        • shower development (302 g/cm²) — 1.00
-        • tau decay — 0.96
-        • footprint sampling (2,446 m) — 0.90
-      Held back by accepted sky at 0.55, which under a product composition is
-      what bounds the total.
-
-  Site 1694 — 23.69 km², 1,122 detectors, facing S, centred -10.5251, -77.2715
-      Measured: 1.06 sr of accepted sky, targets at 3,245 m, striking 38°
-      terrain, 796,051 g/cm² of rock behind, at 2,324 m altitude.
-      Satisfies 5 of 6 criteria:
-        • column depth (796,051 g/cm²) — 1.00
-        • exit distance (3,245 m) — 1.00
-        • shower development (308 g/cm²) — 1.00
-        • tau decay — 0.96
-        • footprint sampling (2,324 m) — 0.91
+        • footprint sampling (2,489 m) — 0.88
       Held back by accepted sky at 0.57, which under a product composition is
       what bounds the total.
 
-  Site 10466 — 23.92 km², 1,097 detectors, facing S, centred -12.7529, -75.8578
-      Measured: 0.92 sr of accepted sky, targets at 3,346 m, striking 37°
-      terrain, 787,928 g/cm² of rock behind, at 2,995 m altitude.
+  Site 1784 — 30.73 km², 1,483 detectors, facing S, centred -10.5133, -77.2080
+      Measured: 0.35 sr of accepted sky, targets at 3,288 m, striking 37°
+      terrain, 789,253 g/cm² of rock behind, at 2,422 m altitude.
       Satisfies 5 of 6 criteria:
-        • column depth (787,928 g/cm²) — 1.00
-        • exit distance (3,346 m) — 1.00
-        • shower development (292 g/cm²) — 1.00
+        • column depth (789,253 g/cm²) — 1.00
+        • exit distance (3,288 m) — 1.00
+        • shower development (309 g/cm²) — 1.00
         • tau decay — 0.96
-        • footprint sampling (2,995 m) — 0.90
-      Held back by accepted sky at 0.54, which under a product composition is
+        • footprint sampling (2,422 m) — 0.92
+      Held back by accepted sky at 0.57, which under a product composition is
       what bounds the total.
 
-  Site 5601 — 22.07 km², 1,024 detectors, facing SW, centred -11.2436, -76.7646
-      Measured: 0.99 sr of accepted sky, targets at 3,154 m, striking 36°
-      terrain, 795,363 g/cm² of rock behind, at 2,855 m altitude.
+  Site 2301 — 29.76 km², 1,396 detectors, facing S, centred -10.6036, -77.2682
+      Measured: 0.34 sr of accepted sky, targets at 3,253 m, striking 38°
+      terrain, 795,363 g/cm² of rock behind, at 2,452 m altitude.
       Satisfies 5 of 6 criteria:
         • column depth (795,363 g/cm²) — 1.00
-        • exit distance (3,154 m) — 1.00
-        • shower development (283 g/cm²) — 1.00
+        • exit distance (3,253 m) — 1.00
+        • shower development (303 g/cm²) — 1.00
         • tau decay — 0.96
-        • footprint sampling (2,855 m) — 0.86
+        • footprint sampling (2,452 m) — 0.90
+      Held back by accepted sky at 0.56, which under a product composition is
+      what bounds the total.
+
+  Site 6018 — 25.36 km², 1,160 detectors, facing SW, centred -11.2408, -76.7657
+      Measured: 0.35 sr of accepted sky, targets at 3,150 m, striking 36°
+      terrain, 795,363 g/cm² of rock behind, at 2,902 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (795,363 g/cm²) — 1.00
+        • exit distance (3,150 m) — 1.00
+        • shower development (281 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,902 m) — 0.86
+      Held back by accepted sky at 0.56, which under a product composition is
+      what bounds the total.
+
+  Site 1890 — 23.53 km², 1,121 detectors, facing S, centred -10.5248, -77.2715
+      Measured: 0.37 sr of accepted sky, targets at 3,246 m, striking 38°
+      terrain, 796,051 g/cm² of rock behind, at 2,330 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (796,051 g/cm²) — 1.00
+        • exit distance (3,246 m) — 1.00
+        • shower development (307 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,330 m) — 0.91
+      Held back by accepted sky at 0.58, which under a product composition is
+      what bounds the total.
+
+  Site 11065 — 22.29 km², 1,043 detectors, facing S, centred -12.6334, -75.9452
+      Measured: 0.32 sr of accepted sky, targets at 3,310 m, striking 37°
+      terrain, 789,253 g/cm² of rock behind, at 2,666 m altitude.
+      Satisfies 5 of 6 criteria:
+        • column depth (789,253 g/cm²) — 1.00
+        • exit distance (3,310 m) — 1.00
+        • shower development (299 g/cm²) — 1.00
+        • tau decay — 0.96
+        • footprint sampling (2,666 m) — 0.91
       Held back by accepted sky at 0.55, which under a product composition is
       what bounds the total.
 
-  The remaining 67 sites are in the results file, each with the same
+  The remaining 78 sites are in the results file, each with the same
   per-criterion record.
 
   Every selected site satisfies: column depth, exit distance, footprint
@@ -183,17 +183,17 @@ WHAT ENERGY THIS GEOMETRY FAVOURS
 ---------------------------------
   Folding each site's accepted solid angle and area against the tau decay
   length gives a geometric aperture that peaks near 63 PeV (analytically 67
-  PeV), at 2.62e+08 m² sr.
+  PeV), at 1e+08 m² sr.
 
-           1 PeV    1.49e-09  
-           4 PeV    2.83e+04  
-          16 PeV    5.99e+07  #########
-          63 PeV    2.62e+08  ########################################
-         251 PeV    1.48e+08  #######################
-       1,000 PeV    4.59e+07  #######
-       3,981 PeV    1.22e+07  ##
-      15,849 PeV     3.1e+06  
-      63,096 PeV     7.8e+05  
+           1 PeV     5.7e-10  
+           4 PeV    1.08e+04  
+          16 PeV     2.3e+07  #########
+          63 PeV       1e+08  ########################################
+         251 PeV    5.67e+07  #######################
+       1,000 PeV    1.76e+07  #######
+       3,981 PeV    4.66e+06  ##
+      15,849 PeV    1.19e+06  
+      63,096 PeV    2.99e+05  
 
   Relative, not absolute: this is geometry and an analytic decay factor, with
   no flux, no cross-section and no detector response. The detector acceptance
@@ -206,7 +206,7 @@ HOW TO READ THESE NUMBERS
   morphologically with a 0.15 km element before areas are measured. Closing
   is not wrong — a site has to be a deployable region rather than a scatter
   of pixels — but it moves the number, and at Colca with a 1 km element it
-  inflated the reported area by 2.29× against a stride-1 control. Set
+  inflated the reported area by 2.35× against a stride-1 control. Set
   gap_close_km to 0 to see the accepted area directly.
 
   This run's own funnel puts that factor at 0.81× — below 1, so here closing

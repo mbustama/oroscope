@@ -81,7 +81,7 @@ It says four things the results file contains but does not spell out:
   lowest one is reported per site: under a product it bounds the total from above.
 * **Which numbers are assumptions**, with the measured sensitivity of each. Including
   the one every reader gets wrong unaided: reported area is not physics-accepted
-  area, because morphological closing inflated it 2.29× at Colca.
+  area, because morphological closing inflated it 2.35× at Colca.
 
 Any results file can be re-explained later, with no DEM and nothing re-run:
 

@@ -9,15 +9,6 @@ It is deliberately blunt. A site search produces authoritative-looking areas and
 detector counts, and the only defence against those being over-read is writing down
 what is behind them.
 
-.. warning::
-
-   **The measured numbers on this page predate the current code.** They come from runs
-   made at TAMBO's old 100 m detector spacing, before the azimuthal cell width was
-   corrected (roadmap 6.63, 6.67) and before the morphology halo was widened (6.64).
-   The *reasoning* stands — every mechanism described here is still the mechanism — but
-   the figures move once the searches are re-run. Roadmap 6.68 lists exactly which.
-   Treat an unqualified number here as indicative until then.
-
 .. contents::
    :local:
    :depth: 2
@@ -95,17 +86,21 @@ parameter at a time:
      - Baseline
      - High
    * - ``decay_spectral_index`` (folded)
-     - 1.5 → 7205
-     - 2.0 → **9717**
-     - 2.7 → 10 495
+     - 1.5 → 6853
+     - 2.0 → **10 437**
+     - 2.7 → 11 349
    * - ``min_score``
-     - 0.0 → 45 928
-     - 0.35 → **2056**
+     - 0.0 → 65 268
+     - 0.35 → **10 437**
      - 0.5 → **0**
    * - ``min_target_slope_deg``
-     - 0° → 7442
-     - 25° → **2056**
-     - 35° → **0**
+     - 0° → 18 622
+     - 25° → **10 437**
+     - 35° → 2814
+
+All three rows now share one baseline. They did not before — the first read 9717 and the
+other two 2056, three rows of one table quoting two different runs, which is the kind of
+thing a table makes invisible by putting the numbers in a column.
 
 **The decay term is now folded over the spectrum, and that fixed it.** Evaluated at a
 single representative energy it *was* the answer rather than an approximation to one:
@@ -140,8 +135,10 @@ about TAMBO. A real differential table remains the outstanding ask.
 
 **A product score has no safe threshold.** Six components each in :math:`[0,1]`
 multiply to a distribution piled up near zero, so ``min_score`` anywhere in the middle
-sits on a cliff — 22× the baseline at 0.0, zero at 0.5. Prefer ranking sites and taking
-the best :math:`N`; a weighted geometric mean would also spread the distribution.
+sits on a cliff — 6.3× the baseline at 0.0, zero at 0.5. A sweep across the cut puts the
+median candidate score near **0.13**, so the shipped 0.35 is already well into the tail:
+it keeps the top 17.8% by rank. Prefer ranking sites and taking the best :math:`N`; a
+weighted geometric mean would also spread the distribution.
 
 
 Reported area is not physics-accepted area
@@ -151,22 +148,30 @@ Three things stand between the accepted pixels and the number in the results fil
 only the first is physics.
 
 **Morphological closing inflates.** Measured with a stride-1 control run at Colca,
-closing with a 1 km element more than doubles the area — **2.29×**. So a reported
-4580 km² corresponds to about 2120 km² the physics actually accepted. Closing is not
+closing with a 1 km element more than doubles the area — **2.35×**. So a reported
+4569 km² corresponds to about 1945 km² the physics actually accepted. Closing is not
 wrong: a site has to be a deployable region rather than a scatter of pixels. But the
 reported figure is an upper bound, and the two should not be conflated.
 
 **Candidate striding is unbiased in acceptance, at both element sizes.**
-``candidate_stride: 5`` samples one pixel in five. Control runs give 60.1% against 60.1%
-for GRAND and 17.491% against 17.494% for TAMBO, so which pixels get *tested* is a fair
-sample either way.
+``candidate_stride: 5`` samples one pixel in five. Control runs give 58.414% against
+58.415% for GRAND and 75.750% against 75.736% for TAMBO, so which pixels get *tested*
+is a fair sample either way.
+
+Those TAMBO figures used to read 17.491% and 17.494%. The acceptance did not change by
+a factor of four: the older pair counted candidates surviving *geometry and the score
+cut together*, because the pre-6.53 funnel recorded the post-cut total under the name
+``directions accepted``. The row above is geometry alone. The score cut is a separate
+row and takes a further 17.8% of it.
 
 **But which pixels survive to be measured is another matter, and for TAMBO it costs
-4.75×.** The mask is closed morphologically before any area is taken. Marking one pixel
+1.51×.** The mask is closed morphologically before any area is taken. Marking one pixel
 in five leaves gaps of five pixels — 154 m at Colca's 30.7 m resolution. GRAND's closing
 element is 1 km, thirty-two pixels, and bridges that without noticing. TAMBO's element is
-``antenna_spacing_km`` = 100 m, three pixels, and **cannot**: the mask never reconnects,
-most regions fall below ``min_sub_array_size``, and the area collapses.
+``antenna_spacing_km``, and at the published **150 m** it is five pixels — just enough to
+reconnect most of what striding cut apart. At the 100 m this page used to quote it was
+three pixels and **could not**, the mask never reconnected, most regions fell below
+``min_sub_array_size``, and the same penalty was **4.75×**.
 
 Measured with a stride-1 control at TAMBO's own settings on the Colca crop:
 
@@ -179,26 +184,26 @@ Measured with a stride-1 control at TAMBO's own settings on the Colca crop:
      - stride 1
      -
    * - directions accepted
-     - 17.491%
-     - 17.494%
+     - 75.750%
+     - 75.736%
      - unbiased
    * - **area**
-     - **83.6 km²**
-     - **396.9 km²**
-     - **4.75× low**
+     - **203.0 km²**
+     - **307.2 km²**
+     - **1.51× low**
    * - capacity
-     - 9,717
-     - 45,856
-     - 4.72× low
+     - 10,437
+     - 15,806
+     - 1.51× low
 
-So **read TAMBO's Colca area as ~397 km² and its capacity as ~45,856**. The full-DEM
-figure of 111.9 km² is low for the same reason and by downsampling on top.
+So **read TAMBO's Colca area as ~307 km² and its capacity as ~15,806**. The full-DEM
+figure of 1,036.9 km² is low for the same reason and by downsampling on top.
 
 The rule generalises: *the closing element must outrun the stride gap.* Every run now
 warns when it does not. The funnel's own closing factor — closed pixels over
 stride-corrected accepted pixels — conflates the two effects and should not be read as
-the inflation alone: for TAMBO it reports 0.53× where closing by itself inflates 1.17×
-and fragmentation costs 4.75×.
+the inflation alone: for TAMBO it reports 0.97× at stride 5, where the stride-1 control,
+which has no gap to bridge, puts closing by itself at 1.28×.
 
 .. figure:: _static/stride_and_closing.gif
    :alt: A strided mask closed with elements smaller and larger than the stride gap

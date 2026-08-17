@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-08-16T22:24:22.019096",
+    "timestamp": "2026-08-17T04:32:51.507257",
     "git": {
-        "commit": "84d4d3eb84a44344d2f2f5693312f04df00d1487",
+        "commit": "8c73445718d1dc3b2432822ed9a34e33b62b96e8",
         "branch": "dev",
         "dirty": true
     },
@@ -29,5 +29,13 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_full_dem.py --region ancash --only tambo"
+    "command": "tools/run_full_dem.py --region ancash",
+    "physics_state": {
+        "tau_energy_loss": {
+            "reference": 6e-07,
+            "reference_energy_pev": 1000.0,
+            "index": 0.2
+        },
+        "declination_model": null
+    }
 }

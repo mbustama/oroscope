@@ -6,7 +6,7 @@ the *story*: which constraint did the work, which sites survived and what weaken
 them, and which of the numbers on the page are choices rather than measurements. A
 reader who assembles that themselves gets it wrong in predictable ways -- most often
 by reading the reported area as physics-accepted area, which it is not (see
-:doc:`assumptions`, and the 2.29x measured at Colca).
+:doc:`assumptions`, and the 2.35x measured at Colca).
 
 The entry point is :func:`explain_results`, which takes the results dictionary and
 returns a string. It runs nothing, opens nothing and needs no DEM, so the pipeline,
@@ -109,7 +109,14 @@ _VIEWING_BANDS = (
 # more than doubles the area it reports. Quoted rather than recomputed because it is a
 # property of the terrain and the element, not of any one run -- but it is the right
 # order of magnitude to warn with whenever closing is enabled at all.
-AREA_INFLATION_AT_COLCA = 2.29
+#
+# Re-measured 2026-08-17 against config/grand_colca_stride1.json, after the audit of
+# 6.53-6.67 changed what the pipeline computes: 5,278,338 closed pixels over 2,250,827
+# accepted is 2.35x, where the pre-audit control said 2.29x. The strided production
+# config agrees to within 4% -- closing_inflation on grand_colca_config.json gives
+# 2.25x once corrected for its stride of 5 -- and that agreement between two runs that
+# sample the terrain differently is what makes the number worth quoting at all.
+AREA_INFLATION_AT_COLCA = 2.35
 
 # Funnel stages that must not be read as constraints.
 #
@@ -265,7 +272,7 @@ def closing_inflation(funnel, candidate_stride=1):
     """
     How much morphological closing grew this run's mask, measured from its own funnel.
 
-    The 2.29x quoted from Colca is a property of that terrain and a 1 km element, not
+    The 2.35x quoted from Colca is a property of that terrain and a 1 km element, not
     a constant. This run has the number in it: the stage before closing counts the
     accepted candidates, closing counts the pixels after, and the only correction
     needed between them is the stride -- which samples one candidate in

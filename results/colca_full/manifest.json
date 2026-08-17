@@ -1,11 +1,11 @@
 {
-    "generated": "2026-08-17T04:34:39",
+    "generated": "2026-08-17T04:10:22",
     "generated_by": "tools/run_full_dem.py",
-    "region": "ancash",
-    "dem": "input/dem/ancash_SRTMGL1.tif",
+    "region": "colca",
+    "dem": "input/dem/colca.tif",
     "configs": {
-        "grand": "config/grand_ancash_full.json",
-        "tambo": "config/tambo_ancash_full.json"
+        "grand": "config/grand_colca_config.json",
+        "tambo": "config/tambo_colca_config.json"
     },
     "files": [
         "combination_explanation.txt",

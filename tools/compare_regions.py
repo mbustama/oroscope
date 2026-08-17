@@ -306,29 +306,38 @@ def build():
                           f"{c['share_of_tambo']:.1f}%"
                           if c and c.get("share_of_tambo") else None,
                           per]))
-        L.append("\n**The share of TAMBO's mask is the number to watch, and it depends on the sampling.** At 4 / 5 it sits near 44% across regions whose terrain could hardly differ more; at 1 / 1 it is near 73%. **The unbiased value is the true one** -- striding fragments TAMBO's mask and leaves GRAND's untouched (ROADMAP 6.49), so what survives a strided run is the scattered remainder, which overlaps GRAND's blob less. Roughly three quarters of TAMBO-viable ground is also GRAND-viable. The invariance itself holds at fixed sampling, which is 6.47's point: the joint region is TAMBO-limited and co-location costs GRAND almost nothing. **Never mix the two rows.**\n")
+        L.append("\n**The share of TAMBO's mask is the number to watch, and it depends on the sampling.** At 4 / 5 it sits between 56% and 60% across departments whose terrain could hardly differ more -- Ancash 55.6%, Lima 55.7%, Arequipa 59.7% -- while the unbiased crops give 76.4% and 78.5%. **The unbiased value is the true one** -- striding fragments TAMBO's mask and leaves GRAND's untouched (ROADMAP 6.49), so what survives a strided run is the scattered remainder, which overlaps GRAND's blob less. Roughly three quarters to four fifths of TAMBO-viable ground is also GRAND-viable, and it is a range set by array design rather than a constant. The invariance itself holds at fixed sampling, which is 6.47's point: the joint region is TAMBO-limited and co-location costs GRAND almost nothing. **Never mix the two rows.**\n")
 
     L.append("\n## What the sampling costs\n")
-    L.append("`huaylas` is a **crop**, not a department — the Rio Santa valley cut out "
-             "of the Ancash DEM — and it is the only row run at 1 / 1. That is why its "
-             "ratios are blank: it is not comparable per pixel to a run at 4 / 5.\n")
-    L.append("It was also run a second time at 4 / 5 as a control, so the cost of the "
-             "sampling is measured rather than assumed. Same ground, same criteria, "
+    L.append("`huaylas` and `cajatambo` are **crops**, not departments — the Rio Santa "
+             "valley cut out of the Ancash DEM, and the upper Pativilca cut out of the "
+             "Lima one — and they are the rows run at 1 / 1. That is why their ratios "
+             "are blank: they are not comparable per pixel to a run at 4 / 5.\n")
+    L.append("`huaylas` was also run a second time at 4 / 5 as a control, so the cost of "
+             "the sampling is measured rather than assumed. Same ground, same criteria, "
              "only `downsample_factor` and `candidate_stride` changed:\n")
     L.append(row(["", "ds 1 / stride 1", "ds 4 / stride 5", "ratio"]))
     L.append(row(["---"] * 4))
-    L.append(row(["GRAND area km²", "8,294.9", "7,537.9", "1.1×"]))
-    L.append(row(["TAMBO sites", "109", "1", "**109×**"]))
-    L.append(row(["TAMBO area km²", "855.1", "2.9", "**291×**"]))
-    L.append(row(["TAMBO capacity", "98,696", "256", "**386×**"]))
-    L.append("\n**Acceptance is identical at 14.0% either way** — striding is unbiased "
-             "there, as ROADMAP §6.34 says. All of the loss happens between closing and "
-             "selection: at stride 5 the mask fragments into 7,954 regions of which one "
-             "clears `min_sub_array_size`, while at stride 1 it is contiguous and 109 "
-             "survive. **So every strided TAMBO area and capacity above is a lower bound "
-             "by a terrain-dependent factor — 4.75× at Colca, 291× here.** GRAND is "
-             "untouched: a 1 km closing element bridges a 154 m stride gap without "
-             "noticing. See ROADMAP §6.49.\n")
+    L.append(row(["GRAND area km²", "8,249.5", "7,451.1", "1.11×"]))
+    L.append(row(["TAMBO sites", "32", "2", "**16.0×**"]))
+    L.append(row(["TAMBO area km²", "291.3", "12.7", "**23.0×**"]))
+    L.append(row(["TAMBO capacity", "14,925", "557", "**26.8×**"]))
+    L.append("\n**Striding is unbiased at both stages, now that the two can be told "
+             "apart.** Geometric acceptance is 81.640% at 1 / 1 against 81.612% at "
+             "4 / 5, and the `min_score` cut takes 8.59% against 8.60%. The older "
+             "\"identical at 14.0%\" quoted one number for the product of the two, "
+             "because the pre-6.53 funnel recorded the post-cut count under the name "
+             "`directions accepted`. Two rows, and they agree separately.\n")
+    L.append("All of the loss is downstream of that, in reconstruction: at 4 / 5 the "
+             "mask breaks into 2,928 labelled regions of which **2** clear the size "
+             "threshold, while at 1 / 1 it resolves 6,408 of which **32** do. **So a "
+             "strided TAMBO area is a lower bound by a terrain-dependent factor — "
+             "1.51× at Colca, 23.0× here.** Both were far larger at TAMBO's old 100 m "
+             "spacing (4.75× and 291×): a 150 m closing element bridges the gap stride "
+             "5 leaves where a 100 m one could not, which is the same mechanism that "
+             "moved Colca's closing ratio from 0.53× to 0.97×. GRAND is untouched "
+             "either way — a 1 km element never noticed the gap. See ROADMAP §6.49, "
+             "§6.71.\n")
 
     overlaps = box_overlaps()
     if overlaps:

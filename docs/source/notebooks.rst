@@ -112,7 +112,7 @@ Going deeper
    Each parameter turned, and what moves. Two of the five sit on cliffs and a third
    changes one reported number while leaving another alone. The striding penalty is
    shown to depend on **how thin the accepted ground is**, which is why the same knob
-   costs 4.75× at Colca and 291× on the Callejón de Huaylas. Runs in seconds on terrain
+   costs 1.51× at Colca and 23.0× on the Callejón de Huaylas. Runs in seconds on terrain
    it builds itself.
 
 .. note::

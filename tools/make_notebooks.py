@@ -741,7 +741,7 @@ representative energy is a property of the energy chosen, not of the terrain.
 Three things this project measured about itself, worth checking in any search:
 
 1. **Reported area is not physics-accepted area.** Morphological closing more than
-   doubles it — measured at 2.29× with a stride-1 control run. Closing is not wrong; a
+   doubles it — measured at 2.35× with a stride-1 control run. Closing is not wrong; a
    site has to be a deployable region rather than a scatter of pixels. But the two
    numbers are different and should not be conflated.
 2. **Candidate striding is unbiased** — acceptance is identical at strides 1 and 5, and
@@ -749,10 +749,11 @@ Three things this project measured about itself, worth checking in any search:
    safe, *with the caveat below*.
 3. **The closing element and the stride interact.** That striding result was measured
    with GRAND's 1 km closing element. Each run's own funnel gives the factor directly,
-   and the two Colca configs disagree: GRAND's mask is 2.19× its stride-corrected
-   accepted set — an independent check on the 2.29× above — while TAMBO's is **0.53×**,
-   because a 100 m element is about three pixels and cannot bridge the gaps stride 5
-   leaves. TAMBO's area is therefore a *lower* bound, not an upper one.
+   and the two Colca configs still disagree, though far less than they used to: GRAND's
+   mask is 2.25× its stride-corrected accepted set — an independent check on the 2.35×
+   above — while TAMBO's is **0.97×**, because a 150 m element is five pixels and only
+   just bridges the gaps stride 5 leaves. TAMBO's area is therefore still a *lower*
+   bound, but by 1.51× rather than the 4.75× a 100 m element cost.
 4. **Area and capacity are measured on different grids** at `downsample_factor > 1`, so
    a feature a few pixels wide loses area it keeps detectors on.
 5. **Not every site in the results file is in the result.** `sites` lists everything
@@ -892,7 +893,8 @@ for stride in (1, 5, 10, 20):
 have = ss.available_memory_gb()
 print(f"\\navailable right now: {have:.1f} GiB" if have else "\\n(memory not reportable here)")
 print("\\nThe full run uses downsample_factor 4 and candidate_stride 5,")
-print("and measured 5.68 GiB peak RSS.")"""),
+print("and measured 6.59 GiB peak RSS -- against 7.80 GiB of address space,")
+print("which is the figure --max-memory-gb actually caps.")"""),
 ("md", """The estimate is rough and says so — `survival_fraction` is the share of pixels passing
 the topographic screen, which is terrain-dependent and unknown until the screen has run.
 It is meant to catch the order-of-magnitude mistake, not to predict a number.
@@ -1063,25 +1065,45 @@ for name, value in sorted(parts.items(), key=lambda kv: kv[1]):
 name, value = explain.weakest_component(scan)
 print(f"\\nweakest: {name} at {value:.3f}")"""),
 ("md", """On the real Colca configurations this is unambiguous: `solid_angle` is the weakest
-component at **15 of 15** TAMBO sites, with everything else at 1.0 except the decay term
-at 0.96. So that result is set almost entirely by `solid_angle_half_sr`, whose 0.05 sr
-default is a GRAND-scale value.
+component at **16 of 16** TAMBO sites, at a median 0.56 where depth, distance and shower
+all sit at 1.00. Two others are off the ceiling without coming near to binding — decay at
+0.96, footprint at a median 0.86.
+
+So the result is set almost entirely by the solid-angle half-value. That knob is now
+`solid_angle_half_fraction` and is dimensionless: it is a *fraction of the sky the fan
+and the arrival window actually make available*, not an absolute number of steradians.
+The steradian form silently encoded the fan width as well, so a value tuned for one fan
+was wrong for any other. TAMBO's 0.186135 default is the old 0.05 sr expressed against
+TAMBO's own sky, chosen so that no shipped score moved when the units changed.
 
 That is the kind of statement the components make available and a single total does not.
 
 ## How much did closing move the area?
 
 The reported area is not the physics-accepted area: the mask is closed morphologically
-before areas are measured. The published figure is 2.29× at Colca, measured against a
+before areas are measured. The published figure is 2.35× at Colca, measured against a
 stride-1 control — but each run has the number in it, as closed pixels over
-stride-corrected accepted pixels."""),
+stride-corrected accepted pixels.
+
+The Colca figures below come from these, and the stride-1 config is a diagnostic kept
+precisely so the closing factor can be separated from the pixels striding discards:
+
+```bash
+python -m oroscope.fetch_roads --dem input/dem/colca.tif --places
+
+python tools/run_full_dem.py --region colca --dry-run
+python tools/run_full_dem.py --region colca
+
+cd src && python -m oroscope.site_searcher \\
+    --config_path ../config/grand_colca_stride1.json   # the stride-1 control
+```"""),
 ("code", """ratio = explain.closing_inflation(results["funnel"],
                                  results["parameters"]["candidate_stride"])
 print(f"this run: closing moved the mask by {ratio:.2f}x")
 print("\\nOn the real configurations:")
-print("   GRAND Colca  2.19x   (against 2.29x from a stride-1 control -- an independent check)")
-print("   TAMBO Colca  0.53x   (a 100 m element cannot bridge the gaps stride 5 leaves,")
-print("                        so its area is a LOWER bound, not an upper one)")"""),
+print("   GRAND Colca  2.25x   (against 2.35x from a stride-1 control -- an independent check)")
+print("   TAMBO Colca  0.97x   (a 150 m element very nearly breaks even; at 100 m it was")
+print("                        0.53x, so the area was a LOWER bound by half)")"""),
 ("md", """## The run, explained — the whole summary, here
 
 Everything above is assembled for you. `explain.explain_results` takes the results
@@ -1195,9 +1217,17 @@ a machine that has the DEM; the notebook opens a few hundred kilobytes of JSON.
 To produce or refresh the store:
 
 ```bash
-python tools/run_full_dem.py --dry-run   # report the cost, then stop
-python tools/run_full_dem.py             # GRAND, TAMBO, then the combination
+export OPENTOPOGRAPHY_API_KEY=...          # free, see the CLI page
+cd src && oroscope-fetch-dem --region arequipa
+python -m oroscope.fetch_roads --dem ../input/dem/arequipa_SRTMGL1.tif --places
+
+python tools/run_full_dem.py --region arequipa --dry-run             # the cost, then stop
+python tools/run_full_dem.py --region arequipa --max-memory-gb 8.0   # both, then combine
 ```
+
+The cap is not optional here, for the reason spelled out below: the default is 80% of
+what the system reports available, and on this machine that lands *under* what the
+search needs.
 
 **Start with `--dry-run`.** It begins nothing — no search, no file, no change to the
 store — and prints the five things worth knowing before committing an hour of a
@@ -1223,8 +1253,17 @@ nothing is allocated.
 **This is a run that needs its cap set.** The default ceiling is 80% of what the system
 reports available, which on a machine whose desktop already holds half of RAM is below
 what the search needs: the first attempt died 23 minutes in, at the scoring stage,
-against a 5.5 GiB cap. Pass `--max-memory-gb` explicitly — the run measured 5.68 GiB
-peak RSS.
+against a 5.5 GiB cap.
+
+**Size that cap from the virtual figure, not the resident one.** `--max-memory-gb` is
+`RLIMIT_AS`, which bounds *address space*; the run's measured peaks are **6.59 GiB
+resident and 7.80 GiB virtual**, and the 1.2 GiB between them is exactly the room a cap
+chosen from the RSS number does not leave. A 6.5 GiB cap — comfortably above the
+resident peak — still died in the final analysis refusing a 69 MiB array. At 7.5 GiB
+GRAND completed and TAMBO's *map* died instead, with `std::bad_alloc` from matplotlib's
+C++ backend, which leaves the search results correct and the PNG beside them stale: the
+worst of the three outcomes, because it is the one that looks like success. 8.0 GiB
+completes.
 
 **Regenerate it when a configuration changes, and not otherwise.** The store carries a
 manifest naming the configs and the time, so a stale one is detectable rather than
@@ -1281,7 +1320,7 @@ The four things worth reading, in this order:
    crops found. If a full DEM is bound by a different stage than its crops were, the
    crops were not representative and every number derived from them needs re-reading.
 2. **The area**, against the crop scaled up — and against the closing factor this run
-   reports for itself, rather than the 2.29× quoted from Colca.
+   reports for itself, rather than the 2.35× quoted from Colca.
 3. **The site count and their spread.** A crop cannot say whether the good ground is one
    region or fifty scattered ones, and that is a deployment question, not a physics one.
 4. **The weakest score component**, which on the crops is `solid_angle` everywhere. If
@@ -1428,7 +1467,7 @@ the high plateau and declines the canyon walls and the steep coast."""),
     show_figure(found, caption=caption)
 
 show_stage("combined_overview_1_grand.png",
-           "GRAND alone — 88,527 km², essentially the whole plateau")"""),
+           "GRAND alone — 88,208 km², essentially the whole plateau")"""),
 ("md", """**Now TAMBO alone.** A different question entirely, and it shows: instead of a
 boundary enclosing most of the map, a scatter of small patches strung along the canyon
 systems. TAMBO needs a wall to stand on facing a wall to watch, and that exists only
@@ -1572,13 +1611,13 @@ of it finds no target, however good the ground underfoot. Past that it opens up.
 window is two constraints, and the far edge is doing the work here.
 
 **The score cut is not physics at all.** It is a threshold on a *product* of components,
-and a product of numbers in [0, 1] piles up near zero — the site scores here have a
-median near 0.10, so a cut of 0.15 is already biting into the body of the distribution
+and a product of numbers in [0, 1] piles up near zero — sweeping the cut puts the median
+candidate score near 0.13, so 0.15 is already biting into the body of the distribution
 while 0.0 keeps everything. Over the real Colca crop `min_score` 0.35 is equivalent to
-keeping the top 22.8% by rank, and a scan across the cut shows **no knee anywhere**:
-nothing in the data marks 0.35 as the natural place to stand. It is the single most
-consequential choice in the TAMBO configuration and the one least constrained by the
-terrain.
+keeping the top 17.8% by rank, and a scan across the cut shows **no knee anywhere**:
+area runs 6.7 → 525.0 km² across percentiles 5 → 40, smooth throughout. Nothing in the
+data marks 0.35 as the natural place to stand. It is the single most consequential
+choice in the TAMBO configuration and the one least constrained by the terrain.
 
 Note also what `min_target_slope_deg: 0` means, since it is a trap: zero is *falsy*, so
 it switches the far-wall criterion **off** rather than setting a 0° floor. Off is not
@@ -1612,8 +1651,8 @@ collaboration should be asked about before any of this is quoted.
 
 | | value | what it rests on |
 |---|---|---|
-| **`solid_angle_half_sr`** (TAMBO) | 0.8 sr | The scale at which accepted sky stops being scarce. The default 0.05 is GRAND-scale and saturates the term to ~1 across a canyon, so it stops discriminating. **This is what the TAMBO result actually turns on** — `solid_angle` is the weakest component at 26 of 26 sites. |
-| **`min_score`** (TAMBO) | 0.35 | A cut on a *product* of components, whose distribution piles up near zero. Equivalent to `score_percentile` **22.8** on this terrain, and a scan across the cut shows **no knee** — area runs 3.1 → 186.8 km² across percentiles 5 → 40, smooth and near linear. Nothing marks 0.35 as natural. |
+| **`solid_angle_half_fraction`** (TAMBO) | 0.186135 | The scale at which accepted sky stops being scarce, as a *fraction of the sky the fan and arrival window make available* rather than an absolute solid angle — the steradian form silently encoded the fan width too, so a value tuned for one fan was wrong for another. The default is the old 0.05 sr expressed against TAMBO's own sky, chosen so no shipped score moved when the units changed. **This is what the TAMBO result actually turns on** — `solid_angle` is the weakest component at **every** site in every region searched: 16 of 16 at Colca, 62 of 62 in Ancash, 84 of 84 in Lima, 85 of 85 in Arequipa. |
+| **`min_score`** (TAMBO) | 0.35 | A cut on a *product* of components, whose distribution piles up near zero. Equivalent to `score_percentile` **17.8** on this terrain, and a scan across the cut shows **no knee** — area runs 6.7 → 525.0 km² across percentiles 5 → 40, smooth throughout. Nothing marks 0.35 as natural. |
 | **near-wall band** (TAMBO) | 20–60° | The wall the array stands on. Colca's walls are ~40°, far outside GRAND's 3–25°. |
 | **`min_target_slope_deg`** (TAMBO) | 25° | The far wall the tau exits, measured along the arrival azimuth. Deliberately permissive against ~40° walls. Without it the scan only asks that rock is present at the right range, which is true almost everywhere in the Andes. |
 | **arrival window** (TAMBO) | ±20° | What the far wall subtends from a detector on the near wall. |
@@ -1630,8 +1669,8 @@ each one moves a reported number.
 | | value | what it costs |
 |---|---|---|
 | **`downsample_factor`** | 4 | Area is measured on the downsampled mask while capacity is measured at full resolution, so a feature a few pixels wide keeps its detectors and loses area — **~30% for a canyon strip**. Affects TAMBO far more than GRAND. |
-| **`candidate_stride`** | 5 | Unbiased in *acceptance* — 17.494% against 17.491% at stride 1 — but the mask is closed before area is taken, and a 100 m element cannot bridge the 154 m gap stride 5 leaves. **TAMBO's area is 4.75× low** because of this. GRAND's 1 km element is unaffected. |
-| **`gap_close_km`** | = detector spacing | Closing inflates GRAND's area **2.10×** in this run (2.29× measured against a stride-1 control). Reported area is not physics-accepted area. |
+| **`candidate_stride`** | 5 | Unbiased in *acceptance* — 75.750% against 75.736% at stride 1 — but the mask is closed before area is taken, and a 150 m element only just bridges the 154 m gap stride 5 leaves. **TAMBO's area is 1.51× low** because of this; at the old 100 m element, three pixels against a five-pixel gap, it was 4.75× low. GRAND's 1 km element is unaffected. |
+| **`gap_close_km`** | = detector spacing | Closing inflates GRAND's area **2.15×** in this run (2.35× measured against a stride-1 control). Reported area is not physics-accepted area. |
 | **`max_range_km`** | unset | The profile walk stops at `max_dist_km`, so the reported **column depth is a property of where the walk stopped**. Measured on TAMBO: walking 4× further raised it **6.4×** with an identical selection. Read the depths as lower bounds. |
 | **`min_width_km`** | 2.0 GRAND / 0.0 TAMBO | The opening step prunes tendrils. At GRAND's 2 km it would delete exactly the strip a canyon array is, which is why TAMBO sets it to 0. |
 
@@ -1710,9 +1749,9 @@ a real deployment would do better.
 ---
 
 **If you quote one number from this notebook, quote it with its caveat.** GRAND's
-88,527.5 km² is a closed mask, 2.10× the accepted set. TAMBO's 111.9 km² is low by ~4.75×
-from striding and ~30% again from downsampling. The joint 50.2 km² inherits both, and is
-a floor rather than an estimate."""),
+88,208.2 km² is a closed mask, 2.15× the accepted set. TAMBO's 1,036.9 km² is low by
+~1.51× from striding and ~30% again from downsampling. The joint 619.1 km² inherits both,
+and is a floor rather than an estimate."""),
 ("md", """## Where to go next
 
 - **[10. Ancash](10_ancash_dem.ipynb)** — the same question over the Cordillera
@@ -1865,18 +1904,19 @@ gap closing, then pruning — each stage drawn on the map with the surviving cou
 The stage that surprises people is closing, which *adds* pixels. It is not a filter; it
 is a repair of the holes striding left."""),
 ("code", """build("the_funnel")"""),
-("md", """### `stride_and_closing` — why TAMBO's area was low by 4.75×
+("md", """### `stride_and_closing` — why TAMBO's area was low by 4.75×, and is now low by 1.51×
 
-The measurement is in `docs/ROADMAP.md` §6.34; this is what it looks like. A strided mask
-closed with an element that bridges the gaps, and the same mask closed with one that does
-not.
+The measurement is in `docs/ROADMAP.md` §6.34 and §6.71; this is what it looks like. A
+strided mask closed with an element that bridges the gaps, and the same mask closed with
+one that does not.
 
 The transition is **at** the gap and it is abrupt, not gradual: on this mask a 3-pixel
-element recovers 0.04× of the accepted set and a 5-pixel one recovers 0.61×, fifteen
-times more for two pixels of element. TAMBO's closing element is 3 pixels against a
-5-pixel gap, which is how a real published area came out 4.75× low while every
-intermediate number looked reasonable. Every run now warns
-(`ss.warn_stride_outruns_closing`)."""),
+element recovers 0.04× of the accepted set and a 5-pixel one recovers 0.68×, seventeen
+times more for two pixels of element. That is the whole story of the spacing change. At
+100 m TAMBO's closing element was 3 pixels against a 5-pixel gap, and a real published
+area came out **4.75× low** while every intermediate number looked reasonable. At the
+published 150 m it is 5 pixels, it lands on the right side of that cliff, and the same
+penalty is **1.51×**. Every run now warns (`ss.warn_stride_outruns_closing`)."""),
 ("code", """build("stride_and_closing")"""),
 ("md", """### `slope_criterion` — where a criterion bites
 
@@ -2321,8 +2361,14 @@ out and searched at 1 and 1.
 ```bash
 cd src && oroscope-crop ../input/dem/ancash_SRTMGL1.tif ../input/dem/huaylas.tif \
     --north -8.80 --south -9.90 --west -78.00 --east -77.20
+python -m oroscope.fetch_roads --dem ../input/dem/huaylas.tif --places
+
+python tools/run_full_dem.py --region huaylas --dry-run
 python tools/run_full_dem.py --region huaylas
-```"""),
+```
+
+The crop has its own roads and places: they are fetched per DEM, so a crop cut from a
+department does not inherit the parent's."""),
 ("code", """HUAYLAS = os.path.abspath(os.path.join("..", "results", "huaylas_full"))
 
 
@@ -2350,12 +2396,16 @@ for label in ("grand", "tambo"):
             print(f"{label.upper() + ', ' + tag:<40}{s['sites']:>8,}"
                   f"{s['area km2']:>12,.1f}{s['capacity']:>12,}")"""),
 ("md", """**The same ground, the same criteria, and only the sampling changed.** GRAND
-moves by 1.1×. TAMBO moves by **291× in area and 386× in capacity**, and from 109 sites
-to one.
+moves by 1.11×. TAMBO moves by **23.0× in area and 26.8× in capacity**, and from 32 sites
+to two.
 
-That is not the 4.75× recorded in `docs/ROADMAP.md` §6.34. That figure was measured on
-Colca varying the stride alone; here both levers move, on terrain whose accepted strips
-are numerous and individually small.
+That is not the 1.51× recorded in `docs/ROADMAP.md` §6.34 and §6.71. That figure was
+measured on Colca varying the stride alone; here both levers move, on terrain whose
+accepted strips are numerous and individually small.
+
+Both numbers were far larger at TAMBO's old 100 m spacing — 291× here and 4.75× at
+Colca. A 150 m element is five pixels against the five-pixel gap stride 5 leaves, and
+landing on the right side of that cliff is worth an order of magnitude.
 
 The funnels say exactly where it goes, and it is not where you would guess."""),
 ("code", """def funnel_of(path):
@@ -2376,12 +2426,17 @@ if a and b:
     strided_b = next(v for k, v in b.items() if k.startswith("kept by stride"))
     acc_b = 100 * b["directions accepted"] / strided_b
     print(f"\\nacceptance: {acc_a:.1f}% at stride 1, {acc_b:.1f}% at stride 5")"""),
-("md", """**Acceptance is identical — 14.0% either way.** Striding really is unbiased
-there, exactly as §6.34 says. Closing differs by only 2.6×. *All* of the 291× happens
-between closing and selection, in the region thresholds: at stride 5 the mask fragments
-into 7,954 labelled regions, of which 5 clear the area threshold and **one** clears
-`min_sub_array_size` of 250 detectors. At stride 1 the mask is contiguous and 109 regions
-survive.
+("md", """**Acceptance is identical — 81.6% either way.** Striding really is unbiased
+there, exactly as §6.34 says, and so is the score cut that follows it: 8.59% against
+8.60%. Two stages, agreeing separately. They used to be quoted as one number, 14.0%,
+because the pre-§6.53 funnel recorded the post-cut total under the name `directions
+accepted` — so the figure that demonstrated striding was unbiased was itself measuring
+two things at once.
+
+Closing differs by under 2×. *All* of the 23.0× happens between closing and selection,
+in the region thresholds: at stride 5 the mask fragments into 2,928 labelled regions of
+which **2** clear the size threshold, while at stride 1 it resolves 6,408 of which **32**
+do.
 
 So the under-report is **fragmentation meeting a minimum-array-size cut**, not pixels
 being miscounted. GRAND never suffers it because a 1 km closing element bridges a 154 m
@@ -2389,7 +2444,7 @@ stride gap without noticing.
 
 **What to take from this.** Every TAMBO area and capacity in this project that came from
 a strided, downsampled run is a lower bound by a factor that is terrain-dependent and, in
-practice, unbounded — 4.75× at Colca, 291× here. Quote TAMBO numbers from unbiased runs,
+practice, unbounded — 1.51× at Colca, 23.0× here. Quote TAMBO numbers from unbiased runs,
 or quote them as "at least". The Callejón de Huaylas was effectively invisible to the
 department run: its TAMBO mask contributes **1.2 km² inside this crop window** against
 the crop's own 855.1 km²."""),
@@ -2646,6 +2701,9 @@ aligned crops of one terrain agree.
 ```bash
 cd src && oroscope-crop ../input/dem/lima_SRTMGL1.tif ../input/dem/cajatambo.tif \
     --north -10.30 --south -11.10 --west -77.60 --east -76.80
+python -m oroscope.fetch_roads --dem ../input/dem/cajatambo.tif --places
+
+python tools/run_full_dem.py --region cajatambo --dry-run
 python tools/run_full_dem.py --region cajatambo --max-memory-gb 6.0
 ```"""),
 ("code", """CROP = os.path.abspath(os.path.join("..", "results", "cajatambo_full"))

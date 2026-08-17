@@ -1,9 +1,9 @@
 {
-    "timestamp": "2026-08-16T07:20:06.994513",
+    "timestamp": "2026-08-17T05:18:27.529824",
     "git": {
-        "commit": "ea5fd9450c470e19fa61379cce28eec947e84c16",
+        "commit": "8c73445718d1dc3b2432822ed9a34e33b62b96e8",
         "branch": "dev",
-        "dirty": false
+        "dirty": true
     },
     "dem": {
         "path": "/home/mbustamante/Research/GRAND/oroscope/input/dem/arequipa_SRTMGL1.tif",
@@ -29,5 +29,13 @@
         "psutil": "7.0.0",
         "imagecodecs": "2024.9.22"
     },
-    "command": "tools/run_arequipa_full.py --max-memory-gb 7.0"
+    "command": "tools/run_full_dem.py --region arequipa --max-memory-gb 7.5",
+    "physics_state": {
+        "tau_energy_loss": {
+            "reference": 6e-07,
+            "reference_energy_pev": 1000.0,
+            "index": 0.2
+        },
+        "declination_model": null
+    }
 }
