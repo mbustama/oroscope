@@ -1,0 +1,86 @@
+/* Click-to-enlarge for the figures.
+ *
+ * The figures are SVG, so a browser zoom is already lossless -- but that is a control
+ * the reader has to know to reach for, and it zooms the whole page rather than the
+ * diagram. This adds the affordance: a magnifier on each figure, and an overlay that
+ * shows it as large as the viewport allows.
+ *
+ * Written here rather than pulled from an extension because sphinxcontrib-images and
+ * sphinx-lightbox2 both hook `figure::` directives, and every figure on these pages
+ * comes from a `jupyter-execute` block instead -- they would decorate the logo and miss
+ * the diagrams. Forty lines with no dependency also keeps the docs build offline and
+ * keeps `sphinx -W` quiet.
+ */
+
+.oro-zoomable {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+}
+
+.oro-zoom-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+    color: #1a1a1a;
+    cursor: zoom-in;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s ease-in-out;
+}
+
+/* Revealed on hover for the mouse, and always present where there is no hover --
+ * a touch device would otherwise have no way to discover the control at all. */
+.oro-zoomable:hover .oro-zoom-btn,
+.oro-zoom-btn:focus-visible {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .oro-zoom-btn { opacity: 1; }
+}
+
+.oro-zoom-btn:hover { background: #fff; }
+.oro-zoom-btn svg { width: 17px; height: 17px; display: block; }
+
+.oro-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(20, 20, 20, 0.88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5vmin;
+    cursor: zoom-out;
+}
+
+.oro-overlay[hidden] { display: none; }
+
+.oro-overlay img {
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    background: #fff;
+    border-radius: 3px;
+    box-shadow: 0 2px 28px rgba(0, 0, 0, 0.5);
+}
+
+.oro-overlay-hint {
+    position: absolute;
+    bottom: 14px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px;
+}
