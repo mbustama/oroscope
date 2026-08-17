@@ -1,15 +1,14 @@
 # Handover brief — Oroscope
 
 Written for a fresh session with no memory of the last one. **The previous session was
-an audit; this one's job is to make the stored results agree with the audited code, and
-then publish.**
+the re-run. It is done: the stores, the notebooks and the documentation now agree with
+the audited code.** This one inherits a consistent repository and a physics to-do list.
 
 **Repository:** `mbustama/oroscope`, **public**. Local path `~/Research/GRAND/oroscope`.
 A `site_search` symlink sits beside it for anything pointing at the old path.
 
-**Branch:** `dev`, head **`ecdd92d`**, pushed, **CI all green** — 8 checks: `docs`,
-`ruff`, `Notebooks execute`, tests on Python 3.9–3.13. **677 tests**, stdlib `unittest`,
-~30 s. `main` is **119 commits behind** and there is no open PR.
+**Branch:** `dev`, head **`c6bcf03`**. **682 tests**, stdlib `unittest`, ~145 s.
+`main` is **121 commits behind**.
 **Documentation:** <https://mbustama.github.io/oroscope/>, built from `main`.
 
 `main` is protected: PR required, seven checks, zero approvals. You can open a PR and
@@ -18,120 +17,95 @@ report its checks, but **you cannot merge** — the permission classifier blocks
 
 ---
 
-## 0. Start here — the one thing blocking everything else
+## 0. State of the store — good, for the first time in a while
 
-**`results/` reflects none of the last eight commits.** The audit changed what the
-pipeline computes; no search has been run since. Every stored number, every notebook
-output, and 39 figures in the docs are from superseded code. Nothing is broken — the
-store is simply *old*, and deliberately so: the previous session stopped rather than
-ship a store it could not vouch for.
+All six regions were re-run on the audited code and every derived number was refreshed
+from them. `results/` and `docs/` agree. `assumptions.rst` no longer carries a warning
+admitting otherwise, because it no longer needs one.
 
-The whole to-do list is that, in order. Do not reorder it; each step consumes the one
-before.
+| region | sampling | GRAND km² | TAMBO sites / km² | joint km² | share of TAMBO |
+| --- | --- | --- | --- | --- | --- |
+| colca | 1 / 5 | 4,569.4 | 16 / 203.0 | 123.3 | 60.7% |
+| huaylas | 1 / 1 | 8,249.5 | 32 / 291.3 | 228.7 | **78.5%** |
+| cajatambo | 1 / 1 | 5,573.8 | 44 / 774.5 | 591.7 | **76.4%** |
+| ancash | 4 / 5 | 42,791.9 | 62 / 740.0 | 411.1 | 55.6% |
+| lima | 4 / 5 | 51,209.0 | 84 / 915.4 | 509.8 | 55.7% |
+| arequipa | 4 / 5 | 88,208.2 | 85 / 1,036.9 | 619.1 | 59.7% |
 
-### 1. Run the searches
+**Quote the crops, never the departments, for TAMBO** — the department figures are
+striding artefacts. The joint share is **two rows and never one**: ~56–60% strided,
+~76–79% unbiased. Roadmap §6.70.
 
-```bash
-python tools/run_full_dem.py --region <r> --dry-run     # ALWAYS first
-```
-
-Six regions: `colca`, `huaylas`, `cajatambo`, `ancash`, `lima`, `arequipa`. Smallest
-first. Both experiments and the combine per region — no `--only`. About **1.5 hours**,
-almost all of it GRAND Arequipa (~25 min) and Lima (~20 min).
-
-Expect TAMBO's numbers to move a lot and GRAND's a little. Two independent reasons, both
-measured and both in the roadmap: TAMBO moved to the published 150 m spacing (§6.62), and
-`gap_close_km` defaults to the detector spacing, so that also widened the closing
-element. **Quote the crops, never the departments, for TAMBO** — the department figures
-are striding artefacts (§6.49, §6.62).
-
-### 2. Regenerate what derives from the runs
-
-- `python tools/compare_regions.py` → `results/region_comparison.md`
-- `explain.AREA_INFLATION_AT_COLCA` — a **module constant** (2.29) quoted in every run's
-  summary, measured from a 100 m Colca run. Recompute from the fresh Colca store, do not
-  hand-edit.
-- `figures.pipeline_stages` — hardcodes the Ancash TAMBO funnel. It currently merges
-  "Arrival scan" and "Scoring" into one bar because the stored run predates §6.53 and
-  cannot separate them. A post-fix run can, so **split it back into seven stages**.
-
-### 3. Re-execute the notebooks
-
-`python tools/make_notebooks.py` rewrites only what changed, then re-execute those.
-Notebooks 08–11 read the stores; 12 reads the Peru survey (untouched); 06, 07, 13 read
-no results. See Trap 4 for the kernelspec.
-
-### 4. Refresh the 39 documentation numbers
-
-Inventoried by group in **roadmap §6.68**. `assumptions.rst` carries a warning at the top
-admitting its figures predate the code — **delete that warning** once they are refreshed.
-
-### 5. Then, and only then
-
-An **ultrareview** is worth running once code and data finally agree — it is not worth
-running now, because it would spend its depth re-finding drift already catalogued. Then
-open the PR to `main` and hand over the merge.
+**No ultrareview has been run on this work.** The owner declined for now. It is still
+the obvious thing to do before the merge, and `/code-review ultra` is user-triggered and
+billed — you cannot launch it.
 
 ---
 
-## 1. What the last session did
+## 1. The immediate job
 
-Fifteen commits, `994fa62` → `ecdd92d`. **Every change is written up in `docs/ROADMAP.md`
-§6.53–§6.68 with its measurement — read those rather than re-deriving.** In brief:
+`dev` is one commit ahead of `origin/dev` and there is **no open PR**. So:
+
+1. `git push origin dev`
+2. Open the PR to `main` — 121 commits, and the first since the audit and re-run.
+3. Report its checks, then **hand the merge command to the owner.**
+
+Nothing else is blocking.
+
+---
+
+## 2. What the last session did
+
+One commit, `8c73445` → `c6bcf03`, written up in `docs/ROADMAP.md` **§6.69–§6.73**.
+Read those rather than re-deriving. In brief:
 
 | § | what |
 | --- | --- |
-| 6.53 | The funnel now separates geometry from the score cut. `--explain` had been blaming the arrival window for cuts `min_score` made. |
-| 6.54 | A mistyped `--score_weights` name was accepted and silently dropped. |
-| 6.55 | The memory pre-flight was sized against the cheaper of two configs. |
-| 6.56 | `tau_exit_probability` integrates in `u = X − x`; the old grid was 8× high at 3 PeV. |
-| 6.57 | The combination's memory is modelled and 0.65 GiB cheaper. It had no test coverage at all. |
-| 6.58 | Numba kernels are measurable via `NUMBA_DISABLE_JIT=1`. |
-| 6.59–6.61 | Sweep timeout, a stale funnel reader, an all-sites area beside a selected count. |
-| 6.62 | TAMBO at the published 150 m; `aperture.array_scale_factor` for the published curves. |
-| **6.63, 6.67** | **The reported solid angle was the whole circle whatever the fan.** Then made scale-free: the score is now the *fraction* of available sky, so no constant needs retuning when the fan or arrival window moves. |
-| 6.64 | The morphology tiling halo was half what closing needs. |
-| 6.65 | Six smaller ones, including Colca finally being in the region table. |
-| 6.66 | What a max-effort code review found **in the audit's own work** — including a 44× under-report and a wrong acceptance column already committed. |
-| 6.68 | The documentation pass, and the inventory of what still waits on the re-run. |
+| 6.69 | `AREA_INFLATION_AT_COLCA` 2.29 → **2.35**, from the same stride-1 control that produced the original. The test guarding it asserted the literal, not the constant. |
+| 6.70 | The six regions. TAMBO moved everywhere, GRAND barely. `solid_angle` is the weakest component at **every** selected site in every region. |
+| 6.71 | Both striding penalties collapse at 150 m: Colca **4.75× → 1.51×**, Huaylas **291× → 23.0×**. §6.49's "acceptance identical at 14.0%" was geometry × score under a geometry label. |
+| 6.72 | The Arequipa cap. `--max-memory-gb` is `RLIMIT_AS`; the documented 5.68 GiB was RSS. Measured **VmHWM 6.59, VmPeak 7.80**. |
+| 6.73 | Two zombie stores and the manifest that hid them; `make_notebooks.py` tracks code, not data. |
 
-The README was cut 590 → 393 lines: its "Complete List of Options" had drifted ten flags
-behind `cli.rst`, which is generated against the parser and tested.
+**One published conclusion did not survive.** `physics.rst` said the joint "barely moved
+with scale" — Colca 50.1 km², the whole DEM 50.2. At 150 m it is 123.3 against 619.1.
+The old invariance was an artefact of a closing element too small to reconnect what
+striding cut apart. Rewritten, not renumbered.
 
 ---
 
-## 2. Owner preferences — follow without being asked
+## 3. Owner preferences — follow without being asked
 
 - **Proceed without asking** when the path is clear. Said repeatedly.
 - **Do not do trivial work.** When asked for options, filter hard and say what you
   rejected. When asked to assess, recommend with reasons.
-- **Measure, do not assert.** Several confident hypotheses were wrong last session,
-  including three of mine that I had already written down. If you claim a number, compute
-  it in front of the owner.
-- **Say plainly when a finding is wrong**, including a reviewer's — do not change code to
-  satisfy a claim you have refuted.
-- **Source data, never invent it.** If a number needs a run that has not happened, say so
-  rather than filling it in.
+- **Measure, do not assert.** Two confident hypotheses were wrong last session — that a
+  6.5 GiB cap sized from RSS would hold, and that TAMBO's failed map was GRAND's fault.
+  Both were refuted by measurement in minutes. If you claim a number, compute it.
+- **Say plainly when a finding is wrong**, including a reviewer's.
+- **Source data, never invent it.** If a number needs a run that has not happened, say so.
 - Negative results go in `docs/ROADMAP.md` so they are not retried.
 - Commit messages explain *why* and quote measured deltas. The roadmap is updated in the
   same commit as the code.
 - **Figures:** no titles; legend outside the axes at the top; minimal legend text;
-  `ss.attach_colorbar` so the bar matches the panel; scale bar and north arrow on every
-  map; grey base with a colorbar; roads green; few labels; capitalise the first word of
-  every label; attribution in the caption.
+  `ss.attach_colorbar`; scale bar and north arrow on every map; grey base with a
+  colorbar; roads green; few labels; capitalise the first word of every label;
+  attribution in the caption.
 - **Notebooks are educational**, figures inline, each region notebook carrying its runs'
-  full `explanation.txt`.
+  full `explanation.txt` **and the exact invocations that produced it** — including the
+  roads fetch and any control run.
 - **Credentials:** the owner hands over an API key when asked and expects it used
   directly. Never commit it.
 
 ---
 
-## 3. Environment and traps
+## 4. Environment and traps
 
-**Trap 1 — memory, and it still bites hardest.** ~8 GiB available of 15. A search that
-reaches it kills the *session*, not just the run. `--dry-run` before anything. `--max_memory_gb`
-is `RLIMIT_AS` and caps *virtual* address space; `estimate_peak_memory_gb` estimates
-*anonymous* memory. They are not comparable. **A cap above available memory is not a cap.**
+**Trap 1 — memory, still the one that bites.** ~8 GiB available of 15. `--dry-run`
+before anything. **`--max_memory_gb` is `RLIMIT_AS` and caps *virtual address space*;
+`estimate_peak_memory_gb` estimates *anonymous* memory. Never size one from the other.**
+Arequipa: estimate 5.08, measured **RSS 6.59, address space 7.80**, so it needs
+`--max-memory-gb 8.0`. A cap above available memory is not a cap.
 
 **Trap 2 — `conda activate sssearch` fails.** Call the interpreter directly:
 `/home/mbustamante/anaconda3/envs/sssearch/bin/python`.
@@ -155,69 +129,78 @@ cd notebooks && env -u MPLBACKEND JUPYTER_PATH=/tmp/k jupyter nbconvert --execut
 the repo's gitignored `output/`.
 
 **Trap 6 — a waiter that greps for a process matches itself.** Wait on a file or a log
-string, never a process name.
+string, never a process name. And note the searches **buffer their progress**: a log can
+sit unchanged for 17 minutes while the run saturates 8 cores. Judge liveness by CPU time
+in `/proc`, not by log growth.
 
 **Trap 7 — `_ = figures.foo()` in a `jupyter-execute` block renders only in the first
 block of a page.** End the block with the figure as the last expression.
 
-**Trap 8 — escaping `\n` through the notebook generator.** Write `\\n`, or use a bare
-`print()`.
+**Trap 8 — escaping `\n` through the notebook generator.** Write `\\n`, or a bare `print()`.
 
-**Trap 9 — the docs build runs `sphinx -W` with numpydoc validation.** An undocumented
-parameter, a namedtuple field with no entry, a duplicated `Examples` heading, or
-Parameters documented out of signature order each fail it:
+**Trap 9 — the docs build runs `sphinx -W` with numpydoc validation:**
 
 ```bash
 env -u MPLBACKEND JUPYTER_PATH=/tmp/k python -m sphinx -W -b html docs/source /tmp/db
 ```
 
-**Build it LAST, after the final edit.** Two commits went red last session because the
-docs were built before the last change rather than after.
+**Build it LAST, after the final edit.**
 
-**Trap 10 — CI runs the tests with `working-directory: tests`.** A doctest or test that
-opens a relative path passes locally and fails in CI. Build paths from `__file__`, as
-`_support.REPO_ROOT` does.
+**Trap 10 — CI runs the tests with `working-directory: tests`.** Build paths from
+`__file__`, as `_support.REPO_ROOT` does.
 
 **Trap 11 — `ruff check .` from the repo root lints the notebooks too.**
 
 **Trap 12 — a killed run leaves orphans.** Check `output/<run>/` for `buffer_*.npy` and
-mismatched timestamps before trusting a directory.
+mismatched timestamps. `output/arequipa_full/` is a known dead directory — orphan
+buffers only, sparse, nothing reads it.
 
 **Trap 13 — Overpass rate-limits.** Fetch roads and places *before* starting a search.
+All six DEMs now have them, Colca included.
 
-**Trap 14 — freeze the code before running anything long.** The previous session
-invalidated an in-flight rerun three times by finding another defect while it ran. Finish
-the fixes, get the suite green, *then* run.
+**Trap 14 — freeze the code before running anything long.**
 
-**Disk** was at 98% with ~13 GB free. `old/` holds 3.5 GB of superseded material.
+**Trap 15 — CI does not execute notebooks 07–11.** 07 needs an ffmpeg the runner lacks;
+08–11 need stores that take an hour to produce. So a change can break them and CI stays
+green — which is exactly what happened to `product_collapse` when §6.54 added a guard.
+**Run them locally whenever the pipeline or the stores change.**
+
+**Trap 16 — `make_notebooks.py` tracks code, not data.** It reports a notebook unchanged
+when only its inputs moved. Anything reading a store must be re-executed regardless.
+
+**Disk** was at 98% with ~12 GB free. `old/` holds 3.5 GB of superseded material.
 
 ---
 
-## 4. Still open
+## 5. Still open
 
-Unchanged from before, none of them touched last session:
+The physics list, unchanged — none of it was touched by the re-run:
 
 1. **`A(E)`** — the outstanding physics ask. `data/` holds two *integral* published
    curves and `aperture.array_scale_factor` corrects them for array size; it cannot
-   correct for the site, and `assumptions.rst` says exactly why. A real differential
-   table is what is missing.
+   correct for the site. A real differential table is what is missing.
 2. **Askaryan (charge-excess) emission is not modelled**, so `sin α → 0` scores exactly
    zero and a product composition rejects the site outright. Peru is near the magnetic
    equator, so north–south geometries are hit hardest.
 3. **Nothing has been checked against an external simulation.** The Earth-absorption
    prediction (window edge −4.4° at 100 PeV to −0.9° at 10 EeV) is the cheapest such test.
-4. **`min_score` → `score_percentile`** (§6.43) — the owner's call.
+4. **`min_score` → `score_percentile`** (§6.43) — the owner's call. The re-run makes the
+   case stronger: 0.35 is `score_percentile` **17.8**, the median candidate score is
+   **0.13**, and a sweep shows no knee anywhere (6.7 → 525.0 km² across percentiles
+   5 → 40).
 5. **A national TAMBO answer** needs 1 arc-second and tiling.
 6. **The joint-realization optimiser** (§6.52). Optimise over the *union*, never the
    intersection.
 7. **No release.** Nothing on PyPI.
-
-New, from last session:
-
-8. **§6.49 (the 291× striding penalty) and §6.51 (three departments) want re-measuring at
-   150 m.** Both were measured at 100 m.
-9. **The talk.** The owner is writing an abstract on co-locating a particle and a radio
-   detector. The co-location result is the structural one: *a pixel has one slope*, so
-   GRAND (3–25°) and TAMBO (20–60°) compete at the screening step, and the viewing
-   windows are in no conflict at all. Joint share is **~73–81%** of TAMBO's mask from the
-   unbiased crops — a range that depends on array design, not a constant.
+8. **IGRF declination per site** — inclination follows the DEM's coordinates now;
+   declination still falls back to the Arequipa value.
+9. **The estimator is left uncalibrated**: 5.08 GiB against a measured 6.59 on Arequipa.
+   Deliberate — re-fitting `n_scoring_arrays` to chase one region is how the pre-flight
+   came to be sized against the cheaper of two configs (§6.55). Fix the second column,
+   not the constant.
+10. **The talk.** The owner is writing an abstract on co-locating a particle and a radio
+    detector. The co-location result is the structural one: *a pixel has one slope*, so
+    GRAND (3–25°) and TAMBO (20–60°) compete at the screening step, while the viewing
+    windows (±3° against ±20°) are in no conflict at all. Joint share is **76–79%** of
+    TAMBO's mask from the unbiased crops — now measured on two of them, and a range that
+    depends on array design rather than a constant.
