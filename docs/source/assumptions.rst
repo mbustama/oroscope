@@ -234,7 +234,9 @@ Using published effective areas: what is corrected, and what is not
 -------------------------------------------------------------------
 
 ``data/`` holds two curves supplied by the collaborations and hand-digitized from their
-figures:
+figures. **It is in the source repository, not in the installed package** — the wheel
+carries code only, and the loaders take a path from the caller rather than looking for a
+bundled file, so an installed user points them at their own copy or at a clone:
 
 .. list-table::
    :header-rows: 1
