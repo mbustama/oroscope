@@ -8,12 +8,19 @@ link to where it is explained and where it bites.
    :sorted:
 
    acceptance
-      The fraction of scanned candidates for which the :term:`arrival scan` accepted at
-      least one direction. Reported as ``directions accepted / kept by stride`` in the
-      :term:`funnel`. **Read it by stage name, never by position** — a run with
-      :term:`RFI zones` carries an extra funnel row, so the same index means different
-      things in two regions. Unbiased under :term:`striding`, which is why striding is
-      described as cost control. See :doc:`howitworks`.
+      The fraction of scanned candidates that survived to the morphology. **Two funnel
+      rows can answer that and they mean different things.** ``directions accepted`` is
+      the *geometry* alone — candidates for which the :term:`arrival scan` accepted at
+      least one direction. Where a score cut is in force a second row follows it
+      (``score >= 0.35``, or ``score in top 25%``), and *that* is the count the reported
+      sites, area and capacity were built from. Quoting the geometric row beside them
+      overstates acceptance badly: at TAMBO Arequipa it reads 63% where the run kept
+      9.7%.
+
+      **Read it by stage name, never by position** — a run with :term:`RFI zones`
+      carries an extra funnel row, so the same index means different things in two
+      regions. Unbiased under :term:`striding`, which is why striding is described as
+      cost control. See :doc:`howitworks`.
 
    arrival scan
       The central operation: from a candidate pixel, walk outward along each bearing of
@@ -74,7 +81,9 @@ link to where it is explained and where it bites.
 
    funnel
       The per-stage record of how many pixels survived: DEM pixels, screening,
-      striding, directions accepted, scoring, closing, pruning, selection. Printed by
+      striding, directions accepted, the score cut where one applies, closing, pruning,
+      selection. The geometry and the score cut are separate rows, because they are
+      separate questions and a reader needs to know which one bound the run. Printed by
       every run and stored in the results JSON. **Its two halves run in opposite
       directions** — see :doc:`howitworks`. :class:`~oroscope.site_searcher.Funnel`.
 

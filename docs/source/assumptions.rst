@@ -9,6 +9,15 @@ It is deliberately blunt. A site search produces authoritative-looking areas and
 detector counts, and the only defence against those being over-read is writing down
 what is behind them.
 
+.. warning::
+
+   **The measured numbers on this page predate the current code.** They come from runs
+   made at TAMBO's old 100 m detector spacing, before the azimuthal cell width was
+   corrected (roadmap 6.63, 6.67) and before the morphology halo was widened (6.64).
+   The *reasoning* stands — every mechanism described here is still the mechanism — but
+   the figures move once the searches are re-run. Roadmap 6.68 lists exactly which.
+   Treat an unqualified number here as indicative until then.
+
 .. contents::
    :local:
    :depth: 2
@@ -109,8 +118,17 @@ than chosen.
 The full job is the number of detected events,
 :math:`\int \Phi(E)\,A(E)\,P_{\rm decay}(E)\,{\rm d}E`. What weights the fold is now
 selectable — ``decay_weight_by`` takes ``flux``, ``acceptance`` or
-``flux_times_acceptance`` — but the acceptance :math:`A(E)` is still what no available
-table supplies. **Every number on this page was computed with the flux alone.**
+``flux_times_acceptance`` — but a *differential* acceptance :math:`A(E)` is still what
+no available table supplies; what ``data/`` holds are two integral curves, and
+:ref:`published-curve-scaling` says exactly what they can and cannot carry.
+**Every number on this page was computed with the flux alone.**
+
+``acceptance`` is worth one caution of its own. It weights by :math:`A(E)\,{\rm d}E`,
+which is :math:`A(E)` against a *flat differential* flux — :math:`\gamma = 0`, harder
+than any astrophysical spectrum. It does not remove the spectral assumption, it replaces
+it: measured against TAMBO's rising :math:`A(E)`, **97.4% of the weight lands above
+100 PeV**, against 31.3% for ``flux``. That is a large part of why weighting by
+acceptance alone empties a search.
 
 An :math:`A(E)` can be *inferred* from a published integral curve by dividing out the
 geometric model (:func:`oroscope.aperture.infer_response`), and it is not a safe weight

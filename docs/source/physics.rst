@@ -391,10 +391,10 @@ is where the tau exits (≥25°, measured along the arrival azimuth at the point
 strikes). Without the second, the scan only asks that rock is present at the right
 range, which is true almost everywhere in the Andes.
 
-*And the array is a strip.* 100 m spacing along a wall, so ``min_width_km`` must be 0 —
+*And the array is a strip.* 150 m spacing along a wall, so ``min_width_km`` must be 0 —
 the opening step that prunes tendrils would otherwise delete exactly the shape TAMBO
 is. Looking across a canyon also accepts far more sky than looking to the horizon: 0.2–
-1.5 sr against GRAND's ~0.05, which is why ``solid_angle_half_sr`` has to be
+0.5 sr against GRAND's ~0.017, which is why the solid-angle half-value has to be
 experiment-specific or the term saturates and stops discriminating.
 
 What each signal tells you about the shower
@@ -498,10 +498,10 @@ Side by side
      - 20–60° near wall, ≥25° far wall
    * - Array shape
      - compact blob, 1 km spacing
-     - strip, 100 m spacing
+     - strip, 150 m spacing
    * - Accepted solid angle
-     - ~0.05 sr
-     - 0.2–1.5 sr
+     - ~0.017 sr
+     - 0.07–0.5 sr
    * - What it measures
      - EM energy, calorimetrically; :math:`X_{\rm max}`; polarisation
      - particle density at the ground; **muon content**

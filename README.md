@@ -467,7 +467,8 @@ is hard-coded.
 | `--shower_development_m` | Float | `3000.0` | Path the shower needs after the tau decays. |
 | `--depth_band_gcm2` | Float ×2 | `None` | Column-depth band scoring 1. A band, not a floor: the tau must be produced *and* escape. |
 | `--distance_band_m` | Float ×2 | decay window | Exit-distance band scoring 1. |
-| `--solid_angle_half_sr` | Float | `0.05` | Accepted solid angle scoring 0.5. The default is GRAND-scale; a canyon experiment sees far more sky, and leaving it here saturates the term. |
+| `--solid_angle_half_fraction` | Float | `0.076` | Fraction of the sky the azimuth fan and arrival window could accept that scores 0.5. Dimensionless, so it survives a change of fan width or arrival window untouched. |
+| `--solid_angle_half_sr` | Float | `None` | The same thing as an absolute solid angle, in steradians, for a caller who wants one. Not portable: it silently encodes the fan width and the elevation window, which is why the fraction is the default. |
 | `--clearance_full_at` | Float | `1.0` | Fresnel clearance ratio, in first-Fresnel radii, that scores 1. |
 | `--nu_interaction_length_gcm2` | Float | `None` | Neutrino interaction length, enabling the Earth-chord attenuation term (order 1e8 near an EeV). |
 | `--decay_energy_pev` | Float | `None` | Score the decay probability at a single tau energy. Left off by default: across one experiment's reach this *chooses* the answer rather than approximating it. |

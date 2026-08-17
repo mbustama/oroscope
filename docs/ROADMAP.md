@@ -3754,6 +3754,42 @@ old cell weights were wrong. The golden regression records it — `directions ac
 
 676 → 677 tests.
 
+### 6.68 The documentation pass, and the 39 numbers waiting on a re-run
+
+Structure and API first, because those are wrong *now* rather than wrong pending a run.
+
+**Fixed.** The README's option table documented `--solid_angle_half_sr` with a default
+of 0.05; that knob now defaults to `None` and the portable one beside it is
+`--solid_angle_half_fraction`. `physics.rst` still described TAMBO as a 100 m strip
+seeing 0.2–1.5 sr against GRAND's 0.05 — the spacing is 150 m and, with the azimuthal
+cell width corrected, those solid angles are 0.07–0.5 sr and ~0.017 sr. The glossary
+defined **acceptance** as `directions accepted / kept by stride`, which since §6.53 is
+the *geometry* alone: quoting it beside post-cut sites and capacity is exactly the error
+that put 63% in the comparison table where the run kept 9.7%, so the entry now names
+both rows and says which belongs where. The funnel entry gained the score row it had
+been missing. And `assumptions.rst` claimed `decay_weight_by="acceptance"` carries no
+spectral assumption; it carries γ = 0, the hardest there is, which puts 97.4% of the
+weight above 100 PeV against 31.3% for `flux`.
+
+**Not fixed, deliberately: 39 run-derived references across the README and eight pages.**
+Inventing replacements before the searches run would be worse than leaving them. They
+fall into eight groups:
+
+| what | where | why it moves |
+| --- | --- | --- |
+| TAMBO Colca area and capacity (83.6 km², 9,717, 396.9, 45,856) | `assumptions` ×8 | 100 m spacing; Colca had no store at all until §6.65 |
+| TAMBO department figures (111.9, 9,024, 174.9, 14,290, 190.9, 15,775) | `assumptions`, `physics` | 100 m spacing |
+| joint share and joint area (44.9/43.0/46.2%, 50.2 km²) | `physics` ×3 | §6.62 measured ~73–81%, and it is a range not a constant |
+| closing inflation, 2.29× at Colca | README, `assumptions`, `cli`, `physics` ×5 | a 100 m element; also a module constant, `explain.AREA_INFLATION_AT_COLCA` |
+| the 4.75× striding penalty | `assumptions`, `howitworks` ×7 | the element is 150 m now, and §6.62 showed the coupling |
+| acceptance percentages (17.491/17.494%, 60.1%, 61.6%) | `assumptions` ×7 | the funnel rows changed meaning |
+| the `min_score` sweep and the 22.8 percentile | README, `assumptions` ×6 | scores moved where acceptance is partial |
+| "weakest component at 15 of 15 / 26 of 26 sites" | `assumptions`, notebooks | the solid-angle term is scored differently |
+
+`assumptions.rst` carries a warning admitting this at the top, which is the honest
+holding position: the mechanisms it describes are unchanged and still worth reading, and
+the figures are indicative until the re-run lands.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
