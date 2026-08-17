@@ -1479,7 +1479,7 @@ boundary enclosing most of the map, a scatter of small patches strung along the 
 systems. TAMBO needs a wall to stand on facing a wall to watch, and that exists only
 where the ground is cut."""),
 ("code", """show_stage("combined_overview_2_tambo.png",
-           "TAMBO alone — 112 km², following the canyons")"""),
+           "TAMBO alone — 1,037 km², following the canyons")"""),
 ("md", """**And both.** The magenta is the ground that satisfies the two at once: 619.1 km²,
 0.7% of GRAND's and 59.7% of TAMBO's. The asymmetry is the finding — co-location costs
 GRAND nothing and is most of what TAMBO has.
@@ -2465,9 +2465,9 @@ scale bar — is identical between them."""),
 ("code", """CROP_OUT = os.path.abspath(os.path.join("..", "output", "huaylas_full_combined"))
 for frame, caption in (
         ("combined_overview_1_grand.png",
-         "GRAND over the crop — one site, 8,295 km²"),
+         "GRAND over the crop — one site, 8,249 km²"),
         ("combined_overview_2_tambo.png",
-         "TAMBO over the crop at stride 1 — 109 sites along the Río Santa"),
+         "TAMBO over the crop at stride 1 — 32 sites along the Río Santa"),
         ("combined_overview_3_both.png",
          "Both — 228.7 km² of joint ground, 78.5% of TAMBO's mask")):
     show_figure(os.path.join(CROP_OUT, frame), caption=caption)"""),
@@ -2764,8 +2764,8 @@ TAMBO-limited finding — but the number to quote comes from the unbiased runs, 
 rows must never be mixed."""),
 ("code", """for frame, caption in (
         ("combined_overview_1_grand.png", "GRAND over the Cajatambo crop"),
-        ("combined_overview_2_tambo.png", "TAMBO at stride 1 — 97 sites"),
-        ("combined_overview_3_both.png", "Both — 805 km², 71.9% of TAMBO's mask")):
+        ("combined_overview_2_tambo.png", "TAMBO at stride 1 — 44 sites"),
+        ("combined_overview_3_both.png", "Both — 591.7 km², 76.4% of TAMBO's mask")):
     show_figure(os.path.abspath(os.path.join(
         "..", "output", "cajatambo_full_combined", frame)), caption=caption)"""),
 ("md", """---
@@ -2778,7 +2778,7 @@ The searches answer *where each experiment could go*. Deployment asks something 
 The tempting way to ask is "how much of the joint mask can host GRAND", and it gives the
 wrong answer. On the unbiased Cajatambo crop the GRAND-viable ground *inside* the joint
 mask is 22,577 fragments of which exactly **one** is large enough for a single 1 km
-lattice cell — while 976 km² of perfectly good GRAND ground lies within 20 km. An
+lattice cell — while 1,012.5 km² of perfectly good GRAND ground lies within 20 km. An
 optimiser pointed at the intersection would call that site impossible.
 
 **A partner array does not have to stand on the joint mask.** What couples two arrays is
