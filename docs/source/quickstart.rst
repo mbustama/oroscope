@@ -9,6 +9,7 @@ Quickstart
    # text repr rather than as a PNG unless the inline backend is switched on. Without
    # this every diagram below silently became "<Figure size 1020x415 with 2 Axes>".
    %matplotlib inline
+   %config InlineBackend.figure_formats = ['svg']
 
 
 A search, and then what each knob does. **One import**: everything below is on

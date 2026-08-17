@@ -3940,6 +3940,47 @@ is gitignored, sparse, and 20K on disk. Noted rather than deleted.
 source is — while the five stores it reads had all been replaced. Anything reading a
 store must be re-executed whether or not the generator rewrote it.
 
+### 6.74 The documentation figures are vector, and one of them was published twice
+
+Asked whether the embedded figures could be zoomable. They can, and not by adding a
+lightbox: **every figure in the `.rst` pages is a diagram or a plot** — `walk_mechanism`,
+`canyon_geometry`, `decay_and_shower`, `pipeline_stages`, `striding_and_closing`,
+`score_composition`. The DEM maps live in the notebooks, not here. So nothing embedded in
+the documentation needs to be raster at all.
+
+Each page already had a hidden setup block running `%matplotlib inline`, which is the
+hook. One line beside it —
+
+```python
+%config InlineBackend.figure_formats = ['svg']
+```
+
+— and the reader gets unlimited lossless zoom from the browser's own controls, with no
+extension, no JavaScript and no CI dependency. Verified: 814 glyph nodes and **zero**
+embedded rasters in the funnel figure. Images go 484 KB → 936 KB, which is nothing.
+
+Rejected `sphinxcontrib-images` and `sphinx-lightbox2`, and not for the dependency: they
+hook `figure::` directives, and these figures come from `jupyter-execute` blocks. The
+extension would have covered the logo and the GIF and missed all eight figures that
+needed it.
+
+One exception, stated rather than fixed: `striding_and_closing` uses `imshow`, so its
+five panels embed as rasters inside the SVG while the labels stay vector. It is a
+120×120 pixel-grid demonstration displayed near natural size.
+
+**The bug this turned up.** `howitworks.rst` was the one page with *no* setup block, and
+the omission was visible in the published HTML: the first block rendered its figure
+**twice** — once as the cell's result value, once by the inline backend flushing as it
+activated during that same cell. `howitworks_0_0.png` and `howitworks_0_1.png` were
+byte-identical, and the seven-stage funnel appeared twice in a row on the live site. It
+now has the setup block every other page has, and emits three figures instead of four.
+
+Two stale passages on the same page, both consequences of §6.70–§6.71 and both missed by
+the number-by-number sweep because they were prose rather than figures: it still said the
+arrival scan and scoring "share a bar" (they are two bars since the funnel was split), and
+still quoted the `min_score` sweep as 45,928 / 2,056 / zero rather than 65,268 / 10,437 /
+zero. A grep for changed *numbers* does not find a sentence whose *claim* has changed.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

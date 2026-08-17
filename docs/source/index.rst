@@ -54,6 +54,7 @@ same scan, and a search can report where each is viable and where the two coinci
    # "<Figure size 1020x415 with 2 Axes>" -- on the front page, in a build that
    # reported no error.
    %matplotlib inline
+   %config InlineBackend.figure_formats = ['svg']
 
 .. jupyter-execute::
    :hide-code:

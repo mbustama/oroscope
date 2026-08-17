@@ -1,6 +1,20 @@
 How the search works
 ====================
 
+.. jupyter-execute::
+   :hide-code:
+   :hide-output:
+
+   # This page had no setup block, and the omission was visible in the published HTML:
+   # the first block rendered its figure *twice*, because the returned Figure was shown
+   # as the cell's result and the inline backend -- activating during that same cell --
+   # then flushed the same figure again. The funnel diagram appeared twice in a row.
+   #
+   # With the backend switched on up front, one figure per block, as on every other page.
+   %matplotlib inline
+   %config InlineBackend.figure_formats = ['svg']
+
+
 This page introduces the vocabulary. **Screening**, **striding**, **the arrival scan**,
 **scoring**, **closing**, **pruning** — these words appear throughout the documentation,
 the code and the run summaries, and none of them is guessable from ordinary English.
@@ -35,7 +49,7 @@ The seven stages
    :hide-code:
 
    from oroscope import figures
-   figures.pipeline_stages()
+   _ = figures.pipeline_stages()
 
 The figure is a real run — TAMBO over the full Ancash DEM, 68.6 million pixels — and the
 important thing about it is that it has **two halves that work in opposite directions**.
@@ -44,10 +58,11 @@ Everything down to *scoring* **removes** candidates. Everything below it **rebui
 from what survived**, which is why the count rises again at closing. Reading a funnel
 table as though every row were a filter is the commonest way to misread one.
 
-The arrival scan and the scoring share a bar because *that* run cannot tell them apart:
-its funnel recorded the same count under both names. A run made after that was fixed
-separates them, and its funnel shows how much of the loss belongs to the geometry and how
-much to ``min_score``.
+The arrival scan and the scoring are **two** bars, and until recently they were one. The
+older funnel recorded the post-cut count under both names, so the merged bar read
+1,022,530 and the arrival window carried the blame for a cut it had not made. Separated,
+the scan keeps **82%** of what striding hands it and ``min_score`` takes **8.4×** — the
+reverse of what a single bar implied, and the reason the stage is drawn on its own.
 
 Stage by stage:
 
@@ -92,7 +107,7 @@ Striding and closing are one decision, not two
    :hide-code:
 
    from oroscope import figures
-   figures.striding_and_closing()
+   _ = figures.striding_and_closing()
 
 Striding leaves a gap of ``candidate_stride`` pixels between kept candidates. Closing
 repairs it — but only if its structuring element is **larger than that gap**. Below the
@@ -130,7 +145,7 @@ Why a product score has no safe threshold
    :hide-code:
 
    from oroscope import figures
-   figures.score_composition()
+   _ = figures.score_composition()
 
 Components are combined by **multiplication**, so a candidate must be good at everything
 and one bad component sinks it. That is defensible — these are requirements, not
@@ -141,7 +156,7 @@ So ``min_score`` does not express a mild preference: it sits on a cliff, and **w
 lands depends on how many components happen to be enabled**. Adding a component moves
 every score down and silently tightens the cut.
 
-Measured on one real search, cuts of 0.0, 0.35 and 0.5 gave 45,928, 2,056 and **zero**
+Measured on one real search, cuts of 0.0, 0.35 and 0.5 gave 65,268, 10,437 and **zero**
 detector positions. ``score_percentile`` is the scale-free alternative and is
 scored against the same ranking; see :doc:`assumptions`.
 
