@@ -3715,21 +3715,44 @@ changes every process; three test classes sat *below* the `__main__` guard and n
 under direct execution; and `absolute_from_published` was missing from `__all__` while
 none of the four new aperture names were re-exported by the package.
 
-**Two are left open deliberately, because both move published scores and the fix shape is
-a physics decision:**
-
-1. **The retune cannot track the fan.** Dividing `solid_angle_half_sr` by 3 is exact only
-   for a ±60° wedge. A full sweep's Ω is unchanged by the correction, so its scores moved
-   (×1.5 at Ω = 0.05 sr, ×2.5 at 0.005). The deep fix is to score the *fraction* of
-   available sky — the scan already knows `span × (sin hi − sin lo)` — which makes the
-   half-value dimensionless and removes the retune forever.
-2. **The wedge fan is endpoint-inclusive**, so `span/n_az` is not the right cell width:
-   the true weights for `azimuth_fan(9, 60)` are 7.5°, 15°×7, 7.5°. Totals agree only
-   when every azimuth accepts, which is exactly what the new test asserts, so it cannot
-   see this. Partial acceptance is off by up to 1.78×. The midpoint rule fixes it and
-   changes which azimuths are sampled.
+**Both of the two left open were then fixed — see §6.67.**
 
 672 → 676 tests.
+
+### 6.67 The solid-angle score is scale-free, and the fan tiles its own arc ✅ delivered
+
+The two the review left open, both closed. Together they end a coupling that had already
+forced one hand-retune and would have forced another.
+
+**The fan now samples cell centres.** `azimuth_fan` was endpoint-inclusive
+(`linspace(-hw, hw, n)`), which puts two samples on the fan's edges and then weights
+them like the interior ones. For `azimuth_fan(9, 60)` the true arcs are 7.5°, 15°×7,
+7.5° against a uniform 13.333°, so the solid angle was right **only when every azimuth
+accepted** — which is exactly what §6.63's test asserted, so it could not see this. A
+candidate open only at the two edges reported **1.78×** the sky it saw; one open
+everywhere but the edges, 0.89×. Centred sampling makes `span / n` the exact arc for
+every sample, matching the convention the full sweep already used, and an odd
+`n_azimuths` still lands one sample exactly on the aspect.
+
+**And the score is now taken on the fraction of available sky.** The scan reports
+`available_sky_sr` — the integral of cos θ over the fan and the arrival window — and
+`solid_angle_half_fraction` is dimensionless. The steradian form could not work: it
+silently encoded the fan width *and* the elevation window, so §6.63's `/3` retune was
+exact for a ±60° wedge and wrong for anything else. Measured before the fix, a full
+sweep scored **×1.5** at Ω = 0.05 sr and **×2.5** at 0.005, because its Ω was unchanged
+by the correction while the half-value had fallen threefold. Now a ±60° wedge and a full
+sweep return the same score on the same ground.
+
+The defaults were chosen to preserve the shipped scores exactly: 0.076026 is the old
+0.05 sr against GRAND's own 120° × ±3° sky, 0.186135 the TAMBO equivalent.
+`solid_angle_half_sr` still works and still means steradians, for a caller who wants an
+absolute scale and accepts that it is not portable across fans.
+
+Scores move only where acceptance is *partial*, which is the point: that is where the
+old cell weights were wrong. The golden regression records it — `directions accepted`
+78,527 → 76,114, capacity 745 → 746.
+
+676 → 677 tests.
 
 ## Phase 4 — Usability *(sketch — to be scoped)*
 

@@ -46,7 +46,7 @@
     "nu_interaction_length_gcm2": null,
     "_comment_scoring": "solid_angle_half_sr defaults to 0.0167, a GRAND-scale value. Looking across a canyon the accepted solid angle is 0.07-0.5 sr, so the default saturates the term to ~1 everywhere and it stops discriminating; 0.267 spreads it across the observed range. min_score is the cut that turns the score into an actual filter - with 0.0 the score is computed and then ignored, which is why an earlier run accepted 91.7% of candidates.",
     "score_composition": "product",
-    "solid_angle_half_sr": 0.26666666666666666,
+    "solid_angle_half_fraction": 0.186135,
     "min_score": 0.35,
     "_comment_layout": "5000 units at 150 m on a triangular grid. min_width_km is 0 because the array is a strip along a wall, not a blob, and the opening would delete it.",
     "target_antennas": 5000,

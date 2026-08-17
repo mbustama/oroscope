@@ -218,9 +218,26 @@ class TestAzimuthFan(unittest.TestCase):
     def test_fan_is_symmetric_about_the_aspect(self):
         offsets = scan_mod.azimuth_fan(9, 60.0)
         self.assertEqual(len(offsets), 9)
-        self.assertAlmostEqual(offsets[0], -60.0)
-        self.assertAlmostEqual(offsets[-1], 60.0)
         self.assertAlmostEqual(float(offsets.sum()), 0.0, places=9)
+        self.assertAlmostEqual(float(offsets[4]), 0.0, places=9,
+                               msg="an odd fan still samples the aspect itself")
+
+    def test_fan_samples_sit_at_cell_centres_and_tile_the_arc(self):
+        """
+        Samples are cell centres, not endpoints. Endpoint-inclusive sampling puts two
+        of them on the fan's edges and then weights them like the interior ones, so the
+        solid angle only came out right when every azimuth accepted: for this fan the
+        true arcs are 7.5, 15x7, 7.5 degrees against a uniform 13.333.
+        """
+        for n, half_width in ((9, 60.0), (5, 30.0), (12, 90.0)):
+            offsets = scan_mod.azimuth_fan(n, half_width)
+            cell = 2.0 * half_width / n
+            steps = np.diff(offsets)
+            np.testing.assert_allclose(steps, cell, rtol=1e-12,
+                                       err_msg=f"n={n} half_width={half_width}")
+            # each sample's cell reaches half a cell either side, tiling [-hw, +hw]
+            self.assertAlmostEqual(float(offsets[0]) - cell / 2.0, -half_width, places=9)
+            self.assertAlmostEqual(float(offsets[-1]) + cell / 2.0, half_width, places=9)
 
     def test_full_sweep_covers_the_compass_without_repeating(self):
         offsets = scan_mod.azimuth_fan(8, None)

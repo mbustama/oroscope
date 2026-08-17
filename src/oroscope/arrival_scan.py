@@ -680,17 +680,31 @@ def azimuth_fan(n_azimuths: int, half_width_deg: float | None = None) -> np.ndar
 
     Examples
     --------
+    Samples sit at **cell centres**, so each stands for the same arc and the arcs tile
+    the fan exactly. The wedge used to be endpoint-inclusive -- ``linspace(-hw, hw, n)``
+    -- which places two samples on the fan's edges and gives them the same weight as the
+    interior ones. The solid angle then only came out right when *every* azimuth
+    accepted: for ``azimuth_fan(9, 60)`` the true arcs are 7.5, 15x7, 7.5 degrees
+    against a uniform 13.333, so a candidate open only at the two edges reported 1.78x
+    the sky it saw, and one open everywhere but the edges reported 0.89x. Centring the
+    samples makes ``span / n`` the exact arc for every one of them, which is the same
+    convention the full sweep already used.
+
+    With an odd ``n_azimuths`` the centre sample still lands exactly on the aspect.
+
     >>> from oroscope import arrival_scan
     >>> arrival_scan.azimuth_fan(4, None)
     array([  0.,  90., 180., 270.])
     >>> arrival_scan.azimuth_fan(3, 60.0)
-    array([-60.,   0.,  60.])
+    array([-40.,   0.,  40.])
     """
     if half_width_deg is None:
         return np.linspace(0.0, 360.0, n_azimuths, endpoint=False)
     if n_azimuths == 1:
         return np.zeros(1)
-    return np.linspace(-half_width_deg, half_width_deg, n_azimuths)
+    half_cell = float(half_width_deg) / n_azimuths
+    return np.linspace(-half_width_deg + half_cell, half_width_deg - half_cell,
+                       n_azimuths)
 
 
 def balanced_order(n_candidates: int, n_threads: int,
@@ -928,6 +942,15 @@ def scan(candidates, elevation, map_grid, *,
         inverse[order] = np.arange(len(order))
         for key in out:
             out[key] = out[key][inverse]
+
+    # The sky this fan could accept at all: the arc it covers times the elevation band,
+    # integral of cos(theta) dtheta dphi. A run-level constant, not a per-candidate
+    # array, and the denominator that makes the solid-angle score scale-free -- without
+    # it a calibration constant in steradians silently encodes the fan width and the
+    # elevation window, and has to be retuned whenever either moves.
+    out["available_sky_sr"] = float(
+        np.radians(azimuth_span_deg)
+        * (np.sin(np.radians(elev_max_deg)) - np.sin(np.radians(elev_min_deg))))
     return out
 
 

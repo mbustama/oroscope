@@ -715,6 +715,10 @@ option below exists and that every option that exists appears below.
      - float
      - ``—``
      - Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).
+   * - ``--solid_angle_half_fraction``
+     - float
+     - ``—``
+     - Fraction of the sky the azimuth fan and arrival window could accept that scores 0.5 (default: 0.076). Dimensionless and therefore portable: unlike ``--solid_angle_half_sr`` it does not have to be re-tuned when the fan width or the elevation window changes.
    * - ``--solid_angle_half_sr``
      - float
      - ``—``

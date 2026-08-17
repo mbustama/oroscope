@@ -3724,6 +3724,7 @@ def default_config(preset="default"):
         "shower_elongation_rate_gcm2": None,
         "shower_lambda_gcm2": None,
         "solid_angle_half_sr": None,
+        "solid_angle_half_fraction": None,
         "distance_band_m": None,
         "clearance_full_at": None,
         "score_weights": None,
@@ -4188,7 +4189,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                             exclude_near_field=True,
                             depth_band_gcm2=None, score_composition='product',
                             score_weights=None, distance_band_m=None,
-                            solid_angle_half_sr=None, clearance_full_at=None,
+                            solid_angle_half_sr=None,
+                            solid_angle_half_fraction=None,
+                            clearance_full_at=None,
                             min_score=0.0,
                             geomag_declination_deg=None, geomag_inclination_deg=None,
                             use_geomagnetic=True, grammage_mode='radio',
@@ -4415,6 +4418,10 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
     solid_angle_half_sr : float, optional
         Accepted solid angle scoring 0.5, in steradians. The 0.05 default is
         GRAND-scale and saturates against a canyon's much larger acceptance.
+    solid_angle_half_fraction : float, optional
+        Fraction of the sky the azimuth fan and arrival window could accept that scores
+        0.5. Dimensionless, so it does not move when either of those does -- which the
+        steradian form could not manage.
 
     clearance_full_at : float, optional
         Fresnel clearance ratio scoring 1.
@@ -4625,7 +4632,9 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
         "exclude_near_field": exclude_near_field,
         "depth_band_gcm2": depth_band_gcm2, "score_composition": score_composition,
         "score_weights": score_weights, "distance_band_m": distance_band_m,
-        "solid_angle_half_sr": solid_angle_half_sr, "clearance_full_at": clearance_full_at,
+        "solid_angle_half_sr": solid_angle_half_sr,
+        "solid_angle_half_fraction": solid_angle_half_fraction,
+        "clearance_full_at": clearance_full_at,
         "grammage_band_fraction": grammage_band_fraction,
         "min_score": min_score,
         "geomag_declination_deg": geomag_declination_deg,
@@ -4811,6 +4820,7 @@ def find_grand_regions_interactive(dem_path, cell_size_deg=None, target_antennas
                                   "decay_response": _decay_response,
                                   "shower_development_m": shower_development_m,
                                   "solid_angle_half_sr": solid_angle_half_sr,
+                                  "solid_angle_half_fraction": solid_angle_half_fraction,
                                   "clearance_full_at": clearance_full_at,
                                   "muon_shielding_km": muon_shielding_km},
                 min_score=min_score, rfi_zones_px=rfi_zones_px,
@@ -5062,6 +5072,7 @@ def main():
     parser.add_argument("--grammage_band_fraction", type=float, default=None, help="When the shower band is derived from an energy range, the fraction of peak particle content that still counts as a usable shower (default: 0.1). Lower admits younger and older showers, so it widens the band and accepts narrower canyons.")
     parser.add_argument("--shower_elongation_rate_gcm2", type=float, default=None, help="How much deeper shower maximum sits per decade of primary energy, in g/cm2 (default: 55, the usual hadronic value; a purely electromagnetic cascade is nearer 85).")
     parser.add_argument("--shower_lambda_gcm2", type=float, default=None, help="Gaisser-Hillas interaction length setting how fast the shower profile rises and falls, in g/cm2 (default: 70).")
+    parser.add_argument("--solid_angle_half_fraction", type=float, default=None, help="Fraction of the sky the azimuth fan and arrival window could accept that scores 0.5 (default: 0.076). Dimensionless and therefore portable: unlike --solid_angle_half_sr it does not have to be re-tuned when the fan width or the elevation window changes.")
     parser.add_argument("--solid_angle_half_sr", type=float, default=None, help="Accepted solid angle scoring 0.5, in steradians (default: 0.0167). This is a GRAND-scale value: an experiment looking across a canyon sees far more sky, and leaving it at the default saturates the term so it stops discriminating. It is calibrated against the reported solid angle, which depends on azimuth_half_width_deg and the elevation window -- change either and this wants re-checking.")
     parser.add_argument("--distance_band_m", type=float, nargs=2, default=None, metavar=("LO", "HI"), help="Exit-point distance band scoring 1, in metres. Defaults to the configured decay-baseline window.")
     parser.add_argument("--clearance_full_at", type=float, default=None, help="Fresnel clearance ratio, in first-Fresnel radii, that scores 1 (default: 1.0).")
