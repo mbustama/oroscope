@@ -147,3 +147,14 @@ html_logo = '_static/oroscope_logo.png'
 html_theme_options = {
     'logo_only': False,
 }
+
+# Click-to-enlarge on every figure. The figures render as SVG, so a browser zoom is
+# already lossless -- but that is a control the reader has to know to reach for, and it
+# magnifies the whole page rather than the diagram. These two files add the affordance:
+# a magnifier on each figure and an overlay that shows it as large as the viewport
+# allows. Kept as static assets rather than an extension because sphinxcontrib-images
+# and sphinx-lightbox2 both hook `figure::` directives, while every diagram on these
+# pages comes from a `jupyter-execute` block -- they would decorate the logo and miss
+# the figures. No dependency also means the docs still build offline.
+html_css_files = ['zoom.css']
+html_js_files = ['zoom.js']
