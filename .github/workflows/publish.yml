@@ -1,0 +1,214 @@
+name: Publish to PyPI
+
+# Two entry points, and which one fired decides which index is published to. Nothing
+# selects the target, because nothing needs to: the event is the selector.
+#
+#   release: published   ->  PyPI. The real thing.
+#   workflow_dispatch    ->  TestPyPI. A rehearsal, run from the Actions tab.
+#
+# Triggering the real publish on a published Release rather than on a tag is what makes
+# releasing deliberate. A tag can be pushed by accident; a release is written and
+# published on purpose, and it is the same object the changelog entry is attached to.
+#
+# The rehearsal has no way to reach PyPI and the release has no way to reach TestPyPI,
+# which is the point of splitting them by event rather than by an input. The obvious
+# alternative -- a `choice` input listing both indexes -- puts a real publish one wrong
+# dropdown away, and the version it would upload is unrepeatable. A knob that can do the
+# irreversible thing is worse than no knob.
+#
+# Same shape as the sibling projects Magnus and NuOscProbExact, deliberately. What
+# differs here is only what this repository actually is: the suite is stdlib `unittest`
+# run from `tests/`, and the promised floor is Python 3.9.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  # Publishing is irreversible: PyPI does not allow re-uploading a version, even a
+  # deleted one. Everything checkable has to be checked before the upload step, and the
+  # push-triggered runs on `main` are not enough on their own -- a release can be cut
+  # from any tag, including one whose commit predates a fix or was never pushed to a
+  # branch CI watches.
+  #
+  # This runs for the rehearsal too. A rehearsal that skips the gate is rehearsing a
+  # different workflow from the one that will publish.
+  test:
+    name: Test before publishing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.9, because that is the floor `requires-python` promises. Testing the floor is
+      # the point: a release that only works on the newest interpreter has advertised a
+      # range it does not support.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install the package and its test extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[test]"
+
+      # Run it exactly as `tests.yml` does, from inside `tests/`. The suite is stdlib
+      # unittest, and several of its modules resolve paths relative to the working
+      # directory; running it from the repository root instead is a known way to get a
+      # green gate that does not match CI. Not `pytest -n auto` as the sibling projects
+      # use -- pytest-xdist is not in this project's `test` extra, and adding a
+      # dependency to make the release gate faster is the wrong trade.
+      - name: Run the suite
+        working-directory: tests
+        run: python -m unittest discover -v
+
+  build-and-publish:
+    name: Build and publish to ${{ github.event_name == 'release' && 'PyPI' || 'TestPyPI' }}
+    needs: test
+    runs-on: ubuntu-latest
+
+    # Required for PyPI Trusted Publisher (OIDC) authentication. The runner exchanges a
+    # short-lived GitHub-signed token for an upload token at publish time, so there is
+    # no API token stored as a repository secret to leak or rotate.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12, not 3.9. `tomllib` reads the version below and is stdlib only from 3.11.
+      # The interpreter here does not affect the artifact: the package is pure Python
+      # and builds `py3-none-any` whatever runs the build, and `requires-python` is
+      # metadata rather than a build constraint. The `test` job above still runs 3.9,
+      # because that is the floor being promised.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runs for BOTH events on purpose. Reading the version is event-independent, so
+      # the rehearsal exercises the parse; only the tag comparison, which genuinely
+      # needs a tag, stays release-only.
+      - name: Read the packaged version
+        id: pkg
+        run: |
+          python -m pip install --upgrade pip
+          pkg="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+          echo "packaged version: $pkg"
+
+      # Nothing otherwise ties the tag to the packaging metadata: the tag names the
+      # release, the `version` field names the artifact, and they are edited in
+      # different places at different times. Tagging v0.5.0 while pyproject.toml still
+      # said 0.1.0 would publish 0.1.0 under a release called 0.5.0, and PyPI would then
+      # refuse the real 0.1.0 forever after, because a version cannot be uploaded twice.
+      #
+      # Release-only: a dispatched run has no tag, and `GITHUB_REF_NAME` is the branch it
+      # was started from, so this would compare a branch name against a version and
+      # always fail.
+      - name: Check the tag matches the packaged version
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="${{ steps.pkg.outputs.version }}"
+          echo "tag=$tag  pyproject=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::release tag '$GITHUB_REF_NAME' does not match pyproject version '$pkg'"
+            exit 1
+          fi
+
+      # The same pairing the suite asserts locally (`TestTheVersionIsOneNumber`), checked
+      # again here because the release gate must not depend on the suite having been run
+      # against this particular commit. `oroscope.__version__` is what every
+      # provenance.json stamps onto a stored result, so a mismatch would ship an artifact
+      # that misreports which code produced a number.
+      - name: Check __version__ matches the packaged version
+        run: |
+          pip install -e . --no-deps --quiet
+          dunder="$(python -c 'import oroscope; print(oroscope.__version__)')"
+          pkg="${{ steps.pkg.outputs.version }}"
+          echo "__version__=$dunder  pyproject=$pkg"
+          if [ "$dunder" != "$pkg" ]; then
+            echo "::error::oroscope.__version__ '$dunder' does not match pyproject version '$pkg'"
+            exit 1
+          fi
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Stamp a unique .devN version (rehearsal only)
+        # TestPyPI burns version numbers exactly as PyPI does: upload 0.5.0 once and
+        # every later attempt at 0.5.0 is refused, permanently, even after the file is
+        # deleted. A rehearsal you can only run once is not much of a rehearsal -- the
+        # second run, after fixing whatever the first found, would fail on the version
+        # rather than on the thing being tested.
+        #
+        # So a dispatched build is stamped 0.5.0.devN, where N is the run number and
+        # therefore never repeats. Under PEP 440 a .devN release sorts *below* the
+        # release it derives from, so these can never shadow a real 0.5.0, and
+        # `pip install oroscope` will not pick one up even from TestPyPI without --pre.
+        #
+        # Only the checkout on the runner is edited. Nothing is committed, and the
+        # release path never reaches this step, so the version that goes to PyPI is
+        # always the one written in pyproject.toml.
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          path = pathlib.Path('pyproject.toml')
+          text = path.read_text()
+          suffix = '.dev' + os.environ['GITHUB_RUN_NUMBER']
+          text, count = re.subn(r'(?m)^version = "([^"]+)"$',
+                                lambda m: 'version = "%s%s"' % (m.group(1), suffix),
+                                text, count=1)
+          # If the version line is ever reshaped, fail here rather than silently
+          # rehearsing the same number twice and blaming TestPyPI for rejecting it.
+          assert count == 1, 'no [project] version line found in pyproject.toml'
+          path.write_text(text)
+          print('rehearsing as', re.search(r'(?m)^version = "([^"]+)"$', text).group(1))
+          PY
+
+      - name: Build the package (sdist and wheel)
+        run: python -m build
+
+      # What PyPI will actually render. A README that fails to parse is not rejected at
+      # upload -- it is accepted and then shown as raw text or an error box on the
+      # project page, which cannot be fixed without publishing a new version. This
+      # README is long, carries tables and an embedded image, and is edited often, which
+      # is exactly the shape that eventually trips the renderer.
+      - name: Check the artifacts and the rendered description
+        run: |
+          pip install twine
+          twine check --strict dist/*
+
+      - name: Publish package to TestPyPI (rehearsal)
+        # The rehearsal, against https://test.pypi.org. `twine check` above catches the
+        # likeliest release failure, a README the renderer rejects, but it cannot
+        # exercise the OIDC exchange, the trusted publisher registration, or the upload
+        # itself. Those are only ever tested by uploading, and on PyPI proper the first
+        # test is also the last: a version refused halfway through cannot be retried,
+        # only renumbered.
+        #
+        # Run it from the Actions tab -> "Publish to PyPI" -> "Run workflow". Nothing
+        # needs editing, no release is cut, and nothing is left behind to revert.
+        #
+        # TestPyPI is a separate site with a separate account and its own
+        # pending-publisher registration, at
+        # https://test.pypi.org/manage/account/publishing/, using the same four values
+        # as PyPI: oroscope, mbustama, oroscope, publish.yml, and an empty environment
+        # name. It also does not mirror PyPI's dependencies, which matters here: numba
+        # and scipy are required, so a `pip install` *from* TestPyPI needs
+        # `--extra-index-url https://pypi.org/simple/` to resolve them.
+        if: github.event_name == 'workflow_dispatch'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish package to PyPI
+        # Reachable only from a published Release. A manual run cannot get here however
+        # the button is pressed, which is what makes the rehearsal above safe to use
+        # casually.
+        if: github.event_name == 'release'
+        uses: pypa/gh-action-pypi-publish@release/v1

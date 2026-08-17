@@ -27,7 +27,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
 
-__all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower"]
+# Every figure builder belongs here, because `automodule :members:` publishes from
+# `__all__`: a builder left out is drawn on the documentation and then absent from the
+# API reference that is supposed to describe it. The last three were added by a docs
+# commit that did not think to touch this list, and were missing from the reference for
+# exactly that reason.
+__all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower",
+           "pipeline_stages", "striding_and_closing", "score_composition"]
 
 # House style for anything a reader sees on a figure: **the first word of every axis
 # label, title, legend entry and annotation is capitalised.** Applies to the notebooks

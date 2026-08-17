@@ -367,6 +367,37 @@ class TestTheDocumentedPublicSurfaceIsReal(unittest.TestCase):
         for name in explain.__all__:
             self.assertTrue(hasattr(explain, name), f"explain.__all__ names {name}")
 
+    def test_no_name_in_all_is_missing_from_its_module(self):
+        """The same check, over every module that declares one."""
+        import importlib
+        for mod in ("physics", "scoring", "arrival_scan", "aperture", "explain",
+                    "site_searcher", "combine_experiments", "crop_dem", "sensitivity",
+                    "figures"):
+            m = importlib.import_module(f"oroscope.{mod}")
+            for name in getattr(m, "__all__", ()):
+                with self.subTest(module=mod, name=name):
+                    self.assertTrue(hasattr(m, name))
+
+    def test_every_figure_builder_is_exported(self):
+        """
+        The other direction, which is the one that actually broke.
+
+        ``__all__`` existing and every name in it resolving says nothing about a
+        public function that was never added. ``automodule :members:`` publishes from
+        ``__all__``, so ``pipeline_stages``, ``striding_and_closing`` and
+        ``score_composition`` were drawn on :doc:`howitworks` and simultaneously absent
+        from the API reference — added by a docs commit that did not touch the list.
+        """
+        import inspect
+
+        from oroscope import figures
+        builders = [n for n, o in vars(figures).items()
+                    if not n.startswith("_") and inspect.isfunction(o)
+                    and o.__module__ == figures.__name__]
+        missing = sorted(set(builders) - set(figures.__all__))
+        self.assertEqual(missing, [],
+                         f"public figure builders missing from __all__: {missing}")
+
 
 if __name__ == "__main__":
     unittest.main()

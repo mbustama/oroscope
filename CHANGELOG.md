@@ -10,11 +10,11 @@ prototype that number described.
 
 ### Added
 - **One import: `import oroscope`.** The modules moved from flat top-level names into a
-  real package, whose `__init__` re-exports the whole public surface — 131 names — while
+  real package, whose `__init__` re-exports the whole public surface — 151 names — while
   the submodules stay importable when a narrower namespace reads better. The notebooks'
   `sys.path` insert is gone; `pip install -e .` is the only setup step.
 - **A dedicated CLI page** in the documentation, with the complete option reference —
-  all 82, with types and defaults, generated from the parser so it cannot drift. The
+  all 87, with types and defaults, generated from the parser so it cannot drift. The
   README and the quickstart now lead with code, since that is how most people use this.
 - **Every run explains itself.** A plain-language summary — what was found, which
   funnel stage set the size of the answer and the parameter behind it, which named
