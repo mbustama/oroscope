@@ -16,7 +16,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        # 3.14 added because `requires-python = ">=3.9"` has no upper bound, so pip
+        # installs on it happily while nothing here had ever run it -- a user on 3.14
+        # got an untested install that looked supported. The stack does not block it:
+        # numba ships cp314 wheels and imagecodecs already requires >=3.12. Whether
+        # *this* code is fine on it is what this leg is for; the classifier stays off
+        # the list until this has actually passed.
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4

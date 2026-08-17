@@ -216,7 +216,7 @@ prototype that number described.
   and annotations, everywhere. Stated at the top of `figures.py` so it holds.
 - Renamed to **oroscope**; outputs are `oroscope_results_*` (the old prefix still reads).
 - `src/setup.py` → `src/oroscope/fetch_dem.py`, so `pip install` no longer runs the downloader.
-- Packaged: `pip install -e .`, five console scripts, CI on Python 3.9–3.13.
+- Packaged: `pip install -e .`, six console scripts, CI on Python 3.9–3.14.
 - Every criterion is a configuration knob; nothing that shapes a result is hard-coded.
 
 ### Known limitations

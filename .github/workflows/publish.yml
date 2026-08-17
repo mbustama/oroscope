@@ -121,10 +121,29 @@ jobs:
       # against this particular commit. `oroscope.__version__` is what every
       # provenance.json stamps onto a stored result, so a mismatch would ship an artifact
       # that misreports which code produced a number.
+      #
+      # Read out of the source rather than imported. The first version of this step did
+      # `pip install -e . --no-deps` and then `import oroscope`, which fails on the very
+      # first line of `__init__` with `No module named 'numpy'`: this job installs only
+      # `build` and `twine`, because building a pure-Python wheel needs nothing else.
+      # Installing the whole scientific stack to read one string literal would be the
+      # wrong trade even if it worked -- and the TestPyPI rehearsal is what caught it,
+      # which is the entire argument for rehearsing.
       - name: Check __version__ matches the packaged version
         run: |
-          pip install -e . --no-deps --quiet
-          dunder="$(python -c 'import oroscope; print(oroscope.__version__)')"
+          dunder="$(python - <<'PY'
+          import ast
+          import pathlib
+          tree = ast.parse(pathlib.Path("src/oroscope/__init__.py").read_text())
+          for node in tree.body:
+              if isinstance(node, ast.Assign) and any(
+                      getattr(t, "id", None) == "__version__" for t in node.targets):
+                  print(ast.literal_eval(node.value))
+                  break
+          else:
+              raise SystemExit("no __version__ assignment in src/oroscope/__init__.py")
+          PY
+          )"
           pkg="${{ steps.pkg.outputs.version }}"
           echo "__version__=$dunder  pyproject=$pkg"
           if [ "$dunder" != "$pkg" ]; then
@@ -150,6 +169,13 @@ jobs:
         # Only the checkout on the runner is edited. Nothing is committed, and the
         # release path never reaches this step, so the version that goes to PyPI is
         # always the one written in pyproject.toml.
+        #
+        # It edits pyproject.toml alone, so a rehearsal wheel is version 0.5.0.devN while
+        # `oroscope.__version__` inside it still reads 0.5.0 -- the one place those two
+        # are allowed to disagree, and only ever in a throwaway build. Patching both
+        # would make the artifact self-consistent at the cost of a second rewrite that
+        # the release path must never run; the check above has already compared the pair
+        # as committed, which is the comparison that matters.
         if: github.event_name == 'workflow_dispatch'
         run: |
           python - <<'PY'
