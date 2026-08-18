@@ -476,7 +476,7 @@ def pipeline_stages(figsize=(9.2, 5.4)):
     return fig
 
 
-def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
+def striding_and_closing(stride=5, element_px=(3, 5), figsize=(10.4, 3.2)):
     r"""
     Why the closing element has to outrun the gap that striding leaves.
 
@@ -525,15 +525,29 @@ def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
     strided = np.zeros_like(truth)
     strided[::stride, ::stride] = truth[::stride, ::stride]
 
+    # `[::stride, ::stride]` keeps every stride'th row *and* column, so it marks one
+    # pixel in stride**2 -- 1 in 25 here, not 1 in 5. The pipeline strides the flat list
+    # of surviving candidates instead and keeps 1 in 5. Both leave the same
+    # stride-sized gap, which is the only thing this figure is about, but the panel
+    # said "one pixel in 5" beside a mask holding a twenty-fifth of them, and a reader
+    # who checked the arithmetic against the funnel found two different numbers.
     panels = [("Accepted, every pixel", truth, None),
-              (f"Marked one pixel in {stride}", strided, None)]
+              (f"Marked on a {stride} px lattice", strided, None)]
     for k in element_px:
         panels.append((f"Closed, element {k} px",
                        binary_closing(strided, np.ones((k, k))), k))
 
+    # Recovery across a range of element sizes, for the last panel. This is the claim
+    # the figure exists to make, and a step is a poor thing to demonstrate with
+    # snapshots: below the gap every mask looks like the strided one, above it every
+    # mask looks recovered, so panels either side are near-duplicates carrying different
+    # captions. The curve shows the edge itself.
     base = int(truth.sum())
+    widths = list(range(1, 2 * stride + 3))
+    recovery = [binary_closing(strided, np.ones((k, k))).sum() / base for k in widths]
+
     with _styled():
-        fig, axes = plt.subplots(1, len(panels), figsize=figsize)
+        fig, axes = plt.subplots(1, len(panels) + 1, figsize=figsize)
         for ax, (name, mask, element) in zip(axes, panels):
             ax.imshow(mask, cmap="Greens", vmin=0, vmax=1.45,
                       interpolation="nearest")
@@ -541,10 +555,43 @@ def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
             ax.set_yticks([])
             for side in ax.spines.values():
                 side.set_color(RULE)
+            # The structuring element, drawn at the scale of the pixels it works on.
+            # Without it the below-gap and above-gap panels are the same picture with
+            # different captions -- which is the point being made, and the wrong way to
+            # make it. Drawn, the reader sees a square too small to span the gap beside
+            # one that spans it.
+            if element is not None:
+                ax.add_patch(Rectangle((6, 6), element, element, facecolor="white",
+                                       edgecolor=INK, lw=1.3, zorder=5))
+                ax.text(6 + element + 4, 6 + element / 2.0, f"{element} px wide",
+                        va="center", fontsize=7.5, color=INK, zorder=5)
+                # The gap it has to span, at the same scale and directly beneath, so the
+                # comparison the caption asserts is one the eye can make.
+                ax.plot([6, 6 + stride], [6 + element + 7] * 2, color=ROCK_EDGE,
+                        lw=1.3, zorder=5, solid_capstyle="butt")
+                ax.text(6 + stride + 4, 6 + element + 7, f"gap {stride} px",
+                        va="center", fontsize=7.5, color=ROCK_EDGE, zorder=5)
             verdict = ("" if element is None
                        else "  ✗" if element < stride else "  ✓")
             ax.set_xlabel(f"{name}{verdict}\n{mask.sum() / base:.2f}× the accepted set",
                           fontsize=8.5)
+
+        ax = axes[-1]
+        ax.step(widths, recovery, where="post", color=DETECTOR, lw=1.6)
+        ax.axvline(stride, color=ROCK_EDGE, lw=1.0, ls="--")
+        ax.text(stride + 0.4, 0.42, f"the gap,\n{stride} px", fontsize=7.5,
+                color=ROCK_EDGE, va="center", linespacing=1.3)
+        ax.text(0.97, 0.13, "A step,\nnot a slope", transform=ax.transAxes,
+                ha="right", va="center", fontsize=8.0, color=INK, linespacing=1.35)
+        ax.set_xlabel("Closing element (px)", fontsize=8.5)
+        ax.set_ylabel("× the accepted set", fontsize=8.5)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_xticks([1, stride, 2 * stride])
+        ax.tick_params(labelsize=7.5)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(RULE)
         fig.tight_layout()
     return fig
 
