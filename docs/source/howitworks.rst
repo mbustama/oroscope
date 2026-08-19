@@ -181,6 +181,31 @@ So ``min_score`` does not express a mild preference: it sits on a cliff, and **w
 lands depends on how many components happen to be enabled**. Adding a component moves
 every score down and silently tightens the cut.
 
+**The figure above is a demonstration, not a measurement.** Its six components are
+draws from a Beta(5, 2), deliberately generous — mean 0.714, mode 0.80 — so that the
+collapse cannot be blamed on poor terrain. What one real search does is a different and
+sharper story.
+
+.. jupyter-execute::
+   :hide-code:
+
+   from oroscope import figures
+   _ = figures.score_composition_measured()
+
+Every curve is the running product over the same **360,939 geometrically accepted
+candidates** of one Colca TAMBO run, with one more component multiplied in. The
+population is fixed; no candidate is removed between curves and only the scores move.
+
+``depth`` and ``distance`` are exactly 1.0 for *every* candidate, and ``shower`` for
+92.3% of them — so half the components do nothing whatever. Five of the six together
+still leave **96.3%** above the shipped cut. The sixth, ``solid_angle``, takes it to
+**17.8%** and the median composed score to **0.13**.
+
+So the honest statement about ``min_score`` on this terrain is not that a product of six
+criteria has no natural threshold. It is that **the cut is a cut on** ``solid_angle``,
+wearing a product as a disguise — the measured form of the caveat that ``solid_angle``
+is the weakest component at every selected site in every region.
+
 Measured on one real search, cuts of 0.0, 0.35 and 0.5 gave 65,268, 10,437 and **zero**
 detector positions. ``score_percentile`` is the scale-free alternative and is
 scored against the same ranking; see :doc:`assumptions`.

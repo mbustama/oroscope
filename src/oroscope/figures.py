@@ -33,7 +33,8 @@ from matplotlib.patches import Rectangle
 # commit that did not think to touch this list, and were missing from the reference for
 # exactly that reason.
 __all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower",
-           "pipeline_stages", "striding_and_closing", "score_composition"]
+           "pipeline_stages", "striding_and_closing", "score_composition",
+           "score_composition_measured"]
 
 # House style for anything a reader sees on a figure: **the first word of every axis
 # label, title, legend entry and annotation is capitalised.** Applies to the notebooks
@@ -49,6 +50,13 @@ DETECTOR = "#0F6B54"
 WINDOW = "#2C6E8F"
 # Ordered low elevation angle to high, and warm so they read against the terrain
 SEQUENCE = ["#C8901A", "#D2621B", "#B02A25", "#7B2D6B"]
+# `score_composition` draws six nested curves and SEQUENCE holds four, so indexing it
+# with min(i, len-1) gave curves 4, 5 and 6 one identical purple. Hand-spaced along the
+# same ramp rather than interpolated, which bunched the middle pair. SEQUENCE itself is
+# left alone: four other builders index it positionally.
+_COMPOSITION_COLOURS = ["#C8901A", "#D2621B", "#B02A25",
+                        "#96295C", "#7B2D6B", "#4E2A6E"]
+
 _STYLE = {
     "font.family": "sans-serif",
     "font.size": 9,
@@ -638,6 +646,13 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
     **multiplication**, so a candidate has to be good at everything, and the composed
     score of several components piles up near zero however good the terrain is.
 
+    **The curves are synthetic.** Six independent draws from a Beta(5, 2) stand in for
+    six components; no search, terrain or stored result is involved. The distribution
+    is deliberately generous --- mean 0.714, mode 0.80 --- so that the collapse cannot
+    be blamed on poor terrain. This figure demonstrates the *mechanism*; it is not a
+    measurement, and the page that publishes it prints a measured sentence directly
+    beneath, which is exactly the confusion the note on the axes exists to prevent.
+
     A cut placed in the middle of that pile is therefore not a mild preference: it is a
     cliff, and where it lands depends on how many components happen to be enabled.
     Adding a component moves every score down and so silently tightens the cut.
@@ -671,15 +686,28 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
         for i, part in enumerate(parts, start=1):
             running = running * part
             ax.hist(running, bins=60, range=(0, 1), histtype="step",
-                    color=SEQUENCE[min(i - 1, len(SEQUENCE) - 1)], lw=1.3,
-                    density=True)
-        ax.axvline(cut, color="#B02A25", lw=1.6)
-        ax.text(cut + 0.02, ax.get_ylim()[1] * 0.92, f"min_score = {cut}",
-                color="#B02A25", fontsize=9, va="top")
-        ax.set_xlabel("Composed score, as components are multiplied in")
+                    color=_COMPOSITION_COLOURS[i - 1], lw=1.3, density=True,
+                    label=f"{i}")
+        # The cut is an annotation, not a seventh curve, so it gets its own ink. It
+        # used to be drawn in SEQUENCE[2] exactly -- the same red as the three-component
+        # histogram it crosses.
+        ax.axvline(cut, color=INK, lw=1.4, ls="--")
+        ax.text(cut + 0.02, ax.get_ylim()[1] * 0.98, f"min_score = {cut}",
+                color=INK, fontsize=9, va="top")
+        ax.set_xlabel("Composed score")
         ax.set_ylabel("Density")
         ax.set_xlim(0, 1)
+        # Placed mid-height rather than in a bottom corner: the many-component curves
+        # run long tails along the baseline and a corner note would sit on them.
+        ax.text(0.98, 0.55, "Synthetic components,\nBeta(5, 2)", transform=ax.transAxes,
+                ha="right", va="top", fontsize=7.5, color=MUTED, style="italic",
+                linespacing=1.3)
         _tidy(ax)
+        # Six nested cumulative products, not six criteria. Without this a reader takes
+        # each curve for one named component, which is the natural reading and wrong.
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=6,
+                  title="Components multiplied in", fontsize=8, title_fontsize=8.5,
+                  handlelength=1.1, columnspacing=1.1, handletextpad=0.5)
 
         kept = []
         running = np.ones(n)
@@ -690,6 +718,150 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
         bx.set_xlabel("Components multiplied in")
         bx.set_ylabel("Above the cut (%)")
         bx.set_ylim(0, 105)
+        _tidy(bx)
+        fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------------
+# Measured composition, Colca TAMBO. Binned counts rather than a stored run, because
+# `score_composition_measured` is executed by the documentation build and a builder
+# that needs a DEM fails on every machine that has never run this project. The numbers
+# below summarise 360,939 real candidates; they are not a model of them.
+#
+# Provenance: `config/tambo_colca_config.json` over `input/dem/colca.tif`
+# (sha256 29676fa7...), candidate_stride 5, min_score 0.35, measured 2026-08-18.
+# Funnel: 6,063,841 DEM pixels -> 2,382,441 in the slope band -> 476,489 kept by
+# stride -> 360,939 directions accepted -> 64,152 above the cut.
+#
+# The six components multiply to the run's own composed score to 1.7e-16, so this is
+# the whole scoring model rather than a subset of it. **Regenerate with
+# `tools/measure_score_composition.py` if scoring changes** -- nothing here can notice
+# on its own that it has gone stale.
+_MEASURED_N = 360939
+_MEASURED_NAMES = ['depth', 'distance', 'shower', 'decay', 'footprint', 'solid_angle']
+_MEASURED_ABOVE_CUT = [100.0, 100.0, 100.0, 100.0, 96.28, 17.77]
+_MEASURED_COMPONENT_MEDIAN = [1.0, 1.0, 1.0, 0.9558, 0.81, 0.1907]
+_MEASURED_RUNNING_MEDIAN = [1.0, 1.0, 1.0, 0.9533, 0.7719, 0.1321]
+_MEASURED_COUNTS = (
+    # depth
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1934, 10244, 348761),
+    # distance
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1934, 10244, 348761),
+    # shower
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 43, 175, 641, 1488, 2265, 2882,
+     3475, 4135, 4798, 5130, 5554, 6009, 6327, 6501, 6967, 7081, 7476, 7740, 8124, 8270, 8656, 8987, 9010, 10433, 14273, 214483),
+    # decay
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 26, 73, 384, 1095, 2017, 2686, 3294, 3956, 4612,
+     5029, 5459, 5951, 6177, 6482, 6873, 7072, 7287, 7666, 8098, 8299, 8518, 8980, 9173, 9154, 9536, 24171, 161582, 37286, 0),
+    # footprint
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 170, 1001, 2055, 2776, 3477,
+     3910, 4353, 4652, 4818, 5152, 5188, 5318, 5438, 5523, 5681, 5730, 6029, 5847, 6174, 6205, 6240, 6483, 6557, 6578, 6875,
+     7099, 7424, 8330, 9495, 10570, 11460, 12293, 12358, 12501, 12232, 11687, 10596, 9928, 9141, 8818, 8122, 10998, 30275, 35350, 0),
+    # solid_angle
+    (21307, 44380, 23103, 25671, 22136, 14302, 16001, 14319, 13030, 9881, 10736, 10363, 9820, 9119, 8456, 8026, 7823, 7616, 7347, 6697,
+     6654, 6773, 6201, 5973, 5817, 5581, 5474, 4976, 4678, 4269, 3686, 3191, 2555, 1952, 1440, 859, 465, 188, 52, 18,
+     4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+)
+
+
+def score_composition_measured(cut=0.35, figsize=(7.8, 3.4)):
+    r"""
+    What the product does to real candidates, rather than to a model of them.
+
+    The companion to :func:`score_composition`, which demonstrates the mechanism with
+    invented components. This one is measured: each curve is the running product over
+    the same **360,939 geometrically accepted candidates** of one Colca TAMBO run, with
+    one more component multiplied in. No candidate is removed between curves --- the
+    population is fixed and only its scores move left. What survives the cut at the end
+    is 64,152 of them.
+
+    The result does not resemble the mechanism figure, and that is the point. ``depth``
+    and ``distance`` are exactly 1.0 for *every* candidate and ``shower`` for 92.3% of
+    them, so three of the six components do nothing whatever. Five of the six together
+    still leave **96.3%** above the shipped cut. The sixth, ``solid_angle``, takes it
+    to **17.8%**.
+
+    So ``min_score`` is not really a threshold on a product of six criteria. It is a
+    cut on ``solid_angle`` wearing a product as a disguise --- the measured form of the
+    caveat that ``solid_angle`` is the weakest component at every selected site in
+    every region.
+
+    Components enter least-restrictive first, so the collapse is attributable to a
+    named component rather than to the number of them.
+
+    Parameters
+    ----------
+    cut : float, optional
+        Where ``min_score`` is drawn. The stored percentages are those of the shipped
+        0.35 and are not recomputed, so another value moves the line without moving
+        the curve beside it.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.score_composition_measured()
+    >>> len(fig.axes)
+    2
+    """
+    edges = np.linspace(0.0, 1.0, 61)
+    width = edges[1] - edges[0]
+
+    with _styled():
+        fig, (ax, bx) = plt.subplots(1, 2, figsize=figsize)
+        labels = [_MEASURED_NAMES[0]] + [f"+{n}" for n in _MEASURED_NAMES[1:]]
+        for i, (counts, label) in enumerate(zip(_MEASURED_COUNTS, labels)):
+            density = np.asarray(counts, dtype=float) / (_MEASURED_N * width)
+            ax.stairs(density, edges, color=_COMPOSITION_COLOURS[i], lw=1.3,
+                      label=label)
+        ax.set_xlim(0, 1)
+        # depth, distance and shower sit at 1.0 for almost every candidate, so their
+        # curves are delta spikes that drive the density axis past 55 and flatten the
+        # three components that actually move the score. Clipped, with the spike named.
+        ax.set_ylim(0, 8)
+        ax.axvline(cut, color=INK, lw=1.4, ls="--")
+        # Axes fraction on y: the clip above makes a data-unit position meaningless.
+        ax.text(cut + 0.02, 0.97, f"min_score = {cut}",
+                transform=ax.get_xaxis_transform(), color=INK, fontsize=9, va="top")
+        ax.set_xlabel("Composed score")
+        ax.set_ylabel("Density")
+        ax.annotate("Depth, distance, shower:\nspike at 1.0, clipped",
+                    xy=(0.99, 7.85), xytext=(0.72, 6.6), fontsize=7.0, color=MUTED,
+                    ha="center", va="top", linespacing=1.3,
+                    arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.8))
+        # In the gap above the descending solid_angle tail: the bottom right sits on
+        # the curves and the top left runs into the y-axis.
+        ax.text(0.07, 0.76, f"Colca, TAMBO\n{_MEASURED_N:,} candidates",
+                transform=ax.transAxes, ha="left", va="top", fontsize=7.5,
+                color=MUTED, style="italic", linespacing=1.3)
+        _tidy(ax)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3,
+                  title="Components multiplied in", fontsize=7.5, title_fontsize=8.5,
+                  handlelength=1.1, columnspacing=1.0, handletextpad=0.5)
+
+        bx.plot(range(1, len(_MEASURED_NAMES) + 1), _MEASURED_ABOVE_CUT, marker="o",
+                color="#B02A25", lw=1.8)
+        bx.set_xticks(range(1, len(_MEASURED_NAMES) + 1))
+        bx.set_xticklabels(_MEASURED_NAMES, rotation=35, ha="right", fontsize=7.5)
+        bx.set_ylabel("Above the cut (%)")
+        bx.set_ylim(0, 105)
+        for i in (4, 5):
+            bx.annotate(f"{_MEASURED_ABOVE_CUT[i]:.1f}%",
+                        xy=(i + 1, _MEASURED_ABOVE_CUT[i]), xytext=(0, -13),
+                        textcoords="offset points", ha="center", fontsize=7.5,
+                        color="#B02A25")
         _tidy(bx)
         fig.tight_layout()
     return fig
