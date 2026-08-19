@@ -49,7 +49,6 @@ DETECTOR = "#0F6B54"
 WINDOW = "#2C6E8F"
 # Ordered low elevation angle to high, and warm so they read against the terrain
 SEQUENCE = ["#C8901A", "#D2621B", "#B02A25", "#7B2D6B"]
-
 _STYLE = {
     "font.family": "sans-serif",
     "font.size": 9,
@@ -486,8 +485,9 @@ def striding_and_closing(stride=5, element_px=(3, 5), figsize=(10.4, 3.2)):
     gap the marks never touch and the mask stays a scatter; above it the region
     reappears almost intact.
 
-    The transition is **at** the gap and it is abrupt, not gradual. That is the whole
-    content of the figure, and it is the mechanism behind a real 1.51x under-report of
+    The transition is **at** the gap and it is abrupt, not gradual. A second, far
+    smaller step follows at twice the gap, where the element grows wide enough to
+    bridge second-neighbour marks as well. That is the whole content of the figure, and it is the mechanism behind a real 1.51x under-report of
     TAMBO's area at Colca --- and a 23.0x one on the steeper ground of the Callejon de
     Huaylas, where the accepted strips are narrower still. Both were far larger at
     TAMBO's old 100 m element, 4.75x and 291x, which is the cliff drawn here: 100 m is
@@ -546,30 +546,53 @@ def striding_and_closing(stride=5, element_px=(3, 5), figsize=(10.4, 3.2)):
     widths = list(range(1, 2 * stride + 3))
     recovery = [binary_closing(strided, np.ones((k, k))).sum() / base for k in widths]
 
+    # The panels show a 48 px detail rather than the whole 120 px field. Across the
+    # full extent one data pixel renders about 2.6 px wide, so the 3 px element and the
+    # 5 px one differed by five pixels on the page: the square meant to show why one
+    # bridges the gap and the other cannot instead read as a legend swatch. The window
+    # sits where the band turns, so both of its edges stay in frame and the panel still
+    # shows a strip of ground rather than a wedge. Cropping costs no information here --
+    # the fractions printed under each panel are measured over the *whole* mask. The
+    # panel is a detail; the number is not.
+    win = (slice(8, 56), slice(44, 92))
+    win_h = win_w = 48
+
+    # A blank strip above the image carries the structuring element, so the swatch and
+    # the gap bar cannot land on the mask. Drawn inside the frame they did: at element
+    # 5 px the bar and its label sat on green and were unreadable.
+    strip = 13
+
     with _styled():
         fig, axes = plt.subplots(1, len(panels) + 1, figsize=figsize)
         for ax, (name, mask, element) in zip(axes, panels):
-            ax.imshow(mask, cmap="Greens", vmin=0, vmax=1.45,
+            ax.imshow(mask[win], cmap="Greens", vmin=0, vmax=1.45,
                       interpolation="nearest")
             ax.set_xticks([])
             ax.set_yticks([])
+            ax.set_xlim(-0.5, win_w - 0.5)
+            ax.set_ylim(win_h - 0.5, -0.5 - strip)
+            # The frame belongs around the terrain, not around the terrain and the strip
+            # together, so the spines come off and the image is given its own border.
             for side in ax.spines.values():
-                side.set_color(RULE)
+                side.set_visible(False)
+            ax.add_patch(Rectangle((-0.5, -0.5), win_w, win_h, fill=False,
+                                   edgecolor=RULE, lw=1.0, zorder=4))
             # The structuring element, drawn at the scale of the pixels it works on.
             # Without it the below-gap and above-gap panels are the same picture with
             # different captions -- which is the point being made, and the wrong way to
             # make it. Drawn, the reader sees a square too small to span the gap beside
             # one that spans it.
             if element is not None:
-                ax.add_patch(Rectangle((6, 6), element, element, facecolor="white",
+                y0 = -0.5 - strip + 2
+                ax.add_patch(Rectangle((0, y0), element, element, facecolor="white",
                                        edgecolor=INK, lw=1.3, zorder=5))
-                ax.text(6 + element + 4, 6 + element / 2.0, f"{element} px wide",
+                ax.text(element + 2, y0 + element / 2.0, f"{element} px wide",
                         va="center", fontsize=7.5, color=INK, zorder=5)
                 # The gap it has to span, at the same scale and directly beneath, so the
                 # comparison the caption asserts is one the eye can make.
-                ax.plot([6, 6 + stride], [6 + element + 7] * 2, color=ROCK_EDGE,
-                        lw=1.3, zorder=5, solid_capstyle="butt")
-                ax.text(6 + stride + 4, 6 + element + 7, f"gap {stride} px",
+                ax.plot([0, stride], [y0 + element + 2.5] * 2, color=ROCK_EDGE,
+                        lw=1.8, zorder=5, solid_capstyle="butt")
+                ax.text(stride + 2, y0 + element + 2.5, f"gap {stride} px",
                         va="center", fontsize=7.5, color=ROCK_EDGE, zorder=5)
             verdict = ("" if element is None
                        else "  ✗" if element < stride else "  ✓")
@@ -581,7 +604,17 @@ def striding_and_closing(stride=5, element_px=(3, 5), figsize=(10.4, 3.2)):
         ax.axvline(stride, color=ROCK_EDGE, lw=1.0, ls="--")
         ax.text(stride + 0.4, 0.42, f"the gap,\n{stride} px", fontsize=7.5,
                 color=ROCK_EDGE, va="center", linespacing=1.3)
-        ax.text(0.97, 0.13, "A step,\nnot a slope", transform=ax.transAxes,
+        # Recovery steps twice, not once: an element twice the gap also bridges
+        # second-neighbour marks and gains a further 0.06x on top of the 0.64x at the
+        # gap. Small, but `set_xticks` already puts a tick at 2 * stride, so the axis
+        # was drawing the eye to a step the annotation denied was there.
+        ax.axvline(2 * stride, color=RULE, lw=1.0, ls=":")
+        ax.text(2 * stride + 0.4, 0.88, "2× the gap", fontsize=7.5, color=ROCK_EDGE,
+                va="center")
+        # Kept short deliberately: right-aligned, two words a line clears the riser at
+        # the gap. A longer line reaches back across it, and masking the overlap with a
+        # white bbox erases the very step the figure is about.
+        ax.text(0.97, 0.13, "A cliff,\nnot a slope", transform=ax.transAxes,
                 ha="right", va="center", fontsize=8.0, color=INK, linespacing=1.35)
         ax.set_xlabel("Closing element (px)", fontsize=8.5)
         ax.set_ylabel("× the accepted set", fontsize=8.5)

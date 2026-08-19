@@ -109,14 +109,39 @@ Striding and closing are one decision, not two
    from oroscope import figures
    _ = figures.striding_and_closing()
 
+Subsampling is legitimate, and the reason is worth stating rather than asserting:
+**a fraction survives sampling; a shape does not.** Keeping one candidate in five tells
+you what *share* of the ground is viable to within a rounding error — 58.414% at stride 1
+against 58.415% at stride 5 for GRAND, 75.750% against 75.736% for TAMBO. It does not
+tell you *where*, because a site is a place and not a statistic. So the map has to be
+rebuilt, and that rebuild is what closing is for.
+
 Striding leaves a gap of ``candidate_stride`` pixels between kept candidates. Closing
 repairs it — but only if its structuring element is **larger than that gap**. Below the
 gap the marks never touch and the mask stays a scatter of isolated pixels; above it the
 region reappears almost intact.
 
+**Closing is a dilation followed by an erosion.** Dilation stamps the structuring
+element on every marked pixel; erosion then keeps only the ground where the whole
+element still fits. Gaps narrower than the element are filled, everything else returns
+to the shape it started as, and nothing is ever removed. Marks left on a lattice are
+therefore reconnected exactly when neighbouring stamps touch — which happens when the
+element is at least as wide as the gap. Below that the stamps stay apart, erosion peels
+each one back to the single pixel it grew from, and the output is *identical* to the
+input. That is why the comparison is a cliff and not a ramp: whether two stamps touch
+is a yes-or-no question.
+
 **The transition is at the gap and it is abrupt.** In the figure a 3-pixel element
 recovers 0.04× of the accepted set and a 5-pixel one recovers 0.68× — seventeen times
-more, for two pixels of element.
+more, for two pixels of element. A second and far smaller step follows at *twice* the
+gap, where the element grows wide enough to bridge second-neighbour marks; it is worth
+0.06× against the 0.64× at the gap.
+
+One arithmetic note, because the figure and the pipeline stride differently. The figure
+thins a two-dimensional lattice, keeping every fifth row *and* column, so it marks one
+pixel in twenty-five. The pipeline thins the flat list of surviving candidates and keeps
+one in five — 3,853,258 to 770,652 for GRAND at Colca. Both leave the same five-pixel
+gap, which is the only thing the figure is about.
 
 This is not a hypothetical. It is the mechanism behind a real **1.51× under-report** of
 TAMBO's area at Colca, and a **23.0× one** on the steeper ground of the Callejón de
