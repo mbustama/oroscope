@@ -7,8 +7,8 @@ the audited code.** This one inherits a consistent repository and a physics to-d
 **Repository:** `mbustama/oroscope`, **public**. Local path `~/Research/GRAND/oroscope`.
 A `site_search` symlink sits beside it for anything pointing at the old path.
 
-**Branch:** `dev`, level with `main`. **706 tests**, stdlib `unittest`, on Python
-3.9–3.14. **`oroscope` 0.5.0 is on PyPI**, tagged `v0.5.0`, with a published GitHub
+**Branch:** `dev`, **4 commits ahead of `main` and pushed**, open as PR #12.
+**708 tests**, stdlib `unittest`, on Python 3.9–3.14. **`oroscope` 0.5.0 is on PyPI**, tagged `v0.5.0`, with a published GitHub
 Release. **Documentation:** <https://mbustama.github.io/oroscope/>, built from `main`.
 
 `main` is protected: PR required, seven checks, zero approvals. You can open a PR and
@@ -44,8 +44,33 @@ cannot launch it.
 
 ## 1. The immediate job
 
-**There isn't one.** The re-run landed, 0.5.0 is published and installable from PyPI,
-the branches are level and nothing is unpushed. What follows is a backlog, not a queue.
+**Merge PR #12, or say why not.** It is the only thing waiting on a person: `main` is
+protected and the permission classifier blocks `gh pr merge`, so the merge command has
+to be the owner's. Nothing else blocks; what follows is a backlog, not a queue.
+
+PR #12 carries four commits — the striding element redrawn at a legible scale, the
+product-collapse figure labelled as the synthetic demonstration it always was, a
+measured companion built from a real Colca run, and GRAND's geometry drawn for the
+first time. **No published area, share or capacity changes.**
+
+It also lands two findings worth reading before quoting any co-location number, both in
+`docs/ROADMAP.md`:
+
+- **§6.75** — `min_score` 0.35 has no derivation, and it is entangled with
+  `solid_angle_half_fraction` (0.186135 for TAMBO against the 0.076 default), set in the
+  same sitting. Measured on a real Colca run: five of six components leave **96.3%**
+  above the cut and `solid_angle` alone takes it to **17.8%**. The cut is a cut on that
+  one component.
+- **§6.76** — GRAND never sets `min_score` at all, which is an omission rather than a
+  choice: its median composed score is **0.189** against TAMBO's **0.132**. So every
+  co-location share compares a score-filtered TAMBO mask against an **unfiltered** GRAND
+  one. Neither the 2-D knob sweep nor the symmetric-cut re-run has been done; both
+  entries say so rather than implying a bound. **These are the two measurements most
+  worth doing next.**
+
+The talk this work came out of was given on 2026-08-18 and went well. `docs/TALK_BRIEF.md`
+and `docs/TALK_OUTLINE.md` remain as the record; the session-specific handover beside
+them has been removed as spent.
 
 Two things are the owner's call and neither blocks anything:
 
