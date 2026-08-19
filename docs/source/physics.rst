@@ -143,6 +143,29 @@ deploy on: 3–25°. Colca's canyon walls are ~40°, far outside that. A single 
 slope band cannot express both, which is the clearest single argument for
 per-experiment criteria.
 
+The slope band is not the only thing that differs. The two experiments ask the same
+structural question — is there a target surface, at the right range, in the right
+direction — at scales an order of magnitude apart, and one shared axis is the quickest
+way to see it.
+
+.. jupyter-execute::
+   :hide-code:
+
+   from oroscope import figures
+   _ = figures.grand_and_tambo_scales()
+
+GRAND stands on ground inside its 3–25° band and watches a massif through a window 3°
+about the horizon; its sight line ends where it first meets ground, 27 km out here.
+TAMBO's whole cross-section — the canyon drawn above, 4.5 km rim to rim — is the notch
+in the first tenth of the same axis, and it looks across 2–5 km through a window 20°
+wide.
+
+**Neither description conflicts with the other.** They differ in range and in angle,
+not in kind, which is why one engine serves both and adding an experiment is a
+configuration rather than a code path. What the two genuinely compete for is the slope
+of the pixel they stand on — settled at the screening step, before any arrival geometry
+is considered.
+
 The far wall
 ````````````
 

@@ -3981,6 +3981,125 @@ arrival scan and scoring "share a bar" (they are two bars since the funnel was s
 still quoted the `min_score` sweep as 45,928 / 2,056 / zero rather than 65,268 / 10,437 /
 zero. A grep for changed *numbers* does not find a sentence whose *claim* has changed.
 
+### 6.75 `min_score` is a cut on one component, and it was set alongside that component
+
+Asked where 0.35 came from. It has no derivation, and the answer is worse than "a knob":
+**it is entangled with a second undetermined knob set in the same commit.**
+
+**Provenance.** The CLI default is `0.0`, keep-all, and every GRAND config still uses it —
+only the eight TAMBO configs carry 0.35, all introduced by `89155b3` (2026-08-15). That
+commit's own config comment justifies *having* a cut and not the value: "`min_score` is
+the cut that turns the score into an actual filter — with 0.0 the score is computed and
+then ignored, which is why an earlier run accepted 91.7% of candidates." Its message
+documents the scoring fixes at length and never mentions 0.35. §6.43 later swept it: 0.35
+is `score_percentile` 22.8 on Colca terrain, area runs smoothly from 3.1 to 186.8 km²
+across the range, and nothing marks any value as natural.
+
+**Measured over a full region.** Per-candidate component scores dumped from the Colca
+TAMBO run — 360,939 geometrically accepted candidates, reproducing the stored funnel
+exactly. The six components multiply to the run's own composed score to 1.7e-16, so this
+is the whole scoring model:
+
+| multiplied in | component median | above the cut |
+| --- | --- | --- |
+| `depth` | 1.0000 | 100.0% |
+| `distance` | 1.0000 | 100.0% |
+| `shower` | 1.0000 | 100.0% |
+| `decay` | 0.9558 | 100.0% |
+| `footprint` | 0.8100 | 96.3% |
+| `solid_angle` | 0.1907 | **17.8%** |
+
+`depth` and `distance` are *exactly* 1.0 for every candidate and `shower` for 92.3% of
+them. Five components together leave 96.3% above the cut; the sixth takes it to 17.8% and
+the median composed score to 0.13.
+
+**The entanglement, which is the point of this entry.** `89155b3` also raised
+`solid_angle_half_sr` from 0.05 to 0.8, because the 0.05 default is GRAND-scale and
+"saturates the term so it stops discriminating at all" against a canyon's 0.2–1.5 sr. So
+the solid-angle term was deliberately given range in the same sitting, and a cut was then
+placed on a product that term now dominates. **TAMBO's acceptance is set by the pair, not
+by `min_score` alone.**
+
+That knob has since been replaced rather than removed: §6.67 made the solid-angle score
+scale-free, so the absolute `solid_angle_half_sr` is now `None` everywhere and the live
+knob is **`solid_angle_half_fraction`, which the TAMBO configs set to 0.186135** while
+GRAND leaves it at the 0.076 default. The entanglement survives the refactor intact — it
+is still one free scale multiplying into a product, with an absolute cut placed on the
+result — and the two experiments now differ in *that* knob as well as in `min_score`.
+Rescale the fraction and 0.35 means something else entirely; the two cannot be varied
+independently, and every sensitivity sweep over `min_score` so far has held the other
+fixed at an equally undetermined value. Calling `min_score` "the dominant assumption"
+understates it.
+
+**Not done:** the two-dimensional sweep over (`solid_angle_half_fraction`, `min_score`). It is
+the sweep that would say whether the 17.8% is a property of the terrain or of the pair,
+and neither knob has ever been varied with the other free.
+
+**§6.45 got here first, on less data.** It measured the same collapse over the central
+40% of the Colca DEM (98,343 viable) and already concluded that "one component does nine
+tenths of it and two do nothing measurable", including that `distance` is *provably*
+inert because the arrival scan applies the same 2–5 km window as a hard criterion, so
+every survivor scores 1.0 by construction. This entry is that finding on the full region
+rather than a new one. Keep the two populations apart: §6.45 reports 32.2% above the cut
+on its crop, this reports 17.8% on the production run, and both are right for their own
+sample.
+
+**Reproduce** with `tools/measure_score_composition.py`, which wraps `run_arrival_scan`
+rather than modifying `src/` and refuses to emit anything if the components stop
+reproducing the composed score. `figures.score_composition_measured` publishes the result
+beside the synthetic `score_composition`, which is now labelled as the demonstration it
+always was.
+
+### 6.76 GRAND is scored and then not filtered, and the joint numbers are asymmetric
+
+Follow-up to §6.75: why 0.0 for GRAND and 0.35 for TAMBO. **It is not two choices, it is
+one choice and one omission.** No GRAND config sets `min_score` at all — they inherit the
+CLI default of 0.0 — and nothing in the configs, the commits, this file or the
+documentation states a reason. TAMBO's 0.35 was set deliberately in `89155b3`.
+
+**The two experiments do not score the same quantities.** Dumped from the Colca GRAND run
+(770,652 candidates, 449,939 scoring above zero):
+
+| | GRAND | TAMBO |
+| --- | --- | --- |
+| components | 7 | 6 |
+| which | clearance, depth, distance, footprint, **geomagnetic**, shower, solid_angle | depth, distance, **decay**, footprint, shower, solid_angle |
+| median composed score | **0.189** | **0.132** |
+| kept by a 0.35 cut | **19.4%** | 17.8% |
+
+A single threshold therefore means different things on each side; it is not a shared
+scale. GRAND's own component medians: `distance` 1.0 (inert, and for §6.45's reason — the
+scan already applied the window as a hard criterion), `shower` 1.0 for 99.3%, `depth` 1.0
+for 96.9%, `clearance` 1.0 for 61.9%, `geomagnetic` 0.747, `solid_angle` 0.549,
+`footprint` 0.606.
+
+**The asymmetry cannot be defended on the distributions.** GRAND's score is not better
+behaved than TAMBO's — median 0.189 against 0.132, and 0.35 would keep 19.4% of GRAND
+against 17.8% of TAMBO. Both pile up near zero in the same way. What the asymmetry
+amounts to is that on every GRAND run **the score is computed and then ignored**, which is
+word for word the condition `89155b3`'s config comment gives as the reason 0.35 was
+introduced for TAMBO.
+
+**The consequence, and it reaches the headline number.** Every co-location figure
+intersects a *score-filtered* TAMBO mask with an *unfiltered* GRAND mask. The joint shares
+— 76.4% and 78.5% on the unbiased crops, 55.6–59.7% on the departments — are therefore
+measured against the most permissive GRAND mask the pipeline can produce. Applying any cut
+to GRAND can only shrink its mask, and closing is monotone, so the intersection and the
+share can only fall; pruning's size and capacity thresholds make the magnitude
+unpredictable, because a slightly smaller mask can lose whole regions at once.
+
+**Not done, and it is the measurement that settles it:** re-run the combination with a
+symmetric cut on both experiments. This entry measures the *inputs* only. Nothing here
+says how far the share moves, and it should not be quoted as if it did.
+
+**One expectation refuted in passing.** 240 candidates pass GRAND's geometry and score
+exactly zero. The obvious suspect was the documented `sin α → 0` pathology, since Peru sits near the
+magnetic equator and a product composition rejects such a site outright. It is not that:
+all 240 are zeroed by `clearance`, and `geomagnetic` never reaches zero at Colca — its
+minimum over accepted candidates is **0.168**. The magnetic-equator caveat is real and
+remains unmodelled, but it does not bite on this terrain, and quoting Colca as evidence
+for it would be wrong.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,

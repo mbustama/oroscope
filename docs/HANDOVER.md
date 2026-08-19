@@ -7,9 +7,9 @@ the audited code.** This one inherits a consistent repository and a physics to-d
 **Repository:** `mbustama/oroscope`, **public**. Local path `~/Research/GRAND/oroscope`.
 A `site_search` symlink sits beside it for anything pointing at the old path.
 
-**Branch:** `dev`, head **`c6bcf03`**. **682 tests**, stdlib `unittest`, ~145 s.
-`main` is **121 commits behind**.
-**Documentation:** <https://mbustama.github.io/oroscope/>, built from `main`.
+**Branch:** `dev`, **4 commits ahead of `main` and pushed**, open as PR #12.
+**708 tests**, stdlib `unittest`, on Python 3.9–3.14. **`oroscope` 0.5.0 is on PyPI**, tagged `v0.5.0`, with a published GitHub
+Release. **Documentation:** <https://mbustama.github.io/oroscope/>, built from `main`.
 
 `main` is protected: PR required, seven checks, zero approvals. You can open a PR and
 report its checks, but **you cannot merge** — the permission classifier blocks
@@ -36,21 +36,60 @@ admitting otherwise, because it no longer needs one.
 striding artefacts. The joint share is **two rows and never one**: ~56–60% strided,
 ~76–79% unbiased. Roadmap §6.70.
 
-**No ultrareview has been run on this work.** The owner declined for now. It is still
-the obvious thing to do before the merge, and `/code-review ultra` is user-triggered and
-billed — you cannot launch it.
+**No ultrareview has ever been run on this work**, through the audits and the release
+alike. The owner declined; `/code-review ultra` is user-triggered and billed, and you
+cannot launch it.
 
 ---
 
 ## 1. The immediate job
 
-`dev` is one commit ahead of `origin/dev` and there is **no open PR**. So:
+**Merge PR #12, or say why not.** It is the only thing waiting on a person: `main` is
+protected and the permission classifier blocks `gh pr merge`, so the merge command has
+to be the owner's. Nothing else blocks; what follows is a backlog, not a queue.
 
-1. `git push origin dev`
-2. Open the PR to `main` — 121 commits, and the first since the audit and re-run.
-3. Report its checks, then **hand the merge command to the owner.**
+PR #12 carries four commits — the striding element redrawn at a legible scale, the
+product-collapse figure labelled as the synthetic demonstration it always was, a
+measured companion built from a real Colca run, and GRAND's geometry drawn for the
+first time. **No published area, share or capacity changes.**
 
-Nothing else is blocking.
+It also lands two findings worth reading before quoting any co-location number, both in
+`docs/ROADMAP.md`:
+
+- **§6.75** — `min_score` 0.35 has no derivation, and it is entangled with
+  `solid_angle_half_fraction` (0.186135 for TAMBO against the 0.076 default), set in the
+  same sitting. Measured on a real Colca run: five of six components leave **96.3%**
+  above the cut and `solid_angle` alone takes it to **17.8%**. The cut is a cut on that
+  one component.
+- **§6.76** — GRAND never sets `min_score` at all, which is an omission rather than a
+  choice: its median composed score is **0.189** against TAMBO's **0.132**. So every
+  co-location share compares a score-filtered TAMBO mask against an **unfiltered** GRAND
+  one. Neither the 2-D knob sweep nor the symmetric-cut re-run has been done; both
+  entries say so rather than implying a bound. **These are the two measurements most
+  worth doing next.**
+
+The talk this work came out of was given on 2026-08-18 and went well. `docs/TALK_BRIEF.md`
+and `docs/TALK_OUTLINE.md` remain as the record; the session-specific handover beside
+them has been removed as spent.
+
+Two things are the owner's call and neither blocks anything:
+
+1. **Should `data/` ship in the wheel?** The two curves are hand-digitised from a Nature
+   Astronomy figure and an arXiv figure, so redistributing them in a public package is a
+   licensing question rather than a packaging one. Today they are repo-only, no runtime
+   path breaks, and the docs say so.
+2. **`bench/baseline.json` wants refreshing** with `--update --repeat 5` on an idle
+   machine. Its *results* are stale and now say so on every run; its *timings* are good
+   and would be spoiled by a busy machine.
+
+**Releasing again**, when it comes to that: bump `pyproject.toml` and
+`oroscope.__version__` together (a test pins them), give the changelog a `## <version>`
+heading (another test pins that), merge, tag the merge commit, and publish a GitHub
+Release — the `release: published` event is what triggers the upload. Rehearse first from
+the Actions tab, which uploads `0.5.0.devN` to TestPyPI and exercises the OIDC exchange
+that no local check reaches. Installing from TestPyPI needs
+`--extra-index-url https://pypi.org/simple/`, because TestPyPI does not mirror
+dependencies and will otherwise try to build a 2015 numpy from source.
 
 ---
 
@@ -172,6 +211,23 @@ when only its inputs moved. Anything reading a store must be re-executed regardl
 
 ---
 
+### 6.  Never examined, if you want depth
+
+`old/` (3.5 GB, gitignored) · the RFI-zone and settlement coordinates · the Numba kernel
+arithmetic, which coverage cannot see by construction · the changelog's older prose. And
+four modules the suite barely reaches: `fetch_roads` 17%, `fetch_dem` and `generate_env`
+27%, **`sensitivity` 32%** — that last one produced the sweep figures now published in
+`assumptions.rst`, which is the same exposure as any trusted output from lightly-tested
+code.
+
+**The pattern worth carrying forward.** Almost everything the audits found was true
+locally and false for a stranger: a config preset that worked because an obsolete DEM
+sits on this machine, a release step that worked where dependencies happened to be
+installed, doctests nobody ran, figure captions in code cells that a sweep over prose
+could not see. None could fail here; two of them failed in the TestPyPI rehearsal, which
+is where you want to find out. When checking something, prefer the question "would this
+hold on a machine that has never run this project?"
+
 ## 5. Still open
 
 The physics list, unchanged — none of it was touched by the re-run:
@@ -191,7 +247,7 @@ The physics list, unchanged — none of it was touched by the re-run:
 5. **A national TAMBO answer** needs 1 arc-second and tiling.
 6. **The joint-realization optimiser** (§6.52). Optimise over the *union*, never the
    intersection.
-7. **No release.** Nothing on PyPI.
+7. **~~No release.~~** 0.5.0 is on PyPI. What is left is the backlog in §1.
 8. **IGRF declination per site** — inclination follows the DEM's coordinates now;
    declination still falls back to the Arequipa value.
 9. **The estimator is left uncalibrated**: 5.08 GiB against a measured 6.59 on Arequipa.

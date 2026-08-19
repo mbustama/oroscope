@@ -33,7 +33,8 @@ from matplotlib.patches import Rectangle
 # commit that did not think to touch this list, and were missing from the reference for
 # exactly that reason.
 __all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower",
-           "pipeline_stages", "striding_and_closing", "score_composition"]
+           "pipeline_stages", "striding_and_closing", "score_composition",
+           "score_composition_measured", "grand_and_tambo_scales"]
 
 # House style for anything a reader sees on a figure: **the first word of every axis
 # label, title, legend entry and annotation is capitalised.** Applies to the notebooks
@@ -49,6 +50,12 @@ DETECTOR = "#0F6B54"
 WINDOW = "#2C6E8F"
 # Ordered low elevation angle to high, and warm so they read against the terrain
 SEQUENCE = ["#C8901A", "#D2621B", "#B02A25", "#7B2D6B"]
+# `score_composition` draws six nested curves and SEQUENCE holds four, so indexing it
+# with min(i, len-1) gave curves 4, 5 and 6 one identical purple. Hand-spaced along the
+# same ramp rather than interpolated, which bunched the middle pair. SEQUENCE itself is
+# left alone: four other builders index it positionally.
+_COMPOSITION_COLOURS = ["#C8901A", "#D2621B", "#B02A25",
+                        "#96295C", "#7B2D6B", "#4E2A6E"]
 
 _STYLE = {
     "font.family": "sans-serif",
@@ -476,7 +483,7 @@ def pipeline_stages(figsize=(9.2, 5.4)):
     return fig
 
 
-def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
+def striding_and_closing(stride=5, element_px=(3, 5), figsize=(10.4, 3.2)):
     r"""
     Why the closing element has to outrun the gap that striding leaves.
 
@@ -486,8 +493,9 @@ def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
     gap the marks never touch and the mask stays a scatter; above it the region
     reappears almost intact.
 
-    The transition is **at** the gap and it is abrupt, not gradual. That is the whole
-    content of the figure, and it is the mechanism behind a real 1.51x under-report of
+    The transition is **at** the gap and it is abrupt, not gradual. A second, far
+    smaller step follows at twice the gap, where the element grows wide enough to
+    bridge second-neighbour marks as well. That is the whole content of the figure, and it is the mechanism behind a real 1.51x under-report of
     TAMBO's area at Colca --- and a 23.0x one on the steeper ground of the Callejon de
     Huaylas, where the accepted strips are narrower still. Both were far larger at
     TAMBO's old 100 m element, 4.75x and 291x, which is the cliff drawn here: 100 m is
@@ -525,26 +533,106 @@ def striding_and_closing(stride=5, element_px=(3, 5, 9), figsize=(8.6, 3.1)):
     strided = np.zeros_like(truth)
     strided[::stride, ::stride] = truth[::stride, ::stride]
 
+    # `[::stride, ::stride]` keeps every stride'th row *and* column, so it marks one
+    # pixel in stride**2 -- 1 in 25 here, not 1 in 5. The pipeline strides the flat list
+    # of surviving candidates instead and keeps 1 in 5. Both leave the same
+    # stride-sized gap, which is the only thing this figure is about, but the panel
+    # said "one pixel in 5" beside a mask holding a twenty-fifth of them, and a reader
+    # who checked the arithmetic against the funnel found two different numbers.
     panels = [("Accepted, every pixel", truth, None),
-              (f"Marked one pixel in {stride}", strided, None)]
+              (f"Marked on a {stride} px lattice", strided, None)]
     for k in element_px:
         panels.append((f"Closed, element {k} px",
                        binary_closing(strided, np.ones((k, k))), k))
 
+    # Recovery across a range of element sizes, for the last panel. This is the claim
+    # the figure exists to make, and a step is a poor thing to demonstrate with
+    # snapshots: below the gap every mask looks like the strided one, above it every
+    # mask looks recovered, so panels either side are near-duplicates carrying different
+    # captions. The curve shows the edge itself.
     base = int(truth.sum())
+    widths = list(range(1, 2 * stride + 3))
+    recovery = [binary_closing(strided, np.ones((k, k))).sum() / base for k in widths]
+
+    # The panels show a 48 px detail rather than the whole 120 px field. Across the
+    # full extent one data pixel renders about 2.6 px wide, so the 3 px element and the
+    # 5 px one differed by five pixels on the page: the square meant to show why one
+    # bridges the gap and the other cannot instead read as a legend swatch. The window
+    # sits where the band turns, so both of its edges stay in frame and the panel still
+    # shows a strip of ground rather than a wedge. Cropping costs no information here --
+    # the fractions printed under each panel are measured over the *whole* mask. The
+    # panel is a detail; the number is not.
+    win = (slice(8, 56), slice(44, 92))
+    win_h = win_w = 48
+
+    # A blank strip above the image carries the structuring element, so the swatch and
+    # the gap bar cannot land on the mask. Drawn inside the frame they did: at element
+    # 5 px the bar and its label sat on green and were unreadable.
+    strip = 13
+
     with _styled():
-        fig, axes = plt.subplots(1, len(panels), figsize=figsize)
+        fig, axes = plt.subplots(1, len(panels) + 1, figsize=figsize)
         for ax, (name, mask, element) in zip(axes, panels):
-            ax.imshow(mask, cmap="Greens", vmin=0, vmax=1.45,
+            ax.imshow(mask[win], cmap="Greens", vmin=0, vmax=1.45,
                       interpolation="nearest")
             ax.set_xticks([])
             ax.set_yticks([])
+            ax.set_xlim(-0.5, win_w - 0.5)
+            ax.set_ylim(win_h - 0.5, -0.5 - strip)
+            # The frame belongs around the terrain, not around the terrain and the strip
+            # together, so the spines come off and the image is given its own border.
             for side in ax.spines.values():
-                side.set_color(RULE)
+                side.set_visible(False)
+            ax.add_patch(Rectangle((-0.5, -0.5), win_w, win_h, fill=False,
+                                   edgecolor=RULE, lw=1.0, zorder=4))
+            # The structuring element, drawn at the scale of the pixels it works on.
+            # Without it the below-gap and above-gap panels are the same picture with
+            # different captions -- which is the point being made, and the wrong way to
+            # make it. Drawn, the reader sees a square too small to span the gap beside
+            # one that spans it.
+            if element is not None:
+                y0 = -0.5 - strip + 2
+                ax.add_patch(Rectangle((0, y0), element, element, facecolor="white",
+                                       edgecolor=INK, lw=1.3, zorder=5))
+                ax.text(element + 2, y0 + element / 2.0, f"{element} px wide",
+                        va="center", fontsize=7.5, color=INK, zorder=5)
+                # The gap it has to span, at the same scale and directly beneath, so the
+                # comparison the caption asserts is one the eye can make.
+                ax.plot([0, stride], [y0 + element + 2.5] * 2, color=ROCK_EDGE,
+                        lw=1.8, zorder=5, solid_capstyle="butt")
+                ax.text(stride + 2, y0 + element + 2.5, f"gap {stride} px",
+                        va="center", fontsize=7.5, color=ROCK_EDGE, zorder=5)
             verdict = ("" if element is None
                        else "  ✗" if element < stride else "  ✓")
             ax.set_xlabel(f"{name}{verdict}\n{mask.sum() / base:.2f}× the accepted set",
                           fontsize=8.5)
+
+        ax = axes[-1]
+        ax.step(widths, recovery, where="post", color=DETECTOR, lw=1.6)
+        ax.axvline(stride, color=ROCK_EDGE, lw=1.0, ls="--")
+        ax.text(stride + 0.4, 0.42, f"the gap,\n{stride} px", fontsize=7.5,
+                color=ROCK_EDGE, va="center", linespacing=1.3)
+        # Recovery steps twice, not once: an element twice the gap also bridges
+        # second-neighbour marks and gains a further 0.06x on top of the 0.64x at the
+        # gap. Small, but `set_xticks` already puts a tick at 2 * stride, so the axis
+        # was drawing the eye to a step the annotation denied was there.
+        ax.axvline(2 * stride, color=RULE, lw=1.0, ls=":")
+        ax.text(2 * stride + 0.4, 0.88, "2× the gap", fontsize=7.5, color=ROCK_EDGE,
+                va="center")
+        # Kept short deliberately: right-aligned, two words a line clears the riser at
+        # the gap. A longer line reaches back across it, and masking the overlap with a
+        # white bbox erases the very step the figure is about.
+        ax.text(0.97, 0.13, "A cliff,\nnot a slope", transform=ax.transAxes,
+                ha="right", va="center", fontsize=8.0, color=INK, linespacing=1.35)
+        ax.set_xlabel("Closing element (px)", fontsize=8.5)
+        ax.set_ylabel("× the accepted set", fontsize=8.5)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_xticks([1, stride, 2 * stride])
+        ax.tick_params(labelsize=7.5)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(RULE)
         fig.tight_layout()
     return fig
 
@@ -557,6 +645,13 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
     accepted solid angle, exit distance, and so on. They are combined by
     **multiplication**, so a candidate has to be good at everything, and the composed
     score of several components piles up near zero however good the terrain is.
+
+    **The curves are synthetic.** Six independent draws from a Beta(5, 2) stand in for
+    six components; no search, terrain or stored result is involved. The distribution
+    is deliberately generous --- mean 0.714, mode 0.80 --- so that the collapse cannot
+    be blamed on poor terrain. This figure demonstrates the *mechanism*; it is not a
+    measurement, and the page that publishes it prints a measured sentence directly
+    beneath, which is exactly the confusion the note on the axes exists to prevent.
 
     A cut placed in the middle of that pile is therefore not a mild preference: it is a
     cliff, and where it lands depends on how many components happen to be enabled.
@@ -591,15 +686,28 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
         for i, part in enumerate(parts, start=1):
             running = running * part
             ax.hist(running, bins=60, range=(0, 1), histtype="step",
-                    color=SEQUENCE[min(i - 1, len(SEQUENCE) - 1)], lw=1.3,
-                    density=True)
-        ax.axvline(cut, color="#B02A25", lw=1.6)
-        ax.text(cut + 0.02, ax.get_ylim()[1] * 0.92, f"min_score = {cut}",
-                color="#B02A25", fontsize=9, va="top")
-        ax.set_xlabel("Composed score, as components are multiplied in")
+                    color=_COMPOSITION_COLOURS[i - 1], lw=1.3, density=True,
+                    label=f"{i}")
+        # The cut is an annotation, not a seventh curve, so it gets its own ink. It
+        # used to be drawn in SEQUENCE[2] exactly -- the same red as the three-component
+        # histogram it crosses.
+        ax.axvline(cut, color=INK, lw=1.4, ls="--")
+        ax.text(cut + 0.02, ax.get_ylim()[1] * 0.98, f"min_score = {cut}",
+                color=INK, fontsize=9, va="top")
+        ax.set_xlabel("Composed score")
         ax.set_ylabel("Density")
         ax.set_xlim(0, 1)
+        # Placed mid-height rather than in a bottom corner: the many-component curves
+        # run long tails along the baseline and a corner note would sit on them.
+        ax.text(0.98, 0.55, "Synthetic components,\nBeta(5, 2)", transform=ax.transAxes,
+                ha="right", va="top", fontsize=7.5, color=MUTED, style="italic",
+                linespacing=1.3)
         _tidy(ax)
+        # Six nested cumulative products, not six criteria. Without this a reader takes
+        # each curve for one named component, which is the natural reading and wrong.
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=6,
+                  title="Components multiplied in", fontsize=8, title_fontsize=8.5,
+                  handlelength=1.1, columnspacing=1.1, handletextpad=0.5)
 
         kept = []
         running = np.ones(n)
@@ -612,4 +720,313 @@ def score_composition(cut=0.35, figsize=(7.8, 3.4)):
         bx.set_ylim(0, 105)
         _tidy(bx)
         fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------------
+# Measured composition, Colca TAMBO. Binned counts rather than a stored run, because
+# `score_composition_measured` is executed by the documentation build and a builder
+# that needs a DEM fails on every machine that has never run this project. The numbers
+# below summarise 360,939 real candidates; they are not a model of them.
+#
+# Provenance: `config/tambo_colca_config.json` over `input/dem/colca.tif`
+# (sha256 29676fa7...), candidate_stride 5, min_score 0.35, measured 2026-08-18.
+# Funnel: 6,063,841 DEM pixels -> 2,382,441 in the slope band -> 476,489 kept by
+# stride -> 360,939 directions accepted -> 64,152 above the cut.
+#
+# The six components multiply to the run's own composed score to 1.7e-16, so this is
+# the whole scoring model rather than a subset of it. **Regenerate with
+# `tools/measure_score_composition.py` if scoring changes** -- nothing here can notice
+# on its own that it has gone stale.
+_MEASURED_N = 360939
+_MEASURED_NAMES = ['depth', 'distance', 'shower', 'decay', 'footprint', 'solid_angle']
+_MEASURED_ABOVE_CUT = [100.0, 100.0, 100.0, 100.0, 96.28, 17.77]
+_MEASURED_COMPONENT_MEDIAN = [1.0, 1.0, 1.0, 0.9558, 0.81, 0.1907]
+_MEASURED_RUNNING_MEDIAN = [1.0, 1.0, 1.0, 0.9533, 0.7719, 0.1321]
+_MEASURED_COUNTS = (
+    # depth
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1934, 10244, 348761),
+    # distance
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1934, 10244, 348761),
+    # shower
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 43, 175, 641, 1488, 2265, 2882,
+     3475, 4135, 4798, 5130, 5554, 6009, 6327, 6501, 6967, 7081, 7476, 7740, 8124, 8270, 8656, 8987, 9010, 10433, 14273, 214483),
+    # decay
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 26, 73, 384, 1095, 2017, 2686, 3294, 3956, 4612,
+     5029, 5459, 5951, 6177, 6482, 6873, 7072, 7287, 7666, 8098, 8299, 8518, 8980, 9173, 9154, 9536, 24171, 161582, 37286, 0),
+    # footprint
+    (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 170, 1001, 2055, 2776, 3477,
+     3910, 4353, 4652, 4818, 5152, 5188, 5318, 5438, 5523, 5681, 5730, 6029, 5847, 6174, 6205, 6240, 6483, 6557, 6578, 6875,
+     7099, 7424, 8330, 9495, 10570, 11460, 12293, 12358, 12501, 12232, 11687, 10596, 9928, 9141, 8818, 8122, 10998, 30275, 35350, 0),
+    # solid_angle
+    (21307, 44380, 23103, 25671, 22136, 14302, 16001, 14319, 13030, 9881, 10736, 10363, 9820, 9119, 8456, 8026, 7823, 7616, 7347, 6697,
+     6654, 6773, 6201, 5973, 5817, 5581, 5474, 4976, 4678, 4269, 3686, 3191, 2555, 1952, 1440, 859, 465, 188, 52, 18,
+     4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+)
+
+
+def score_composition_measured(cut=0.35, figsize=(7.8, 3.4)):
+    r"""
+    What the product does to real candidates, rather than to a model of them.
+
+    The companion to :func:`score_composition`, which demonstrates the mechanism with
+    invented components. This one is measured: each curve is the running product over
+    the same **360,939 geometrically accepted candidates** of one Colca TAMBO run, with
+    one more component multiplied in. No candidate is removed between curves --- the
+    population is fixed and only its scores move left. What survives the cut at the end
+    is 64,152 of them.
+
+    The result does not resemble the mechanism figure, and that is the point. ``depth``
+    and ``distance`` are exactly 1.0 for *every* candidate and ``shower`` for 92.3% of
+    them, so three of the six components do nothing whatever. Five of the six together
+    still leave **96.3%** above the shipped cut. The sixth, ``solid_angle``, takes it
+    to **17.8%**.
+
+    So ``min_score`` is not really a threshold on a product of six criteria. It is a
+    cut on ``solid_angle`` wearing a product as a disguise --- the measured form of the
+    caveat that ``solid_angle`` is the weakest component at every selected site in
+    every region.
+
+    Components enter least-restrictive first, so the collapse is attributable to a
+    named component rather than to the number of them.
+
+    Parameters
+    ----------
+    cut : float, optional
+        Where ``min_score`` is drawn. The stored percentages are those of the shipped
+        0.35 and are not recomputed, so another value moves the line without moving
+        the curve beside it.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.score_composition_measured()
+    >>> len(fig.axes)
+    2
+    """
+    edges = np.linspace(0.0, 1.0, 61)
+    width = edges[1] - edges[0]
+
+    with _styled():
+        fig, (ax, bx) = plt.subplots(1, 2, figsize=figsize)
+        labels = [_MEASURED_NAMES[0]] + [f"+{n}" for n in _MEASURED_NAMES[1:]]
+        for i, (counts, label) in enumerate(zip(_MEASURED_COUNTS, labels)):
+            density = np.asarray(counts, dtype=float) / (_MEASURED_N * width)
+            ax.stairs(density, edges, color=_COMPOSITION_COLOURS[i], lw=1.3,
+                      label=label)
+        ax.set_xlim(0, 1)
+        # depth, distance and shower sit at 1.0 for almost every candidate, so their
+        # curves are delta spikes that drive the density axis past 55 and flatten the
+        # three components that actually move the score. Clipped, with the spike named.
+        ax.set_ylim(0, 8)
+        ax.axvline(cut, color=INK, lw=1.4, ls="--")
+        # Axes fraction on y: the clip above makes a data-unit position meaningless.
+        ax.text(cut + 0.02, 0.97, f"min_score = {cut}",
+                transform=ax.get_xaxis_transform(), color=INK, fontsize=9, va="top")
+        ax.set_xlabel("Composed score")
+        ax.set_ylabel("Density")
+        ax.annotate("Depth, distance, shower:\nspike at 1.0, clipped",
+                    xy=(0.99, 7.85), xytext=(0.72, 6.6), fontsize=7.0, color=MUTED,
+                    ha="center", va="top", linespacing=1.3,
+                    arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.8))
+        # In the gap above the descending solid_angle tail: the bottom right sits on
+        # the curves and the top left runs into the y-axis.
+        ax.text(0.07, 0.76, f"Colca, TAMBO\n{_MEASURED_N:,} candidates",
+                transform=ax.transAxes, ha="left", va="top", fontsize=7.5,
+                color=MUTED, style="italic", linespacing=1.3)
+        _tidy(ax)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3,
+                  title="Components multiplied in", fontsize=7.5, title_fontsize=8.5,
+                  handlelength=1.1, columnspacing=1.0, handletextpad=0.5)
+
+        bx.plot(range(1, len(_MEASURED_NAMES) + 1), _MEASURED_ABOVE_CUT, marker="o",
+                color="#B02A25", lw=1.8)
+        bx.set_xticks(range(1, len(_MEASURED_NAMES) + 1))
+        bx.set_xticklabels(_MEASURED_NAMES, rotation=35, ha="right", fontsize=7.5)
+        bx.set_ylabel("Above the cut (%)")
+        bx.set_ylim(0, 105)
+        for i in (4, 5):
+            bx.annotate(f"{_MEASURED_ABOVE_CUT[i]:.1f}%",
+                        xy=(i + 1, _MEASURED_ABOVE_CUT[i]), xytext=(0, -13),
+                        textcoords="offset points", ha="center", fontsize=7.5,
+                        color="#B02A25")
+        _tidy(bx)
+        fig.tight_layout()
+    return fig
+
+
+def grand_and_tambo_scales(xmax_km=50.0, figsize=(10.4, 5.8)):
+    r"""
+    The same question, asked ten kilometres apart and four hundred metres apart.
+
+    :func:`canyon_geometry` draws what TAMBO asks of the ground. This draws what both
+    experiments ask, on **one shared horizontal axis**, because the comparison is the
+    point and a reader should not have to do it in their head.
+
+    The upper row is GRAND: antennas on ground inside its 3--25° band, watching a
+    massif through a window 3° about the horizon. The lower row is the Colca
+    cross-section at *the same scale* --- the notch in the first 4.5 km --- with a
+    magnified detail tied back to its true position, so it cannot be mistaken for a
+    second canyon further out.
+
+    The window stops where the highest ray first meets ground, which is the acceptance
+    test itself rather than a decoration: shading past the massif would claim sight
+    lines the massif blocks.
+
+    One asymmetry is deliberate. The lower edge of GRAND's window is invisible because
+    the ground beyond the detector is level, so a ray 3° below the horizon meets it at
+    once. That is the honest picture of a detector on a plain.
+
+    Parameters
+    ----------
+    xmax_km : float, optional
+        Ground distance spanned by both rows, in km. The comparison only works while
+        both rows share it.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.grand_and_tambo_scales()
+    >>> len(fig.axes)
+    2
+    """
+    ymax = 4.0
+    det_x = 1.0
+    tambo_ink = SEQUENCE[2]
+
+    def terrain(x):
+        # An 8.5 deg hillside the array can stand on, inside GRAND's own 3-25 deg
+        # band, then level ground and the massif. The detector sits at the crest: put
+        # it on the rise and its own hill blocks the 3 deg ray within two kilometres,
+        # which is a real effect but not the one this figure is about.
+        hill = np.where(x < 1.0, 0.90 + 0.15 * x, 1.05)
+        return hill + 1.65 * np.exp(-((x - 30.0) / 7.0) ** 2)
+
+    def canyon(x, x0=0.6, rim=1.50, floor_w=1.0, slope_deg=40.6):
+        run = rim / np.tan(np.radians(slope_deg))
+        a, b, c, d = x0, x0 + run, x0 + run + floor_w, x0 + 2 * run + floor_w
+        z = np.full_like(x, rim)
+        z = np.where((x >= a) & (x < b),
+                     rim - (x - a) * np.tan(np.radians(slope_deg)), z)
+        z = np.where((x >= b) & (x < c), 0.0, z)
+        z = np.where((x >= c) & (x < d),
+                     (x - c) * np.tan(np.radians(slope_deg)), z)
+        return z
+
+    x = np.linspace(0, xmax_km, 3000)
+    z = terrain(x)
+    det_z = float(terrain(np.array([det_x]))[0]) + 0.02
+
+    with _styled():
+        fig, (ax, bx) = plt.subplots(2, 1, figsize=figsize, sharex=True,
+                                     gridspec_kw=dict(hspace=0.30))
+
+        tan3 = np.tan(np.radians(3.0))
+        up = det_z + tan3 * (x - det_x)
+        lo = det_z - tan3 * (x - det_x)
+        blocked = (x > det_x) & (up <= z)
+        x_hit, z_hit = x[blocked][0], z[blocked][0]
+        seen = (x >= det_x) & (x <= x_hit)
+        ax.fill_between(x, np.maximum(lo, z), up,
+                        where=seen & (up > np.maximum(lo, z)),
+                        color=WINDOW, alpha=0.16, lw=0, zorder=1)
+        ax.plot(x[seen], up[seen], color=WINDOW, lw=1.0, ls="--", zorder=3)
+        air = seen & (lo > z)
+        ax.plot(x[air], lo[air], color=WINDOW, lw=1.0, ls="--", zorder=3)
+        ax.fill_between(x, 0, z, color=ROCK_FILL, zorder=4)
+        ax.plot(x, z, color=ROCK_EDGE, lw=1.1, zorder=5)
+        ax.plot([x_hit], [z_hit], marker="o", ms=5, color=WINDOW, zorder=8)
+        ax.annotate(f"First terrain met,\n{x_hit:.0f} km out", xy=(x_hit, z_hit),
+                    xytext=(x_hit + 4.5, z_hit - 0.75), fontsize=8.5, color=WINDOW,
+                    linespacing=1.3, zorder=8,
+                    arrowprops=dict(arrowstyle="-", color=WINDOW, lw=0.9))
+        ax.plot([det_x], [det_z], marker="^", ms=9, color=DETECTOR, zorder=7)
+        ax.text(det_x - 0.4, det_z + 0.80, "GRAND", color=DETECTOR, fontsize=9.5,
+                fontweight="bold", zorder=7)
+        ax.annotate("", xy=(det_x + 10, 3.74), xytext=(det_x + 40, 3.74),
+                    arrowprops=dict(arrowstyle="<->", color=ROCK_EDGE, lw=1.1),
+                    zorder=7)
+        ax.text(det_x + 25, 3.84, "Target 10–40 km", ha="center", fontsize=8.5,
+                color=ROCK_EDGE, zorder=7)
+        ax.text(8.0, 2.30, "Within 3° of the horizon", fontsize=8.5, color=WINDOW,
+                zorder=7)
+        ax.text(0.985, 0.055, "Antennas 1 km apart, on 3–25° ground",
+                transform=ax.transAxes, ha="right", fontsize=8.5, color=INK, zorder=7)
+        ax.add_patch(Rectangle((0.4, 0), 4.9, 1.62, fill=False, edgecolor=tambo_ink,
+                               lw=1.3, zorder=8))
+        ax.annotate("All of TAMBO's cross-section\nfits inside this box",
+                    xy=(5.3, 1.30), xytext=(6.6, 3.05), fontsize=8.5,
+                    color=tambo_ink, linespacing=1.35, zorder=8,
+                    arrowprops=dict(arrowstyle="-", color=tambo_ink, lw=0.9))
+        ax.set_ylabel("Elevation (km)", fontsize=9)
+        ax.set_ylim(0, ymax)
+
+        bx.fill_between(x, 0, canyon(x), color=ROCK_FILL, zorder=1)
+        bx.plot(x, canyon(x), color=ROCK_EDGE, lw=1.1, zorder=2)
+        bx.set_ylim(0, ymax)
+        bx.set_xlim(0, xmax_km)
+        bx.set_xlabel("Ground distance from the array (km)", fontsize=9)
+        bx.set_ylabel("Elevation (km)", fontsize=9)
+        bx.text(0.985, 0.055, "Units 150 m apart, on 20–60° ground",
+                transform=bx.transAxes, ha="right", fontsize=8.5, color=INK, zorder=7)
+        bx.text(6.6, 2.95, f"The same {xmax_km:.0f} km of ground —\n"
+                "TAMBO uses the first 4.5 km", fontsize=9.5, color=tambo_ink,
+                linespacing=1.35, va="center", zorder=7)
+
+        iax = bx.inset_axes([0.545, 0.26, 0.40, 0.70])
+        xi = np.linspace(0, 6.0, 1500)
+        iax.set_facecolor("white")
+        iax.fill_between(xi, 0, canyon(xi), color=ROCK_FILL)
+        iax.plot(xi, canyon(xi), color=ROCK_EDGE, lw=1.1)
+        for tx, tz in ((3.50, 0.55), (4.00, 1.00), (4.30, 1.30)):
+            iax.plot([1.30, tx], [0.90, tz], color=tambo_ink, lw=1.0, zorder=5)
+            iax.plot([tx], [tz], marker="o", ms=2.6, color=tambo_ink, zorder=6)
+        iax.plot([1.30], [0.90], marker="^", ms=8, color=DETECTOR, zorder=6)
+        iax.text(1.25, 1.06, "TAMBO", color=DETECTOR, fontsize=8.5,
+                 fontweight="bold", ha="center", zorder=6)
+        iax.text(2.85, 1.80, "Within 20°, target 2–5 km", fontsize=8,
+                 color=tambo_ink, ha="center")
+        iax.set_xlim(0, 6.0)
+        iax.set_ylim(0, 2.1)
+        iax.set_xticks([])
+        iax.set_yticks([])
+        for side in iax.spines.values():
+            side.set_color(tambo_ink)
+            side.set_linewidth(1.2)
+        bx.indicate_inset_zoom(iax, edgecolor=tambo_ink, alpha=0.9, lw=1.2)
+        iax.text(0.5, 1.045, "Detail, magnified ≈ 8×", transform=iax.transAxes,
+                 ha="center", va="bottom", fontsize=8, color=tambo_ink)
+
+        for a in (ax, bx):
+            for side in ("top", "right"):
+                a.spines[side].set_visible(False)
+            for side in ("left", "bottom"):
+                a.spines[side].set_color(RULE)
+            a.tick_params(labelsize=8)
+
+        # Measured from the rendered axes rather than assumed, so the note cannot drift
+        # if `figsize` changes.
+        box = ax.get_window_extent(fig.canvas.get_renderer())
+        ve = (xmax_km / box.width) / (ymax / box.height)
+        fig.text(0.995, 0.005, "Both rows share one horizontal scale. Vertical "
+                 f"exaggeration ≈ {ve:.0f}:1. Schematic.", ha="right", va="bottom",
+                 fontsize=7.5, color=MUTED, style="italic")
     return fig

@@ -109,14 +109,39 @@ Striding and closing are one decision, not two
    from oroscope import figures
    _ = figures.striding_and_closing()
 
+Subsampling is legitimate, and the reason is worth stating rather than asserting:
+**a fraction survives sampling; a shape does not.** Keeping one candidate in five tells
+you what *share* of the ground is viable to within a rounding error — 58.414% at stride 1
+against 58.415% at stride 5 for GRAND, 75.750% against 75.736% for TAMBO. It does not
+tell you *where*, because a site is a place and not a statistic. So the map has to be
+rebuilt, and that rebuild is what closing is for.
+
 Striding leaves a gap of ``candidate_stride`` pixels between kept candidates. Closing
 repairs it — but only if its structuring element is **larger than that gap**. Below the
 gap the marks never touch and the mask stays a scatter of isolated pixels; above it the
 region reappears almost intact.
 
+**Closing is a dilation followed by an erosion.** Dilation stamps the structuring
+element on every marked pixel; erosion then keeps only the ground where the whole
+element still fits. Gaps narrower than the element are filled, everything else returns
+to the shape it started as, and nothing is ever removed. Marks left on a lattice are
+therefore reconnected exactly when neighbouring stamps touch — which happens when the
+element is at least as wide as the gap. Below that the stamps stay apart, erosion peels
+each one back to the single pixel it grew from, and the output is *identical* to the
+input. That is why the comparison is a cliff and not a ramp: whether two stamps touch
+is a yes-or-no question.
+
 **The transition is at the gap and it is abrupt.** In the figure a 3-pixel element
 recovers 0.04× of the accepted set and a 5-pixel one recovers 0.68× — seventeen times
-more, for two pixels of element.
+more, for two pixels of element. A second and far smaller step follows at *twice* the
+gap, where the element grows wide enough to bridge second-neighbour marks; it is worth
+0.06× against the 0.64× at the gap.
+
+One arithmetic note, because the figure and the pipeline stride differently. The figure
+thins a two-dimensional lattice, keeping every fifth row *and* column, so it marks one
+pixel in twenty-five. The pipeline thins the flat list of surviving candidates and keeps
+one in five — 3,853,258 to 770,652 for GRAND at Colca. Both leave the same five-pixel
+gap, which is the only thing the figure is about.
 
 This is not a hypothetical. It is the mechanism behind a real **1.51× under-report** of
 TAMBO's area at Colca, and a **23.0× one** on the steeper ground of the Callejón de
@@ -155,6 +180,31 @@ A product of several numbers in [0, 1] piles up near zero however good the terra
 So ``min_score`` does not express a mild preference: it sits on a cliff, and **where it
 lands depends on how many components happen to be enabled**. Adding a component moves
 every score down and silently tightens the cut.
+
+**The figure above is a demonstration, not a measurement.** Its six components are
+draws from a Beta(5, 2), deliberately generous — mean 0.714, mode 0.80 — so that the
+collapse cannot be blamed on poor terrain. What one real search does is a different and
+sharper story.
+
+.. jupyter-execute::
+   :hide-code:
+
+   from oroscope import figures
+   _ = figures.score_composition_measured()
+
+Every curve is the running product over the same **360,939 geometrically accepted
+candidates** of one Colca TAMBO run, with one more component multiplied in. The
+population is fixed; no candidate is removed between curves and only the scores move.
+
+``depth`` and ``distance`` are exactly 1.0 for *every* candidate, and ``shower`` for
+92.3% of them — so half the components do nothing whatever. Five of the six together
+still leave **96.3%** above the shipped cut. The sixth, ``solid_angle``, takes it to
+**17.8%** and the median composed score to **0.13**.
+
+So the honest statement about ``min_score`` on this terrain is not that a product of six
+criteria has no natural threshold. It is that **the cut is a cut on** ``solid_angle``,
+wearing a product as a disguise — the measured form of the caveat that ``solid_angle``
+is the weakest component at every selected site in every region.
 
 Measured on one real search, cuts of 0.0, 0.35 and 0.5 gave 65,268, 10,437 and **zero**
 detector positions. ``score_percentile`` is the scale-free alternative and is
