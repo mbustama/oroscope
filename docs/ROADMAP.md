@@ -4100,6 +4100,50 @@ minimum over accepted candidates is **0.168**. The magnetic-equator caveat is re
 remains unmodelled, but it does not bite on this terrain, and quoting Colca as evidence
 for it would be wrong.
 
+### 6.77 A symmetric cut does not lower the joint shares. It erases GRAND's sites.
+
+§6.76 recorded that every co-location number compares a score-filtered TAMBO mask with
+an unfiltered GRAND one, and named the measurement that would bound the effect: re-run
+the combination with the same cut on both. Done, on the two cheapest regions, with
+TAMBO untouched and GRAND re-run at TAMBO's own `min_score` of 0.35.
+
+**The share does not move. It stops existing.**
+
+| region | GRAND km² | TAMBO km² | joint km² | share of TAMBO |
+| --- | --- | --- | --- | --- |
+| colca, baseline | 4,569.4 | 203.0 | 123.3 | 60.7% |
+| colca, cut at 0.35 | **0.0** | 203.0 | **0.0** | **0.0%** |
+| cajatambo, baseline | 5,573.8 | 774.5 | 591.7 | 76.4% |
+| cajatambo, cut at 0.35 | **0.0** | 774.5 | **0.0** | **0.0%** |
+
+**The mechanism is fragmentation against the array-size floor, not the cut alone.**
+Ground still passes the cut in quantity — 1,114 km² at Colca and 715 km² at Cajatambo
+survive scoring, closing and the width test. What does not survive is *contiguity*. The
+cut shatters Colca's mask from 4 labelled regions into **35** and Cajatambo's into
+**54**, and **none** of them reaches the ~500 km² a GRAND site needs to hold its 500-
+antenna minimum. Every region fails the area threshold, so zero sites are selected and
+the reported area is zero.
+
+Two things follow, and the second matters more.
+
+**The published shares cannot be repaired by symmetrising the cut.** There is no
+corrected number hiding behind the asymmetry, because the symmetric configuration
+produces no GRAND sites at all. §6.76's monotonicity argument was right that the share
+can only fall, and useless about the magnitude: it falls to zero on both regions tested.
+
+**An absolute cut is the wrong instrument for a mask that must stay contiguous.**
+GRAND's selection asks for one region big enough for 500 antennas; TAMBO's asks for
+many small ones. A cut that removes 80% of candidates is survivable for the second and
+fatal for the first, whatever the physics of the components says. That is an argument
+about the *shape* of the selection rather than about `min_score`'s value, and it is why
+§7.9 now asks for a rank-based cut rather than another sweep of the absolute one.
+
+**Not measured:** whether a rank-matched cut — same *percentile* on each experiment
+rather than the same number — leaves GRAND's mask contiguous. On Colca the two are
+nearly the same cut already (0.35 keeps 19.3% of GRAND against 17.8% of TAMBO), so a
+percentile match would very likely fragment it the same way; but "very likely" is not a
+measurement and this entry does not claim one.
+
 ## Phase 4 — Usability *(sketch — to be scoped)*
 
 Auto-detect `origin_lat`/`origin_lon` from the GeoTIFF tiepoint (verified present,
@@ -4124,6 +4168,20 @@ outputs; ~~`--explain` funnel report~~ (done, §6.23); parameter sweeps.
    though not the siting conclusion.
 8. **Neutral-current regeneration** is not modelled — only charged-current attenuation
    is counted, so the Earth-chord suppression of §4.13(iii) is somewhat overstated.
+9. **Rank the scores rather than thresholding them.** `score_percentile` exists and is
+   unused; `min_score` is an absolute cut on a product whose distribution piles up near
+   zero, whose meaning changes with the component set (§6.75), which GRAND does not
+   apply at all (§6.76), and which erases GRAND's sites outright when it is applied
+   symmetrically (§6.77). A rank-based cut is scale-free and means the same thing on
+   both experiments. **The open question is not whether to rank, but what a rank should
+   be taken over** — all candidates, or per connected region, given that GRAND needs one
+   contiguous mask and TAMBO does not.
+10. **How much does the answer move with the slope requirements?** The 3–25° and 20–60°
+    bands are stated assumptions rather than collaboration inputs, and co-location is
+    decided entirely inside their 20–25° overlap — a five-degree sliver, 23% of the
+    narrower band. Every joint number in the project is therefore a function of two
+    numbers nobody has varied. A sweep over both bands is cheap on the crops and has
+    never been run.
 
 ---
 
