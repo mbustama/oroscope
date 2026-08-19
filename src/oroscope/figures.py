@@ -34,7 +34,7 @@ from matplotlib.patches import Rectangle
 # exactly that reason.
 __all__ = ["walk_mechanism", "canyon_geometry", "decay_and_shower",
            "pipeline_stages", "striding_and_closing", "score_composition",
-           "score_composition_measured"]
+           "score_composition_measured", "grand_and_tambo_scales"]
 
 # House style for anything a reader sees on a figure: **the first word of every axis
 # label, title, legend entry and annotation is capitalised.** Applies to the notebooks
@@ -864,4 +864,169 @@ def score_composition_measured(cut=0.35, figsize=(7.8, 3.4)):
                         color="#B02A25")
         _tidy(bx)
         fig.tight_layout()
+    return fig
+
+
+def grand_and_tambo_scales(xmax_km=50.0, figsize=(10.4, 5.8)):
+    r"""
+    The same question, asked ten kilometres apart and four hundred metres apart.
+
+    :func:`canyon_geometry` draws what TAMBO asks of the ground. This draws what both
+    experiments ask, on **one shared horizontal axis**, because the comparison is the
+    point and a reader should not have to do it in their head.
+
+    The upper row is GRAND: antennas on ground inside its 3--25° band, watching a
+    massif through a window 3° about the horizon. The lower row is the Colca
+    cross-section at *the same scale* --- the notch in the first 4.5 km --- with a
+    magnified detail tied back to its true position, so it cannot be mistaken for a
+    second canyon further out.
+
+    The window stops where the highest ray first meets ground, which is the acceptance
+    test itself rather than a decoration: shading past the massif would claim sight
+    lines the massif blocks.
+
+    One asymmetry is deliberate. The lower edge of GRAND's window is invisible because
+    the ground beyond the detector is level, so a ray 3° below the horizon meets it at
+    once. That is the honest picture of a detector on a plain.
+
+    Parameters
+    ----------
+    xmax_km : float, optional
+        Ground distance spanned by both rows, in km. The comparison only works while
+        both rows share it.
+    figsize : tuple of float, optional
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+
+    Examples
+    --------
+    >>> from oroscope import figures
+    >>> fig = figures.grand_and_tambo_scales()
+    >>> len(fig.axes)
+    2
+    """
+    ymax = 4.0
+    det_x = 1.0
+    tambo_ink = SEQUENCE[2]
+
+    def terrain(x):
+        # An 8.5 deg hillside the array can stand on, inside GRAND's own 3-25 deg
+        # band, then level ground and the massif. The detector sits at the crest: put
+        # it on the rise and its own hill blocks the 3 deg ray within two kilometres,
+        # which is a real effect but not the one this figure is about.
+        hill = np.where(x < 1.0, 0.90 + 0.15 * x, 1.05)
+        return hill + 1.65 * np.exp(-((x - 30.0) / 7.0) ** 2)
+
+    def canyon(x, x0=0.6, rim=1.50, floor_w=1.0, slope_deg=40.6):
+        run = rim / np.tan(np.radians(slope_deg))
+        a, b, c, d = x0, x0 + run, x0 + run + floor_w, x0 + 2 * run + floor_w
+        z = np.full_like(x, rim)
+        z = np.where((x >= a) & (x < b),
+                     rim - (x - a) * np.tan(np.radians(slope_deg)), z)
+        z = np.where((x >= b) & (x < c), 0.0, z)
+        z = np.where((x >= c) & (x < d),
+                     (x - c) * np.tan(np.radians(slope_deg)), z)
+        return z
+
+    x = np.linspace(0, xmax_km, 3000)
+    z = terrain(x)
+    det_z = float(terrain(np.array([det_x]))[0]) + 0.02
+
+    with _styled():
+        fig, (ax, bx) = plt.subplots(2, 1, figsize=figsize, sharex=True,
+                                     gridspec_kw=dict(hspace=0.30))
+
+        tan3 = np.tan(np.radians(3.0))
+        up = det_z + tan3 * (x - det_x)
+        lo = det_z - tan3 * (x - det_x)
+        blocked = (x > det_x) & (up <= z)
+        x_hit, z_hit = x[blocked][0], z[blocked][0]
+        seen = (x >= det_x) & (x <= x_hit)
+        ax.fill_between(x, np.maximum(lo, z), up,
+                        where=seen & (up > np.maximum(lo, z)),
+                        color=WINDOW, alpha=0.16, lw=0, zorder=1)
+        ax.plot(x[seen], up[seen], color=WINDOW, lw=1.0, ls="--", zorder=3)
+        air = seen & (lo > z)
+        ax.plot(x[air], lo[air], color=WINDOW, lw=1.0, ls="--", zorder=3)
+        ax.fill_between(x, 0, z, color=ROCK_FILL, zorder=4)
+        ax.plot(x, z, color=ROCK_EDGE, lw=1.1, zorder=5)
+        ax.plot([x_hit], [z_hit], marker="o", ms=5, color=WINDOW, zorder=8)
+        ax.annotate(f"First terrain met,\n{x_hit:.0f} km out", xy=(x_hit, z_hit),
+                    xytext=(x_hit + 4.5, z_hit - 0.75), fontsize=8.5, color=WINDOW,
+                    linespacing=1.3, zorder=8,
+                    arrowprops=dict(arrowstyle="-", color=WINDOW, lw=0.9))
+        ax.plot([det_x], [det_z], marker="^", ms=9, color=DETECTOR, zorder=7)
+        ax.text(det_x - 0.4, det_z + 0.80, "GRAND", color=DETECTOR, fontsize=9.5,
+                fontweight="bold", zorder=7)
+        ax.annotate("", xy=(det_x + 10, 3.74), xytext=(det_x + 40, 3.74),
+                    arrowprops=dict(arrowstyle="<->", color=ROCK_EDGE, lw=1.1),
+                    zorder=7)
+        ax.text(det_x + 25, 3.84, "Target 10–40 km", ha="center", fontsize=8.5,
+                color=ROCK_EDGE, zorder=7)
+        ax.text(8.0, 2.30, "Within 3° of the horizon", fontsize=8.5, color=WINDOW,
+                zorder=7)
+        ax.text(0.985, 0.055, "Antennas 1 km apart, on 3–25° ground",
+                transform=ax.transAxes, ha="right", fontsize=8.5, color=INK, zorder=7)
+        ax.add_patch(Rectangle((0.4, 0), 4.9, 1.62, fill=False, edgecolor=tambo_ink,
+                               lw=1.3, zorder=8))
+        ax.annotate("All of TAMBO's cross-section\nfits inside this box",
+                    xy=(5.3, 1.30), xytext=(6.6, 3.05), fontsize=8.5,
+                    color=tambo_ink, linespacing=1.35, zorder=8,
+                    arrowprops=dict(arrowstyle="-", color=tambo_ink, lw=0.9))
+        ax.set_ylabel("Elevation (km)", fontsize=9)
+        ax.set_ylim(0, ymax)
+
+        bx.fill_between(x, 0, canyon(x), color=ROCK_FILL, zorder=1)
+        bx.plot(x, canyon(x), color=ROCK_EDGE, lw=1.1, zorder=2)
+        bx.set_ylim(0, ymax)
+        bx.set_xlim(0, xmax_km)
+        bx.set_xlabel("Ground distance from the array (km)", fontsize=9)
+        bx.set_ylabel("Elevation (km)", fontsize=9)
+        bx.text(0.985, 0.055, "Units 150 m apart, on 20–60° ground",
+                transform=bx.transAxes, ha="right", fontsize=8.5, color=INK, zorder=7)
+        bx.text(6.6, 2.95, f"The same {xmax_km:.0f} km of ground —\n"
+                "TAMBO uses the first 4.5 km", fontsize=9.5, color=tambo_ink,
+                linespacing=1.35, va="center", zorder=7)
+
+        iax = bx.inset_axes([0.545, 0.26, 0.40, 0.70])
+        xi = np.linspace(0, 6.0, 1500)
+        iax.set_facecolor("white")
+        iax.fill_between(xi, 0, canyon(xi), color=ROCK_FILL)
+        iax.plot(xi, canyon(xi), color=ROCK_EDGE, lw=1.1)
+        for tx, tz in ((3.50, 0.55), (4.00, 1.00), (4.30, 1.30)):
+            iax.plot([1.30, tx], [0.90, tz], color=tambo_ink, lw=1.0, zorder=5)
+            iax.plot([tx], [tz], marker="o", ms=2.6, color=tambo_ink, zorder=6)
+        iax.plot([1.30], [0.90], marker="^", ms=8, color=DETECTOR, zorder=6)
+        iax.text(1.25, 1.06, "TAMBO", color=DETECTOR, fontsize=8.5,
+                 fontweight="bold", ha="center", zorder=6)
+        iax.text(2.85, 1.80, "Within 20°, target 2–5 km", fontsize=8,
+                 color=tambo_ink, ha="center")
+        iax.set_xlim(0, 6.0)
+        iax.set_ylim(0, 2.1)
+        iax.set_xticks([])
+        iax.set_yticks([])
+        for side in iax.spines.values():
+            side.set_color(tambo_ink)
+            side.set_linewidth(1.2)
+        bx.indicate_inset_zoom(iax, edgecolor=tambo_ink, alpha=0.9, lw=1.2)
+        iax.text(0.5, 1.045, "Detail, magnified ≈ 8×", transform=iax.transAxes,
+                 ha="center", va="bottom", fontsize=8, color=tambo_ink)
+
+        for a in (ax, bx):
+            for side in ("top", "right"):
+                a.spines[side].set_visible(False)
+            for side in ("left", "bottom"):
+                a.spines[side].set_color(RULE)
+            a.tick_params(labelsize=8)
+
+        # Measured from the rendered axes rather than assumed, so the note cannot drift
+        # if `figsize` changes.
+        box = ax.get_window_extent(fig.canvas.get_renderer())
+        ve = (xmax_km / box.width) / (ymax / box.height)
+        fig.text(0.995, 0.005, "Both rows share one horizontal scale. Vertical "
+                 f"exaggeration ≈ {ve:.0f}:1. Schematic.", ha="right", va="bottom",
+                 fontsize=7.5, color=MUTED, style="italic")
     return fig
